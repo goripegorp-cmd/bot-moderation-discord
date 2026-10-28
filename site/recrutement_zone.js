@@ -40,7 +40,7 @@ const FINALES = new Set(["accepte", "refuse", "refus_etape1", "ferme"]);
 const STYLES_DISCORD = { 1: "primary", 2: "", 3: "success", 4: "danger", 5: "lien" };
 const RE_BANNIERE = /^\/v\/[A-Za-z0-9_-]{1,40}\.(png|gif)(\?v=[A-Za-z0-9_.-]{1,20})?$/;   // la bannière de l'affiche (/v/)
 const SOURCES = [["defaut", "La sélection par défaut"], ["tirage", "Un tirage dans la banque"], ["modele", "Un modèle"], ["questions", "Des questions choisies"]];
-const TYPES_CHAMP = [["court", "Texte court"], ["long", "Texte long"], ["choix", "Un choix dans une liste"]];
+const TYPES_CHAMP = [["court", "Texte court"], ["long", "Texte long"], ["choix", "Un choix dans une liste"], ["metier", "Le métier (selon les places)"]];
 
 // ═══ LA ZONE ══════════════════════════════════════════════════════════════
 export function zone(vue, ctx) {
@@ -720,7 +720,8 @@ function champFiche(v, c, i, lim, apres) {
       boutonIcone("fermer", "Retirer le choix « " + o + " »", () => { c.options.splice(k, 1); c.eliminatoires = (c.eliminatoires || []).filter((x) => x !== o); apres(); }))),
     (() => { const s = saisie({ maxlength: lim.option || 100, placeholder: "Ajoute un choix puis Entrée", "aria-label": "Nouveau choix" });
       s.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); const t = s.value.trim(); if (t && !(c.options || []).includes(t) && (c.options || []).length < (lim.options || 25)) { c.options = [...(c.options || []), t]; apres(); } } });
-      return s; })()) : null;
+      return s; })()) : c.type === "metier"
+    ? h("p", { classe: "aide" }, "La liste des métiers qui ont encore une place, avec le nombre de places libres (Rôles & métiers › Places par métier). Le métier choisi est donné à l'acceptation s'il reste une place.") : null;
   return h("div", { classe: "zr-champ" },
     h("div", { classe: "rangee entre" }, h("b", {}, "Champ " + (i + 1)),
       h("div", { classe: "rangee" }, liste({ valeur: c.type || "court", label: "Type", options: TYPES_CHAMP.map(([k, l]) => ({ v: k, l })), changer: (t) => { c.type = t; apres(); } }),

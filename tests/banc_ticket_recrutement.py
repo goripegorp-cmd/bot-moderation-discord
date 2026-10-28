@@ -431,9 +431,12 @@ class BancTicket:
 
         async def autorise(i):
             return i.user.id in (FONDATEUR, DIRECTION, RECRUTEUR)
+
+        async def champs_avec_places(_g, champs):   # 28/10/2026 : comme metiers.champs_avec_places, sans champ « metier »
+            return [ch for ch in champs or [] if ch.get("type") != "metier"], ""
         return espace_du_bot(g=self.g, get_db=self.get_db, cfg=self.cfg, db_set=self.db_set, porteur=self.porteur,
                              categorie=self.categorie, journal=self.journal, logs=self.logs, erreurs=self.erreurs,
-                             metiers=Obj(inviter_au_choix=inviter_au_choix), autorise=autorise)
+                             metiers=Obj(inviter_au_choix=inviter_au_choix, champs_avec_places=champs_avec_places), autorise=autorise)
 
     def monter(self, **extra):
         """`questionnaire.setup` comme l'étape « questionnaire » du bot (ses branchements du 26/10/2026 compris)."""
@@ -449,7 +452,7 @@ class BancTicket:
             async def metiers_membre(_g, m):
                 return ["navigation"] if getattr(m, "id", 0) == CANDIDAT else []
 
-            async def invitation(g, membre):
+            async def invitation(g, membre, reponses=None):   # 28/10/2026 : les réponses de la fiche (le métier choisi)
                 return (f"{membre.mention} choisis ton métier.", "https://discord.com/channels/1/2/3",
                         "Choisir mon métier") if self.metier else None
             kw.update(extras=ns["_recrutement_extras"], liste_noire=ns["_liste_noire_recrutement"],

@@ -58,6 +58,13 @@ CLE_AUTO, CLE_MAX, CLE_RATTACHES = "metiers_auto", "metiers_max", "clan_roles_ra
 #  26/10/2026 : le nom choisi sur le site pour le rôle d'un métier (Rôles & métiers → « Renommer ») — {clé: nom} ; il
 #  sert aussi quand il faut recréer le rôle, et dans la liste du guide.
 CLE_NOMS = "metiers_noms"
+#  28/10/2026, le fondateur : « on choisit les places disponibles et la limite des places… ils ne peuvent pas choisir sur
+#  le serveur… ils le décident dans le ticket… ça leur dit les places disponibles lors de la création du ticket. »
+#  `metiers_places` {clé: places} (absent = sans limite) ; `metiers_au_ticket` (OUI par défaut) : le métier se choisit
+#  dans la fiche du ticket de recrutement (un champ « Métier »), il est donné à l'acceptation s'il reste une place ; la
+#  liste du guide du clan disparaît.
+CLE_PLACES, CLE_TICKET = "metiers_places", "metiers_au_ticket"
+PLACES_MAX = 500
 CLE_BILAN = "metiers_derniere_reconciliation"
 AVIS_S = 120.0                  # un mot pour soi s'efface au bout de 2 minutes
 DEMARRE_S = 30.0
@@ -108,6 +115,8 @@ TEXTES = {
     "doucement": ("Doucement : ton choix précédent vient d'être enregistré, réessaie dans quelques secondes.\n"
                   "-# Easy: your previous choice was just saved, try again in a few seconds."),
     "souci": "Un souci est survenu : réessaie dans quelques secondes.\n-# Something went wrong: try again in a few seconds.",
+    "au_ticket": ("Le métier se choisit dans le ticket de recrutement, selon les places libres : la direction l'attribue.\n"
+                  "-# Your job is picked in the recruitment ticket, by open spots: the staff assigns it."),
 }
 
 #  Les textes que la direction réécrit (26/10/2026 : Capitainerie → Textes & noms, registre `textes.py`) : la section
@@ -148,6 +157,33 @@ _declarer("metiers.carte.manuel",
           aide="La même carte, quand l'attribution automatique est coupée.")
 _declarer("metiers.carte.bouton", "Choisir mon métier · Pick my job", titre="Le bouton de la carte",
           partie=_ACCEPTATION, ordre=12, max_=80, lignes=False, aide="Il mène au guide du clan.")
+_declarer("metiers.carte.attribue",
+          "### Bienvenue dans l'équipage · Welcome aboard\n{membre}, ton métier : **{metier}**. Ton rôle de métier t'est donné."
+          "\n-# Your job: {metier}. Your job role is given.", titre="La carte (métier choisi au ticket, attribué)",
+          partie=_ACCEPTATION, ordre=14, max_=1200, variables=(("membre", "la mention du nouveau membre"), ("metier", "le métier")),
+          aide="Le métier choisi dans la fiche avait encore une place : il est attribué à l'acceptation.")
+_declarer("metiers.carte.complet",
+          "### Bienvenue dans l'équipage · Welcome aboard\n{membre}, la dernière place en **{metier}** vient d'être prise : la "
+          "direction t'attribue un métier.\n-# The last {metier} spot was just taken: the staff will assign your job.",
+          titre="La carte (plus de place dans le métier choisi)", partie=_ACCEPTATION, ordre=15, max_=1200,
+          variables=(("membre", "la mention du nouveau membre"), ("metier", "le métier")),
+          aide="Entre la fiche et l'acceptation, le métier choisi s'est rempli.")
+_declarer("metiers.carte.sans",
+          "### Bienvenue dans l'équipage · Welcome aboard\n{membre}, la direction t'attribue ton métier selon les places libres."
+          "\n-# The staff assigns your job by open spots.", titre="La carte (aucun métier choisi dans la fiche)",
+          partie=_ACCEPTATION, ordre=16, max_=1200, variables=(("membre", "la mention du nouveau membre"),),
+          aide="La fiche n'avait pas de champ « Métier », ou aucune place n'était libre.")
+_declarer("metiers.fiche.places", "{n} place(s) libre(s)", titre="Sous chaque métier de la fiche", partie=_ACCEPTATION,
+          ordre=17, max_=100, lignes=False, variables=(("n", "le nombre de places libres"),),
+          aide="Dans la liste « Métier » de la fiche du ticket, sous le nom du métier.")
+_declarer("metiers.fiche.libre", "Places libres", titre="Sous un métier sans limite", partie=_ACCEPTATION, ordre=18,
+          max_=100, lignes=False, aide="Un métier sans nombre de places réglé.")
+_declarer("metiers.fiche.recap", "**Métiers ouverts** : {liste}", titre="La ligne des places (avant la fiche)",
+          partie=_ACCEPTATION, ordre=19, max_=600, lignes=False, variables=(("liste", "« Cuisinier 2 · Artisan 1 … »"),),
+          aide="Ajoutée à « Es-tu sûr ? » : les métiers et leurs places libres.")
+_declarer("metiers.fiche.complet", "**Métiers** : aucune place libre pour le moment, la direction t'en attribuera un.",
+          titre="La ligne des places (tout est pris)", partie=_ACCEPTATION, ordre=20, max_=300, lignes=False,
+          aide="Ajoutée à « Es-tu sûr ? » quand aucun métier n'a de place libre.")
 _declarer("metiers.mp_lien", "choisis ton métier dans le guide du clan (pick your job) : {lien}",
           titre="La ligne du message privé", partie=_ACCEPTATION, ordre=13, max_=300, lignes=False,
           variables=(("lien", "le lien du guide du clan"),),
@@ -164,7 +200,8 @@ _AVIS = {"reserve": ("Réservé au clan", "Quelqu'un hors du clan choisit un mé
          "rien": ("Rien de choisi", "La liste refermée sans choix."),
          "doucement": ("Doucement", "Deux choix coup sur coup."),
          "demarre": ("Le bot démarre", "Un choix pendant le démarrage du bot."),
-         "souci": ("Un souci", "Une erreur imprévue (elle est aussi notée au journal du bot).")}
+         "souci": ("Un souci", "Une erreur imprévue (elle est aussi notée au journal du bot)."),
+         "au_ticket": ("Choix au ticket", "Quelqu'un touche l'ancienne liste du guide alors que le métier se choisit au ticket.")}
 for _k, (_titre, _aide) in _AVIS.items():
     _declarer(f"metiers.avis.{_k}", TEXTES[_k], titre=_titre, partie=_REPONSES, ordre=40 + list(_AVIS).index(_k),
               max_=600, aide=_aide, variables=(("n", "le nombre de métiers permis"),) if _k == "trop" else ())
@@ -285,8 +322,14 @@ def reglages_de(c: dict) -> dict:
     except (TypeError, ValueError):
         maxi = MAX_DEFAUT
     rattaches = [int(x) for x in (c.get(CLE_RATTACHES) or []) if str(x).isdigit() and int(x) > 0]
+    places = {}
+    for k, v in (c.get(CLE_PLACES) or {}).items() if isinstance(c.get(CLE_PLACES), dict) else ():
+        if isinstance(k, str) and isinstance(v, int) and not isinstance(v, bool) and 0 <= v <= PLACES_MAX:
+            places[k] = v
+    ticket = c.get(CLE_TICKET)
     return {"auto": True if auto is None else bool(auto), "max": max(MAX_MIN, min(MAX_MAX, maxi)),
-            "rattaches": list(dict.fromkeys(rattaches))[:RATTACHES_MAX]}
+            "rattaches": list(dict.fromkeys(rattaches))[:RATTACHES_MAX], "places": places,
+            "ticket": True if ticket is None else bool(ticket)}
 
 
 async def reglages(g) -> dict:
@@ -437,6 +480,73 @@ async def options_selecteur(g=None) -> list[dict]:
         out.append({"cle": e["cle"], "label": label[:100], "description": str(e.get("categorie") or "")[:100],
                     "emoji": _emoji(e["cle"])})
     return out
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Les places (28/10/2026) : le métier se choisit dans la fiche du ticket
+# ═══════════════════════════════════════════════════════════════════════════════
+
+async def occupes(g, c: dict | None = None) -> dict:
+    """{clé du métier : membres du clan dont l'affiche porte ce métier}."""
+    c = c if c is not None else await _cfg(g.id)
+    clan = await role_du_clan(g, c)
+    dans_clan = {m.id for m in getattr(clan, "members", []) or []} if clan is not None else None
+    out: dict = {}
+    for a in await affiches._affiches(g.id):
+        if a["retire_le"] or (dans_clan is not None and int(a["membre_id"] or 0) not in dans_clan):
+            continue
+        for cle in a["attributs"].get(TYPE) or []:
+            out[cle] = out.get(cle, 0) + 1
+    return out
+
+
+async def places(g, c: dict | None = None) -> list:
+    """Chaque métier actif : `{"cle", "nom", "limite" (None : sans limite), "occupes", "libres" (None : sans limite)}`."""
+    c = c if c is not None else await _cfg(g.id)
+    reg, noms, pris = reglages_de(c), noms_choisis(c), await occupes(g, c)
+    out = []
+    for e in (await metiers_du_catalogue())[:OPTIONS_MAX]:
+        limite = reg["places"].get(e["cle"])
+        n = pris.get(e["cle"], 0)
+        out.append({"cle": e["cle"], "nom": nom_du_role(e, noms), "limite": limite, "occupes": n,
+                    "libres": None if limite is None else max(0, limite - n), "emoji": _emoji(e["cle"])})
+    return out
+
+
+async def champs_avec_places(g, champs: list) -> tuple:
+    """La fiche du ticket : chaque champ « metier » devient une liste des métiers qui ont une place libre (leur nombre de
+    places sous le nom). → (les champs, la ligne des places pour « Es-tu sûr ? », "" sans champ « metier »)."""
+    if not any(isinstance(ch, dict) and ch.get("type") == "metier" for ch in champs or []) or g is None or not pret():
+        return [ch for ch in champs or [] if ch.get("type") != "metier"], ""
+    c = await _cfg(g.id)
+    ouverts = [p for p in await places(g, c) if p["libres"] is None or p["libres"] > 0]
+    out = []
+    for ch in champs:
+        if ch.get("type") != "metier":
+            out.append(ch)
+        elif ouverts:
+            out.append(dict(ch, type="choix", options=[p["nom"][:100] for p in ouverts], eliminatoires=[],
+                            descriptions=[_t(g.id, "metiers.fiche.libre") if p["libres"] is None
+                                          else _t(g.id, "metiers.fiche.places", n=p["libres"]) for p in ouverts],
+                            cles=[p["cle"] for p in ouverts]))
+    if not ouverts:
+        return out, _t(g.id, "metiers.fiche.complet")
+    liste = " · ".join(p["nom"] + ("" if p["libres"] is None else f" {p['libres']}") for p in ouverts)
+    return out, _t(g.id, "metiers.fiche.recap", liste=liste)
+
+
+def metier_des_reponses(metiers: list, reponses: dict, noms: dict) -> dict | None:
+    """FONCTION PURE : le métier choisi dans la fiche (une réponse égale au nom d'un métier actif), ou None."""
+    par_nom = {}
+    for e in metiers:
+        for n in (nom_du_role(e, noms), e.get("nom"), e.get("nom_en")):
+            if n:
+                par_nom.setdefault(_norme(n), e)
+    for v in (reponses or {}).values():
+        e = par_nom.get(_norme(v))
+        if e is not None:
+            return e
+    return None
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1044,6 +1154,8 @@ async def choisir(i, valeurs: list) -> None:
     if await sous_sanction(g, m):
         return await _avis(i, _reponse(i, "indisponible"), Palette.WARNING)
     reg = reglages_de(c)
+    if reg["ticket"]:   # une ancienne liste du guide : le métier se choisit au ticket, la direction l'attribue
+        return await _avis(i, _reponse(i, "au_ticket"), Palette.WARNING)
     actifs = {e["cle"]: e for e in await metiers_du_catalogue()}
     choix = list(dict.fromkeys(valeurs))
     aucun = AUCUN in choix
@@ -1079,8 +1191,8 @@ async def choisir(i, valeurs: list) -> None:
 async def section_guide(g, c: dict) -> tuple | None:
     """Pour le guide du clan (`zones.vue_guide_clan`) : (les composants « Choisis ton métier », leur signature) — None
     quand le choix n'est pas possible (aucun rôle du clan réglé, aucun métier actif) : aucune liste qui ment."""
-    if not pret() or await role_du_clan(g, c) is None:
-        return None
+    if not pret() or await role_du_clan(g, c) is None or reglages_de(c)["ticket"]:
+        return None   # 28/10/2026 : le métier se choisit au ticket — aucune liste sur le serveur
     options = await options_selecteur(g)
     if not options:
         return None
@@ -1138,7 +1250,7 @@ def lien_guide(g, c: dict) -> str | None:
     return f"https://discord.com/channels/{g.id}/{pid}" if pid else None
 
 
-async def invitation(g, membre) -> tuple | None:
+async def invitation(g, membre, reponses: dict | None = None) -> tuple | None:
     """(le texte, le lien du guide, le libellé du bouton) de l'invitation à choisir son métier — None s'il n'y a ni guide, ni métier à choisir,
     ni rôle du clan réglé. 26/10/2026 : le recrutement la met dans SON message de décision (un message de moins dans
     le ticket) ; `inviter_au_choix` la pose en carte."""
@@ -1146,12 +1258,41 @@ async def invitation(g, membre) -> tuple | None:
         return None
     c = await _cfg(g.id)
     lien = lien_guide(g, c)
+    if reglages_de(c)["ticket"]:
+        return await _attribuer_au_recrutement(g, c, membre, reponses or {}, lien)
     if lien is None or await role_du_clan(g, c) is None or not await options_selecteur(g):
         return None
     auto = reglages_de(c)["auto"]
     await textes_du_site.texte(g.id, "metiers.carte.bouton")   # le cache des textes (Textes & noms) est chargé
     return (_t(g.id, "metiers.carte.auto" if auto else "metiers.carte.manuel", membre=membre.mention), lien,
             _t(g.id, "metiers.carte.bouton"))
+
+
+async def _attribuer_au_recrutement(g, c: dict, membre, reponses: dict, lien) -> tuple | None:
+    """28/10/2026 : à l'acceptation, le métier choisi dans la fiche est donné s'il reste une place (son affiche, puis son
+    rôle). → (le texte de la carte, le lien du guide ou None, le libellé du bouton)."""
+    if await role_du_clan(g, c) is None:
+        return None
+    reg, noms = reglages_de(c), noms_choisis(c)
+    await textes_du_site.texte(g.id, "metiers.carte.attribue")   # le cache des textes est chargé
+    bouton = _t(g.id, "metiers.carte.bouton")
+    e = metier_des_reponses(await metiers_du_catalogue(), reponses, noms)
+    if e is None:
+        return _t(g.id, "metiers.carte.sans", membre=membre.mention), lien, bouton
+    nom = nom_du_role(e, noms)
+    async with _verrou(("places", g.id)):
+        limite = reg["places"].get(e["cle"])
+        pris = (await occupes(g, c)).get(e["cle"], 0)
+        if limite is not None and pris >= limite:
+            await _noter(g, "clan.metier_complet", f"{membre.display_name} : plus de place en {nom}, à attribuer",
+                         membre_id=membre.id)
+            return _t(g.id, "metiers.carte.complet", membre=membre.mention, metier=nom), lien, bouton
+        affiche, _change = await affiches.definir_metiers(g, membre, [e["cle"]], membre.id)
+    if reg["auto"]:
+        await appliquer(g, membre, [e["cle"]], auteur=None, cause="choisi au recrutement", creer=True)
+    await _noter(g, "clan.metier_choisi", f"{membre.display_name} : métier {nom} (choisi au recrutement)",
+                 membre_id=membre.id, detail=f"affiche {affiche['id']}")
+    return _t(g.id, "metiers.carte.attribue", membre=membre.mention, metier=nom), lien, bouton
 
 
 async def metiers_du_membre(g, membre) -> list:
@@ -1226,7 +1367,12 @@ async def etat(g) -> dict:
         rattaches.append({"id": str(rid), "nom": getattr(r, "name", ""), "existe": r is not None,
                           "attribuable": refus is None, "raison": refus or "",
                           "non_membres": sum(1 for m in hors_clan if any(x.id == rid for x in m.roles)) if clan else 0})
+    pris = await occupes(g, c)
+    for x in metiers:
+        x["places"] = reg["places"].get(x["cle"])
+        x["occupes"] = pris.get(x["cle"], 0)
     return {"auto": reg["auto"], "max_metiers": reg["max"], "max_bornes": [MAX_MIN, MAX_MAX],
+            "au_ticket": reg["ticket"], "places_max": PLACES_MAX,
             "rattaches": [str(x) for x in reg["rattaches"]], "rattaches_details": rattaches,
             "roles_disponibles": disponibles, "icones_roles": "ROLE_ICONS" in (getattr(g, "features", None) or []),
             "gestion": affiches._peut_gerer_roles(g), "actif": clan is not None, "role_clan": _role_sortie(clan),
@@ -1255,6 +1401,23 @@ async def _valider_rattaches(g, c: dict, v) -> list:
     return out
 
 
+async def _valider_places(v) -> dict:
+    """`{clé: places | null}` : null (ou absent) = sans limite ; un entier de 0 à PLACES_MAX."""
+    if not isinstance(v, dict) or len(v) > 200:
+        raise affiches.Invalide("places", "Un objet {métier : nombre de places}.")
+    connus = {e["cle"] for e in await metiers_du_catalogue(actifs=False)}
+    out = {}
+    for k, n in v.items():
+        if k not in connus:
+            raise affiches.Invalide("places", "Un de ces métiers n'existe pas.")
+        if n is None:
+            continue
+        if isinstance(n, bool) or not isinstance(n, int) or not 0 <= n <= PLACES_MAX:
+            raise affiches.Invalide("places", f"Des places : un nombre de 0 à {PLACES_MAX}, ou vide pour sans limite.")
+        out[k] = n
+    return out
+
+
 async def route_reglages(g, auteur, requete, corps):
     return 200, await etat(g)
 
@@ -1272,20 +1435,26 @@ async def route_regler(g, auteur, requete, corps):
             voulu[CLE_MAX] = affiches._entier(corps.get("max_metiers"), "max_metiers", MAX_MIN, MAX_MAX)
         if "rattaches" in corps:
             voulu[CLE_RATTACHES] = await _valider_rattaches(g, c, corps.get("rattaches"))
+        if "au_ticket" in corps:
+            voulu[CLE_TICKET] = affiches._booleen(corps.get("au_ticket"), "au_ticket", reg["ticket"])
+        if "places" in corps:
+            voulu[CLE_PLACES] = await _valider_places(corps.get("places"))
     except affiches.Invalide as ex:
         return 400, ex.corps()
     if not voulu:
-        return 400, {"erreur": "Rien à régler : « auto », « max_metiers » ou « rattaches »."}
-    avant = {CLE_AUTO: reg["auto"], CLE_MAX: reg["max"], CLE_RATTACHES: reg["rattaches"]}
+        return 400, {"erreur": "Rien à régler : « auto », « max_metiers », « rattaches », « au_ticket » ou « places »."}
+    avant = {CLE_AUTO: reg["auto"], CLE_MAX: reg["max"], CLE_RATTACHES: reg["rattaches"], CLE_TICKET: reg["ticket"],
+             CLE_PLACES: reg["places"]}
     changes = {k: v for k, v in voulu.items() if avant[k] != v}
     for k, v in changes.items():
         await _db_set(g.id, k, v)
     nouveau = await etat(g)
-    if CLE_AUTO in changes or CLE_MAX in changes:
+    if CLE_AUTO in changes or CLE_MAX in changes or CLE_TICKET in changes:
         planifier_guide(g)
     phrase = (f"Rôles & métiers : attribution automatique {'OUI' if nouveau['auto'] else 'NON'}, "
               f"{nouveau['max_metiers']} métier(s) au plus par membre, {len(nouveau['rattaches'])} rôle(s) rattaché(s) "
-              "au clan")
+              f"au clan, métier choisi {'au ticket' if nouveau['au_ticket'] else 'dans le guide'}"
+              + (", places des métiers changées" if CLE_PLACES in changes else ""))
     return 200, dict(nouveau, ok=True, _journal=phrase if changes else None)
 
 

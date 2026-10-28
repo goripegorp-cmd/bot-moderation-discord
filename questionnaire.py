@@ -138,7 +138,8 @@ FICHE_MAX = 5                        # la fiche d'ouverture : une fenêtre Disco
 CHAMP_TITRE_MAX, CHAMP_AIDE_MAX, CHAMP_EXEMPLE_MAX = 45, 100, 100
 CHAMP_LONGUEUR_MAX, CHAMP_LONGUEUR_DEFAUT = 1000, 300
 OPTIONS_MAX, OPTION_MAX = 25, 100
-TYPES_CHAMP = ("court", "long", "choix")
+#  28/10/2026 : « metier » — la liste des métiers qui ont une place libre, remplie à l'ouverture (metiers.champs_avec_places).
+TYPES_CHAMP = ("court", "long", "choix", "metier")
 SOURCES_ETAPE = ("defaut", "modele", "questions", "tirage")
 DELAI_MIN, DELAI_MAX = 5, 3600       # s : la fermeture après une décision
 NOUVELLES_MAX = 10                   # questions écrites pour un seul candidat, par envoi
@@ -1561,7 +1562,7 @@ def _champ_fiche(x) -> dict:
     exemple = _texte(x, "exemple", maxi=CHAMP_EXEMPLE_MAX, requis=False)
     type_ = x.get("type", "court")
     if type_ not in TYPES_CHAMP:
-        raise _Invalide("« type » : court, long ou choix.")
+        raise _Invalide("« type » : court, long, choix ou metier.")
     requis = _booleen(x, "requis", True)
     options, longueur, eliminatoires = [], CHAMP_LONGUEUR_DEFAUT, []
     if type_ == "choix":
@@ -1593,7 +1594,7 @@ def _champ_fiche(x) -> dict:
     else:
         longueur = _entier(x, "max", requis=False, mini=1, maxi=CHAMP_LONGUEUR_MAX) or CHAMP_LONGUEUR_DEFAUT
     return {"titre": titre, "aide": aide, "exemple": exemple, "type": type_, "requis": bool(requis),
-            "max": int(longueur), "options": options, "eliminatoires": eliminatoires}
+            "max": int(longueur) if type_ != "metier" else OPTION_MAX, "options": options, "eliminatoires": eliminatoires}
 
 
 def _etape_gabarit(x) -> dict:
@@ -3635,7 +3636,7 @@ async def accepter(g, tid: int, auteur, *, forcer: bool = False) -> tuple[int, d
             invitation = None
             if p["metier"] and _metier is not None and candidat is not None:
                 try:
-                    invitation = await _metier(g, candidat)
+                    invitation = await _metier(g, candidat, reponses=dict(tk.get("answers") or {}))
                 except Exception as ex:  # le choix du métier manque : l'acceptation reste
                     _log("[RECRUTEMENT][E16] choix du métier indisponible")
                     _log(f"[RECRUTEMENT][E16:DETAIL] {type(ex).__name__} {ex}")
@@ -3645,7 +3646,8 @@ async def accepter(g, tid: int, auteur, *, forcer: bool = False) -> tuple[int, d
             libelle = str(invitation[2]) if invitation and len(invitation) > 2 else "Choisir mon métier"
             if invitation:
                 texte += "\n\n" + str(invitation[0])
-                boutons = [discord.ui.Button(label=libelle[:80], url=str(invitation[1]))]
+                if invitation[1]:   # sans guide du clan : la carte seule
+                    boutons = [discord.ui.Button(label=libelle[:80], url=str(invitation[1]))]
             try:
                 await ch.send(view=_vue_decision(texte, COULEUR_VERT, boutons), allowed_mentions=_ping(tk["user"]))
             except discord.HTTPException as ex:
@@ -3654,7 +3656,7 @@ async def accepter(g, tid: int, auteur, *, forcer: bool = False) -> tuple[int, d
             await _editer_carte_staff(g, ch, await _suivi(g.id, tid), "accepte", par=auteur.id, quand=t)
             mp = await textes_du_site.texte(g.id, "recrutement.mp.acceptee")
             trace["mp"] = await _mp(g, int(tk["user"]), mp, [discord.ui.Button(
-                label=libelle[:80], url=str(invitation[1]))] if invitation else ())
+                label=libelle[:80], url=str(invitation[1]))] if invitation and invitation[1] else ())
         ok, message = await _decider_avec(g, tid, auteur, True, "", annonce=annonce, mp=False)
         if not ok:
             return _erreur(message, 503 if message == DISCORD_HS else 409)
@@ -3849,7 +3851,9 @@ class FormulaireFiche(discord.ui.Modal):
         for ch in (champs or [])[:FICHE_MAX]:
             requis = bool(ch.get("requis", True))
             if ch.get("type") == "choix" and ch.get("options"):
-                comp = discord.ui.Select(options=[discord.SelectOption(label=str(o)[:100], value=str(k))
+                desc = ch.get("descriptions") or []   # 28/10/2026 : les places libres, sous chaque métier
+                comp = discord.ui.Select(options=[discord.SelectOption(label=str(o)[:100], value=str(k),
+                                                                       description=(str(desc[k])[:100] if k < len(desc) and desc[k] else None))
                                                   for k, o in enumerate(ch["options"][:OPTIONS_MAX])],
                                          required=requis, min_values=1 if requis else 0, max_values=1,
                                          placeholder=str(ch.get("exemple") or "")[:100] or None)

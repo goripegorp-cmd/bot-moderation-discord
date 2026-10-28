@@ -9152,8 +9152,12 @@ async def _ticket_ouvrir(i, pid):
             g_ = i.guild.id
             recap = (await textes.texte(g_, "recrutement.confirmation") + "\n"
                      + await textes.texte(g_, "recrutement.confirmation.info")).strip()
+            #  28/10/2026 : le champ « Métier » de la fiche — les métiers qui ont une place libre, et la ligne des places.
+            champs_f, places_f = await metiers.champs_avec_places(i.guild, await questionnaire.fiche_ouverture(g_, pid, pnl))
+            if places_f:
+                recap += "\n\n" + places_f
             return await i.response.send_message(view=TicketConfirmCreateView(
-                pid, recap, champs=await questionnaire.fiche_ouverture(g_, pid, pnl),
+                pid, recap, champs=champs_f,
                 oui=await textes.texte(g_, "recrutement.confirmation.oui"),
                 non=await textes.texte(g_, "recrutement.confirmation.non"),
                 annule=await textes.texte(g_, "recrutement.confirmation.annule")), ephemeral=True)

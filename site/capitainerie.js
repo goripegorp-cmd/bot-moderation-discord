@@ -649,10 +649,12 @@ const reglagesMetiersAlerte = (M) => !M || !!M.erreur || M.actif === false || M.
 /** Les réglages des rôles de métier (jamais hors ligne). */
 function blocReglagesMetiers(M, rolesD, apres) {
   if (!M || M.erreur) return bandeau("Les réglages des rôles de métier sont indisponibles pour le moment" + (M && M.erreur ? " : " + M.erreur : "."), "");
-  const v = { auto: M.auto !== false, max_metiers: Math.max(1, Math.min(5, Number(M.max_metiers) || 2)), rattaches: new Set((M.rattaches || []).map(String)) };
-  const initial = JSON.stringify({ a: v.auto, m: v.max_metiers, r: [...v.rattaches].sort() });
+  const v = { auto: M.auto !== false, max_metiers: Math.max(1, Math.min(5, Number(M.max_metiers) || 2)), rattaches: new Set((M.rattaches || []).map(String)),
+    au_ticket: M.au_ticket !== false, places: Object.fromEntries((M.metiers || []).filter((m) => m.actif).map((m) => [m.cle, m.places ?? null])) };
+  const cliche = () => JSON.stringify({ a: v.auto, m: v.max_metiers, r: [...v.rattaches].sort(), t: v.au_ticket, p: v.places });
+  const initial = cliche();
   const enregistrer = bouton("Enregistrer les réglages", { classe: "p principal", icone: "valider", reseau: true });
-  const sale = () => JSON.stringify({ a: v.auto, m: v.max_metiers, r: [...v.rattaches].sort() }) !== initial;
+  const sale = () => cliche() !== initial;
   const etat_ = () => { if (enLigne()) enregistrer.disabled = !sale(); };
   const nombreE = h("input", { type: "number", classe: "saisie", min: 1, max: 5, value: v.max_metiers, inputmode: "numeric", "aria-label": "Nombre de métiers par membre" });
   nombreE.addEventListener("input", () => { v.max_metiers = Math.max(1, Math.min(5, Number(nombreE.value) || 1)); etat_(); });
@@ -663,7 +665,7 @@ function blocReglagesMetiers(M, rolesD, apres) {
   const grille = h("div", { classe: "roles-rattaches" }, candidats.map((r) => caseACocher(h("span", { classe: "role-nom" }, h("i", { classe: "pastille-couleur", vars: { "--teinte": r.couleur || "#6e553f" } }), sansEmoji(r.nom) || "Rôle"),
     v.rattaches.has(String(r.id)), (x) => { if (x) v.rattaches.add(String(r.id)); else v.rattaches.delete(String(r.id)); etat_(); })));
   enregistrer.addEventListener("click", async () => {
-    const r = await poster("rell/metiers/reglages", { auto: v.auto, max_metiers: v.max_metiers, rattaches: [...v.rattaches] });
+    const r = await poster("rell/metiers/reglages", { auto: v.auto, max_metiers: v.max_metiers, rattaches: [...v.rattaches], au_ticket: v.au_ticket, places: v.places });
     toast(r.ok ? "Réglages des rôles enregistrés." : r.erreur, r.ok ? "succes" : "erreur");
     if (r.ok) apres(null);
   });
@@ -696,6 +698,18 @@ function blocReglagesMetiers(M, rolesD, apres) {
   return zoneReglagesMetiers(apres, h("div", { classe: "cadre pile serree" }, h("h3", {}, "Les réglages"),
     ...alertes,
     interrupteur("Attribution automatique des rôles de métier", v.auto, (x) => { v.auto = x; etat_(); }),
+    //  28/10/2026 : le métier se choisit dans la fiche du ticket, selon les places ; plus de liste dans le guide du clan.
+    interrupteur("Le métier se choisit dans le ticket de recrutement (selon les places)", v.au_ticket, (x) => { v.au_ticket = x; etat_(); }),
+    h("div", { classe: "champ" }, h("span", { classe: "champ-lib" }, "Places par métier"),
+      h("span", { classe: "champ-aide" }, "Vide : sans limite. La fiche du ticket ne propose que les métiers qui ont une place libre ; ajoute-y un champ « Métier » (Capitainerie › Demande de recrutement)."),
+      h("div", { classe: "places-metiers" }, (M.metiers || []).filter((m) => m.actif).map((m) => {
+        const e = h("input", { type: "number", classe: "saisie", min: 0, max: M.places_max || 500, inputmode: "numeric", placeholder: "∞",
+          value: m.places ?? "", "aria-label": "Places : " + sansEmoji(m.role_nom || m.nom) });
+        e.addEventListener("input", () => { const t = e.value.trim(); v.places[m.cle] = t === "" ? null : Math.max(0, Math.min(M.places_max || 500, Math.floor(Number(t)) || 0)); etat_(); });
+        const libres = m.places == null ? "sans limite" : Math.max(0, m.places - (m.occupes || 0)) + " libre(s)";
+        return h("label", { classe: "place-metier" }, h("span", { classe: "place-nom" }, sansEmoji(m.role_nom || m.nom)),
+          h("span", { classe: "meta" }, (m.occupes || 0) + " pris · " + libres), e);
+      }))),
     h("div", { classe: "champ" }, h("span", { classe: "champ-lib" }, "Nombre de métiers par membre"),
       h("div", { classe: "pas-a-pas" }, boutonIcone("moins", "Un de moins", pas(-1)), nombreE, boutonIcone("plus", "Un de plus", pas(1))),
       h("span", { classe: "champ-aide" }, "De 1 à 5. L'atelier des affiches n'en laisse pas choisir davantage.")),

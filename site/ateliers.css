@@ -328,3 +328,10 @@ button.element-carte:hover { border-color: var(--trait-fort); box-shadow: var(--
 /* Les chiffres « alignés » partout (le raccourci font: remettait les chiffres elzéviriens : « 0 » lu comme « o »). */
 .mini-tuile b, .gros-chiffre b, .regle-valeur, .correction-compte b, .selection-num, .correction-num, .pancarte-pastille,
 .compteur, .plaque-nombre, .lot b, .tuile .val, .vote-haut b, .barre-h b, .affiche-prime, .prime, .num { font-variant-numeric: lining-nums tabular-nums; }
+
+/* 28/10/2026 : Rôles & métiers › Places par métier — une ligne par métier, alignée (nom · pris/libres · places). */
+.places-metiers { display: grid; gap: 6px; }
+.place-metier { display: grid; grid-template-columns: minmax(0, 1fr) auto 84px; align-items: center; gap: 8px; }
+.place-metier .place-nom { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.place-metier .saisie { width: 84px; text-align: center; }
+@media (max-width: 480px) { .place-metier { grid-template-columns: minmax(0, 1fr) 72px; } .place-metier .meta { grid-column: 1 / -1; grid-row: 2; } .place-metier .saisie { width: 72px; } }

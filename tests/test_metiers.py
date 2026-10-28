@@ -207,7 +207,9 @@ class Banc:
         self.robot = g.membre(3, "Robot", self.clan, bot=True)
         self.chef = g.membre(FONDATEUR, "GoRipe", self.membre_role)
         self.direction = g.membre(DIRECTION, "Direction", self.membre_role)
-        self.conf = {rellseas_panneau.CLE_ROLE_CIBLE: self.clan.id}
+        #  28/10/2026 : ces tests suivent le choix dans le GUIDE (réglage « au ticket » coupé) ; le choix au ticket :
+        #  tests/test_metiers_places.py.
+        self.conf = {rellseas_panneau.CLE_ROLE_CIBLE: self.clan.id, metiers.CLE_TICKET: False}
         self.journal, self.sanctionnes, self.guides, self.journal_bot = [], set(), [], []
 
         async def cfg(_gid):
@@ -1173,6 +1175,7 @@ def test_M10d_installer_la_zone_du_clan_pose_le_guide_avec_le_choix_du_metier(tm
     g.categorie("🦜 · GoRp_SEA")
     clan = run(g.create_role(name="GoRPC"))
     conf[rellseas_panneau.CLE_ROLE_CIBLE] = clan.id
+    conf[metiers.CLE_TICKET] = False   # 28/10/2026 : le choix dans le guide (réglage « au ticket » coupé)
     affiches.setup(get_db=get_db, log=lambda *a: None)
     metiers.setup(get_db=get_db, cfg=cfg, db_set=db_set, log=lambda *a: None,
                   role_clan=lambda gg, c: gg.get_role(int(c.get(rellseas_panneau.CLE_ROLE_CIBLE, 0) or 0)))
