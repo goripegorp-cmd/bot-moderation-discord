@@ -131,6 +131,9 @@ const SCENES_EQUIPAGE = [
     geste: "(() => { const s = document.querySelector('.mon-equipe'); if (!s) throw new Error('pas de « Mon équipe »'); s.scrollIntoView({ block: 'start' }); return 1; })()" },
   { nom: "site-equipage-toutes-affiches", ...EQ, ancre: "#equipage", interdits: GESTES_DIRECTION, geste: cliquerTexte(".segment button", "Toutes les affiches"),
     apres: "(() => { const b = [...document.querySelectorAll('.segment button')].find((x) => x.textContent.includes('Les équipes')); if (b) b.click(); return 1; })()" },
+  //  27/10/2026 : la HIÉRARCHIE (les rangs, le Capitaine en tête) — en lecture seule, puis retour aux équipes.
+  { nom: "site-equipage-la-hierarchie", ...EQ, ancre: "#equipage", interdits: [...GESTES_DIRECTION, "undefined"], geste: cliquerTexte(".segment button", "La hiérarchie"),
+    apres: "(() => { const b = [...document.querySelectorAll('.segment button')].find((x) => x.textContent.includes('Les équipes')); if (b) b.click(); return 1; })()" },
   //  27/10/2026 : la VITRINE PUBLIQUE — sans session (la page ne lit aucun cookie : ses données partent sans).
   { nom: "vitrine-accueil", ...VITRINE },
   { nom: "vitrine-equipes", ...VITRINE, geste: "(() => { document.querySelector('.vitrine-mur').scrollIntoView({ block: 'start' }); return 1; })()" },
@@ -138,6 +141,9 @@ const SCENES_EQUIPAGE = [
     geste2: "(() => { document.querySelector('.vitrine-mur').scrollIntoView({ block: 'start' }); return 1; })()", apres: "(() => { const b = [...document.querySelectorAll('.segment button')].find((x) => x.textContent.includes('Les équipes')); if (b) b.click(); return 1; })()" },
   { nom: "vitrine-affiche", ...VITRINE, geste: "(async () => { document.querySelector('button.affiche').click(); return 1; })()" },
   { nom: "vitrine-hierarchie", ...VITRINE, geste: CHOISIR_TRI("hiérarchie"), geste2: "(() => { document.querySelector('.vitrine-mur').scrollIntoView({ block: 'start' }); return 1; })()" },
+  { nom: "vitrine-la-hierarchie", ...VITRINE, interdits: [...VITRINE.interdits, "Tortuga"], geste: cliquerTexte(".segment button", "La hiérarchie"),
+    geste2: "(() => { document.querySelector('.organigramme').scrollIntoView({ block: 'start' }); return 1; })()",
+    apres: "(() => { const b = [...document.querySelectorAll('.segment button')].find((x) => x.textContent.includes('Les équipes')); if (b) b.click(); return 1; })()" },
   { nom: "vitrine-copier-lien", ...VITRINE, geste: "(async () => { document.querySelector('#entete-outils .lien-equipage').click(); await new Promise(r => setTimeout(r, 400)); return 1; })()" },
   //  26/10/2026 : modifier une annonce PUBLIÉE depuis l'accueil (la tête), la bannière aux dimensions exactes (1600 × 640, 5:2)
   //  partout — les actualités en lecture et en édition, beaucoup d'actualités, l'éditeur et ses deux aperçus, le bandeau.
@@ -297,6 +303,15 @@ const SCENES = [
   //  27/10/2026 : la fiche de Kolax par son adresse — sur une base de plusieurs années (472 au clan), sa ligne n'est pas
   //  dans la première page de la liste, et le geste ouvrait la fiche d'un autre (sans équipe).
   { nom: "fenetre-fiche-equipe", ancre: "#equipage/membres&membre=1000", interdits: ["Équipe : aucune"] },
+  //  27/10/2026 : la HIÉRARCHIE, côté direction — l'organigramme et ses boutons, l'éditeur d'un rang (son rôle Discord),
+  //  « Nommer », la ligne « Rang » de la fiche d'Ishmael (Charpentier de la démonstration).
+  { nom: "equipage-hierarchie", ancre: "#equipage/membres/hierarchie", interdits: ["undefined"] },
+  { nom: "fenetre-editeur-rang", ancre: "#equipage/membres/hierarchie",
+    geste: "(async () => { await new Promise(r => setTimeout(r, 800)); const p = [...document.querySelectorAll('.org-palier')].find((x) => x.textContent.includes('Vigie')); [...p.querySelectorAll('button')].find(b => b.textContent.includes('Modifier')).click(); return 1; })()" },
+  { nom: "fenetre-nommer-rang", ancre: "#equipage/membres/hierarchie",
+    geste: "(async () => { await new Promise(r => setTimeout(r, 800)); const p = [...document.querySelectorAll('.org-palier')].find((x) => x.textContent.includes('Vigie')); [...p.querySelectorAll('button')].find(b => b.textContent.includes('Nommer')).click(); return 1; })()" },
+  { nom: "fenetre-fiche-rang", ancre: "#equipage/membres&membre=1006", interdits: ["undefined"],
+    geste: "(async () => { for (let i = 0; i < 30 && !document.querySelector('dialog[open] .fiche-rang-h'); i++) await new Promise(r => setTimeout(r, 200)); if (!document.querySelector('dialog[open] .fiche-rang-h')) throw new Error('ligne du rang absente'); return 1; })()" },
   { nom: "fenetre-nouvelle-equipe", ancre: "#equipage/membres/equipes",
     geste: "(async () => { await new Promise(r => setTimeout(r, 600)); [...document.querySelectorAll('button')].find(b => b.textContent.includes('Nouvelle équipe')).click(); return 1; })()" },
   { nom: "fenetre-dossier-demande", ancre: "#capitainerie/recrutement", geste: CLIQUER_LIGNE("Demande à lire") },

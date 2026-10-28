@@ -235,6 +235,8 @@ export async function editer(a, preremplir) {
   const objetApercu = () => ({
     id: a ? a.id : "apercu", membre: v.membre || { id: v.membre_id, nom: "", avatar: "" }, roblox: v.roblox, surnom: v.surnom, prime: v.prime, niveau: v.niveau,
     grade: v.grade, statut: v.statut, attributs: v.attributs, notes: v.notes,
+    //  27/10/2026 : le grade montré vient du rang de son membre (hierarchie.py) — tant que c'est le même membre.
+    rang: a && a.rang !== undefined && a.membre && String(a.membre.id || "") === String(v.membre_id || "") ? a.rang : undefined,
   });
   const majApercu = () => remplacer(apercu, affiche(objetApercu(), cat, { taille: "grande" }));
   const changer = (k, x) => { v[k] = x; modifie = true; garder(); majApercu(); };
@@ -286,7 +288,8 @@ export async function editer(a, preremplir) {
       champ("Surnom", surnom, { optionnel: true })),
     h("fieldset", { classe: "cadre pile serree bloc-form" }, h("legend", { classe: "cadre-titre" }, "La prime et le rang"),
       h("div", { classe: "champs" }, champ("Prime (en berrys)", primeE, { aide: primeLue }), champ("Niveau", niveau)),
-      h("div", { classe: "champs" }, gradeC, statut))]);
+      h("div", { classe: "champs" }, gradeC, statut),
+      v.membre_id ? h("p", { classe: "aide" }, "Membre lié : le grade montré vient de son rang (L'Équipage › Équipage › Hiérarchie). Ce grade écrit reste gardé.") : null)]);
   // Les insignes : un bloc par type du catalogue (sauf le grade, choisi au-dessus)
   const reglagesMetiers = await charger("metiers_reglages").catch(() => null);
   const maxMetiers = reglagesMetiers && !reglagesMetiers.erreur ? Math.max(1, Math.min(5, Number(reglagesMetiers.max_metiers) || 0)) || null : null;

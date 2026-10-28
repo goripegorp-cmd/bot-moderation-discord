@@ -95,6 +95,7 @@ _log = print
 _actions_staff = None
 _verrou = None
 _metiers = None                 # le module des rôles de métier du clan, une fois branché (`brancher_metiers`)
+_hierarchie = None              # 27/10/2026 : la hiérarchie de l'équipage (`hierarchie.py`) — le rang montré sur l'affiche
 _cat: dict = {"types": None, "elements": None}
 _appels_roblox: list = []
 
@@ -102,11 +103,19 @@ _appels_roblox: list = []
 def setup(*, get_db, log=None, actions_staff=None):
     """`actions_staff(guild_id, auteur_id, cible_id, action, detail, surface=)` (async, facultatif) : la trace
     des rôles donnés ou retirés dans l'historique du staff."""
-    global _get_db, _log, _actions_staff, _metiers
+    global _get_db, _log, _actions_staff, _metiers, _hierarchie
     _get_db, _log, _actions_staff = get_db, log or print, actions_staff
     _metiers = None                 # rebranché par `metiers.setup` (son étape vient après celle-ci au démarrage)
+    _hierarchie = None              # rebranchée par `hierarchie.setup` (son étape vient après celle-ci)
     _cat.update(types=None, elements=None)
     _appels_roblox.clear()
+
+
+def brancher_hierarchie(module) -> None:
+    """La hiérarchie de l'équipage (`hierarchie.setup` l'appelle) : chaque affiche dit le rang de son membre lié (`rang`) ;
+    son grade écrit reste tel quel (une affiche sans membre lié le montre toujours). None la débranche."""
+    global _hierarchie
+    _hierarchie = module
 
 
 def brancher_metiers(module) -> None:
@@ -636,6 +645,13 @@ def _avatar_roblox(roblox_id) -> str:
 
 
 def _sortie_affiche(g, a: dict) -> dict:
+    sortie = _sortie_affiche_seule(g, a)
+    if _hierarchie is not None and _hierarchie.connu(g):
+        sortie["rang"] = _hierarchie.rang_affiche(g, a)   # le rang montré (None : sans membre lié, le grade écrit)
+    return sortie
+
+
+def _sortie_affiche_seule(g, a: dict) -> dict:
     m = g.get_member(int(a["membre_id"])) if a["membre_id"] else None
     return {"id": a["id"],
             "membre": {"id": str(a["membre_id"] or ""), "nom": m.display_name if m else a["membre_nom"],
@@ -726,6 +742,8 @@ def _titre(a: dict) -> str:
 
 async def _route_affiches(g, auteur, requete, corps):
     """`GET rell/affiches` → `{"affiches": [...], "corbeille": [...], "stats": {...}}`."""
+    if _hierarchie is not None:
+        await _hierarchie.assurer(g)   # le rang de chaque membre lié, lu avant les affiches
     toutes = await _affiches(g.id)
     actives = [a for a in toutes if not a["retire_le"]]
     corbeille = [a for a in toutes if a["retire_le"]]
@@ -753,6 +771,8 @@ async def _route_affiche_lire(g, auteur, requete, corps):
     a = await _affiche(g.id, ident)
     if a is None:
         return 404, {"erreur": "Affiche introuvable."}
+    if _hierarchie is not None:
+        await _hierarchie.assurer(g)
     async with _get_db() as db:
         async with db.execute("SELECT quand, par, action, changements FROM rell_affiches_historique WHERE guild_id=?"
                               " AND affiche_id=? ORDER BY id DESC LIMIT ?", (g.id, ident, HISTORIQUE)) as cur:
@@ -853,6 +873,8 @@ async def _route_affiche(g, auteur, requete, corps):
             nouvelle = await _affiche(g.id, ident)
     except Invalide as ex:
         return 400, ex.corps()
+    if _hierarchie is not None:
+        _hierarchie.affiches_changees(g.id)   # son grade écrit peut donner un rang (la reprise des anciens grades)
     rep = {"ok": True, "affiche": _sortie_affiche(g, nouvelle),
            "_journal": {"texte": f"Affiche « {_titre(nouvelle)} » {'créée' if deja is None else 'modifiée'}",
                         "membre_id": nouvelle["membre_id"],
@@ -892,6 +914,8 @@ async def _route_affiche_retirer(g, auteur, requete, corps):
             await _noter_historique(db, g.id, ident, auteur.id, "retiree", [], t)
             await db.commit()
         a = await _affiche(g.id, ident)
+    if _hierarchie is not None:
+        _hierarchie.affiches_changees(g.id)
     return 200, {"ok": True, "affiche": _sortie_affiche(g, a),
                  "_journal": {"texte": f"Affiche « {_titre(a)} » mise à la corbeille", "membre_id": a["membre_id"]}}
 
@@ -920,6 +944,8 @@ async def _route_affiche_restaurer(g, auteur, requete, corps):
             await _noter_historique(db, g.id, ident, auteur.id, "restauree", [], t)
             await db.commit()
         a = await _affiche(g.id, ident)
+    if _hierarchie is not None:
+        _hierarchie.affiches_changees(g.id)
     return 200, {"ok": True, "affiche": _sortie_affiche(g, a),
                  "_journal": {"texte": f"Affiche « {_titre(a)} » restaurée", "membre_id": a["membre_id"]}}
 

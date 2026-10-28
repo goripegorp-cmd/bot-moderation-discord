@@ -12,6 +12,7 @@ import { E, T, lire, ouvrirAffiche, detailsAffiche, catalogue, afficheParId, ran
 import * as accueil from "./equipage_accueil.js";
 import { rendreMur } from "./equipage_mur.js";
 import { rendreEquipes, sectionMonEquipe, avecEquipes } from "./equipage_equipes.js";
+import { rendreHierarchie, titreHierarchie } from "./hierarchie.js";
 import { boutonLienEquipage } from "./lien_equipage.js";
 
 /** La version des fichiers : celle de la balise <script> de cette page (s/equipage.js?v=…), posée par le serveur. */
@@ -154,12 +155,20 @@ ecouter("equipage:rendre", () => { if (courant === "accueil") rendre(); });
 
 // ═══ L'ÉQUIPAGE : toutes les affiches, par métier (equipage_mur.js, le même mur que la vitrine publique) ═════
 function rendreEquipage(corps) {
-  if (!avecEquipes()) { rendreMur(corps, { cle: "site-equipage" }); return; }
-  //  27/10/2026 : les équipes du clan (le chef mis en avant), ou toutes les affiches par métier.
-  const f = filtres("site-equipage-vue", { vue: "equipes" });
+  //  27/10/2026 : les équipes du clan (le chef mis en avant), la hiérarchie (les rangs), ou toutes les affiches.
+  const vues = [avecEquipes() ? ["equipes", libelle("site.equipes.titre", "Les équipes")] : null,
+    E.equipage && E.equipage.hierarchie ? ["hierarchie", titreHierarchie()] : null, ["affiches", "Toutes les affiches"]].filter(Boolean);
+  if (vues.length === 1) { rendreMur(corps, { cle: "site-equipage" }); return; }
+  const f = filtres("site-equipage-vue", { vue: vues[0][0] });
+  if (!vues.some(([k]) => k === f.vue)) f.vue = vues[0][0];
   const zone = h("div", { classe: "pile" });
-  const dessiner = () => { remplacer(zone); if (f.vue === "affiches") rendreMur(zone, { cle: "site-equipage" }); else rendreEquipes(zone, { cle: "site-equipes" }); };
-  ajouter(corps, [segment(f.vue, [["equipes", libelle("site.equipes.titre", "Les équipes")], ["affiches", "Toutes les affiches"]], (v) => { f.vue = v; dessiner(); }, "Afficher"), zone]);
+  const dessiner = () => {
+    remplacer(zone);
+    if (f.vue === "affiches") rendreMur(zone, { cle: "site-equipage" });
+    else if (f.vue === "hierarchie") rendreHierarchie(zone, { cle: "site-hierarchie" });
+    else rendreEquipes(zone, { cle: "site-equipes" });
+  };
+  ajouter(corps, [segment(f.vue, vues, (v) => { f.vue = v; dessiner(); }, "Afficher"), zone]);
   dessiner();
 }
 /** Après un réglage de la direction (une affiche retirée de la vitrine, ou remise) : le mur se redessine. */

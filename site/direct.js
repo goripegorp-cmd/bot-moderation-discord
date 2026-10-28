@@ -58,7 +58,7 @@ const LECTURE = new Set(["autre", "rendu", "relecture", "libre"]);
 const SOUS = { questionnaire: "Questionnaire", "en-cours": "En cours", decidees: "Décidées", composer: "Composer", brouillons: "Brouillons",
   "a-venir": "À venir", passes: "Passés", questions: "Questions", idees: "Idées", droits: "Droits des salons", sondages: "Sondages",
   entraide: "Entraide", annonces: "Annonces", candidatures: "Candidatures", chefs: "Chefs d'équipe", reglages: "Réglages", publiees: "Publiées",
-  fiches: "Fiches techniques", equipes: "Équipes", normaux: "Tickets normaux", clan: "Clan · RELL Seas", textes: "Textes & noms", nettoyage: "Nettoyage",
+  fiches: "Fiches techniques", equipes: "Équipes", hierarchie: "Hiérarchie", normaux: "Tickets normaux", clan: "Clan · RELL Seas", textes: "Textes & noms", nettoyage: "Nettoyage",
   avis: "Idées & sondages" };
 // Les jeux de données que relit une page quand quelqu'un d'autre écrit (« ecrit »).
 const JEUX = { affiche: ["affiches"], "affiche-membre": ["affiches"], element: ["catalogue"], catalogue: ["catalogue"], question: ["banque"],

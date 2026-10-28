@@ -9,6 +9,7 @@ import { filtres, libelle } from "./noyau.js";
 import { vide, groupe, liste, recherche, avatar } from "./ui.js";
 import { affiche, nomAffiche, gradeDe, portrait } from "./affiche.js";
 import { E, ouvrirAffiche, afficheParId, catalogue, sceau } from "./equipage_commun.js";
+import { pastilleRang, rangLu } from "./hierarchie.js";
 
 const L = (cle, defaut) => libelle("site.equipes." + cle, defaut);
 export const nomChef = () => L("chef", "Chef d'équipe");
@@ -33,7 +34,8 @@ function personne(p) {
   if (a) return h("div", { classe: "affiche-case" }, affiche(a, catalogue(), { taille: "mini", clic: () => ouvrirAffiche(a.id) }));
   if (!p || !p.nom) return null;
   return h("div", { classe: "membre-sans-affiche" }, avatar({ nom: p.nom, avatar: p.avatar }, "g"),
-    h("span", { classe: "membre-sans-affiche-nom" }, sansEmoji(p.nom)), h("span", { classe: "membre-sans-affiche-sous" }, "Pas encore d'affiche"));
+    h("span", { classe: "membre-sans-affiche-nom" }, sansEmoji(p.nom)), pastilleRang(rangLu(p.rang)),   // son rang (27/10/2026)
+    h("span", { classe: "membre-sans-affiche-sous" }, "Pas encore d'affiche"));
 }
 
 /** Le corps d'une équipe : le chef à part, mis en avant (insigne, titre, métier, affiche), puis ses membres. */
@@ -131,7 +133,7 @@ function hierarchie(equipes, sans) {
     const a = afficheDe(x.p);
     const src = a ? srcSure(portrait(a)) : "";
     const visuel = src ? h("img", { classe: "avatar p", src, alt: "", loading: "lazy", decoding: "async" }) : avatar({ nom: nomDe(x.p), avatar: x.p.avatar }, "p");
-    const grade = a ? gradeDe(a, cat) : "";
+    const grade = a ? gradeDe(a, cat) : ((rangLu(x.p.rang) || {}).nom || "");
     const contenu = [h("span", { classe: "hierarchie-rang num" }, String(i + 1)), visuel,
       h("span", { classe: "hierarchie-texte" }, h("b", {}, nomDe(x.p)),
         h("span", { classe: "hierarchie-sous" }, [x.chef ? nomChef() + (x.e.type && x.e.type.genre === "metier" ? " · " + x.e.type.nom : "") : grade,

@@ -285,7 +285,7 @@ def test_S2_les_lectures_nettoient_tout_ce_qu_une_affiche_ne_montre_pas(local):
             assert interdit not in tout, f"{interdit} sort dans les lectures de l'équipage"
     _st, eq = local.lire("equipage", local.kolax)
     t = next(x for x in eq["affiches"] if x["roblox"]["nom"] == "Tortuga_RS")
-    assert set(t) == {"id", "membre", "roblox", "surnom", "prime", "niveau", "grade", "statut", "attributs"}
+    assert set(t) == {"id", "membre", "roblox", "surnom", "prime", "niveau", "grade", "statut", "attributs", "rang"}
     assert set(t["membre"]) == {"nom", "avatar"} and set(t["roblox"]) == {"nom", "avatar"}
     assert t["prime"] == 13_000 and t["surnom"] == "La Tortue"
     #  L'historique d'une affiche (adresse de la direction) : refusé à l'équipage.

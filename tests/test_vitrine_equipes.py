@@ -93,10 +93,10 @@ def test_V2_seulement_des_champs_publics(local):
     import site_equipage
     d = _donnees(local)
     assert set(d) == {"serveur", "clan", "textes", "libelles", "affiches", "catalogue", "accueil", "equipes", "maintenant",
-                      "version"}
+                      "version", "hierarchie"}
     assert d["affiches"], "le mur n'est pas vide"
     for a in d["affiches"]:
-        assert set(a) == {"id", "roblox", "surnom", "prime", "niveau", "grade", "statut", "attributs"}, a
+        assert set(a) == {"id", "roblox", "surnom", "prime", "niveau", "grade", "statut", "attributs", "rang"}, a
         assert set(a["roblox"]) == {"nom", "avatar"} and (not a["roblox"]["avatar"] or MIEN_JETON.match(a["roblox"]["avatar"]))
         assert re.fullmatch(r"[A-Za-z0-9_-]{12}", a["id"]), "un jeton, jamais l'identifiant de l'affiche"
     tout = "\n".join(_chaines(d))
@@ -468,12 +468,12 @@ def test_E3_ce_que_l_equipage_lit_hierarchie_et_mon_equipe(local):
         {"id": cuistots["id"], "role": "membre"}
     sans = local.entrer("/tableau/demo?qui=equipage&id=1004")[0]
     assert local.lire("equipage", sans)[1]["mon_equipe"] is None
-    assert any(p["nom"] for p in d["sans_equipe"]) and all(set(p) == {"nom", "avatar", "affiche", "h"} for p in d["sans_equipe"])
+    assert any(p["nom"] for p in d["sans_equipe"]) and all(set(p) == {"nom", "avatar", "affiche", "h", "rang"} for p in d["sans_equipe"])
     #  Aucun identifiant de membre dans ce que lit l'équipage.
     for e in d["equipes"]:
         for p in [e["chef"], *e["membres"]]:
             if p:
-                assert set(p) == {"nom", "avatar", "affiche", "h"}, p
+                assert set(p) == {"nom", "avatar", "affiche", "h", "rang"}, p
 
 
 def test_E4_la_hierarchie_existante():
