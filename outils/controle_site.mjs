@@ -301,6 +301,9 @@ const SCENES = [
   //  27/10/2026 : le type du catalogue dans une liste (plus de rangée de dix-huit onglets).
   { nom: "capitainerie-catalogue-type", ancre: "#capitainerie/catalogue", geste: CHOISIR_LISTE("Type", "Métiers"), apres: CHOISIR_LISTE("Type", "Tous les types") },
   { nom: "capitainerie-roles", ancre: "#capitainerie/roles" },
+  //  28/10/2026 : les places par métier (le métier se choisit au ticket), dans « Les réglages » des rôles.
+  { nom: "capitainerie-roles-places", ancre: "#capitainerie/roles", interdits: ["undefined", "NaN"],
+    geste: "(async () => { for (let i = 0; i < 30 && !document.querySelector('details.groupe-reglages'); i++) await new Promise(r => setTimeout(r, 200)); const d = document.querySelector('details.groupe-reglages'); if (!d) throw new Error('réglages absents'); d.open = true; await new Promise(r => setTimeout(r, 500)); const p = document.querySelector('.places-metiers'); if (!p) throw new Error('places absentes'); p.scrollIntoView({ block: 'center' }); return 1; })()" },
   // Les fenêtres (pancartes)
   { nom: "fenetre-fiche", ancre: "#port/sanctions", geste: CLIQUER_LIGNE("") },
   // La fiche descendue jusqu'à ses onglets : jamais écrasés sous « Agir » (le contrôle « rangée écrasée » le vérifie).
