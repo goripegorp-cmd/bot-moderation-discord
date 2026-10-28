@@ -130,6 +130,7 @@ import candidature_site  # 26/10/2026 : le questionnaire en ligne du candidat (s
 import annonces_modifiables  # 26/10/2026 : une annonce publiée, modifiée EN PLACE depuis le site de l'équipage (la tête)
 import textes  # 26/10/2026 : les textes du bot et les noms du site, réécrits par la direction (Textes & noms)
 import offtopic_filter as offtopic_filter  # politique/religion/militantisme (anti-FP gaming)
+import sujets_interdits as sujets_interdits  # religion, politique, extrémisme : texte ET GIF (27/10/2026)
 import trust_system as trust_system  # confiance progressive des nouveaux + liens/invitations
 import behavior_guard as behavior_guard  # anti-crash (zalgo/invisible) + spam inter-salons + anti-automation
 import ocr_scan as ocr_scan  # OCR anti-scam image — sans effet si tesseract absent
@@ -5574,6 +5575,44 @@ def _msg_url_slugs(text):
     return ' '.join(out)
 
 
+def _gif_texte(msg, ct: str = "") -> str:
+    """Le texte d'un GIF ou d'un lien : les mots de l'adresse (Tenor, Giphy…) et le titre / la description de ses
+    aperçus (27/10/2026 : « GIF insultants bloqués : lien, titre »). FAIL-SAFE → ""."""
+    morceaux = [_msg_url_slugs(ct)]
+    try:
+        for emb in (getattr(msg, 'embeds', None) or []):
+            for x in (getattr(emb, 'title', None), getattr(emb, 'description', None)):
+                if x:
+                    morceaux.append(str(x)[:300])
+    except Exception:
+        pass
+    return " ".join(m for m in morceaux if m).strip()
+
+
+def _sujet_interdit(c, texte: str, msg=None) -> str:
+    """« catégorie · terme » d'un sujet interdit (religion, politique, extrémisme) dans le texte, ses liens ou ses
+    GIF ; "" sinon. L'ancien lexique des slogans d'abord, puis `sujets_interdits` (texte, puis GIF : le titre
+    désigne l'image). Réglages : clé `sujets_interdits` de la configuration. FAIL-SAFE → ""."""
+    try:
+        t = offtopic_filter.scan(texte, _normalize_for_scan(texte))
+        if t:
+            return "politique · " + str(t)[:60]
+    except Exception:
+        pass
+    try:
+        reglages = (c or {}).get('sujets_interdits') if isinstance(c, dict) else None
+        v = sujets_interdits.juger(texte, reglages=reglages)
+        if not v:
+            gif = _gif_texte(msg, texte) if msg is not None else _msg_url_slugs(texte)
+            if gif:
+                v = sujets_interdits.juger(gif, gif=True, reglages=reglages)
+        if v:
+            return f"{v['categorie']} · {v['terme']}"[:80]
+    except Exception:
+        pass
+    return ""
+
+
 # ═══════════════ RAFALE D'INFRACTIONS → EXCLUSION 1 H ═══════════════
 # Quelqu'un qui enchaîne des infractions AUTOMATIQUES en quelques secondes = signature d'un BOT,
 # d'un compte PIRATÉ ou d'un RAID → exclusion temporaire d'une heure et alerte. Le ban (2026-06-26)
@@ -5787,6 +5826,29 @@ async def _ocr_scam_check(msg, immune: bool = False, lire=None):
                 if not immune:
                     await _offense_tick(msg.guild, msg.author, msg.channel)
                 return
+            #  27/10/2026 : le texte écrit DANS l'image ou le GIF — une insulte grave, du validisme ou un sujet interdit
+            #  retirent l'image (le journal le dit) ; aucune sanction sur une lecture d'image.
+            if not immune and text and len(text.strip()) >= 3:
+                try:
+                    _cfg_img = await cfg(msg.guild.id)
+                    _lu = ""
+                    if _cfg_img.get('anti_insults', 1):
+                        _niv, _mot = insult_filter.scan(text, lg=insult_filter.langue(text, "en"))
+                        if _niv >= 3:
+                            _lu = "insulte · " + str(_mot)
+                        elif insult_filter.ableist_hit(text):
+                            _lu = "validisme · " + str(insult_filter.ableist_hit(text))
+                    if not _lu and _cfg_img.get('anti_offtopic', 1):
+                        _lu = _sujet_interdit(_cfg_img, text)
+                    if _lu:
+                        try:
+                            await msg.delete()
+                        except discord.HTTPException:
+                            pass
+                        await send_log(msg.guild, 'anti_badwords', msg.author, msg, "Texte interdit dans une image", f"||{_lu[:60]}||")
+                        return
+                except Exception as ex:
+                    _logerr("ocr.texte", ex, guild_id=msg.guild.id)
             # Routine (caché sauf DIAG_VERBOSE=1) : prouve que le scan a TOURNÉ et ce qu'il a lu.
             try:
                 diag.trace("security", "ocr_scan",
@@ -15430,7 +15492,7 @@ async def _texte_refuse_pour(g, texte: str, dans: str = "un sondage", ton: str =
     norm = _normalize_for_scan(texte)
     if c.get('anti_insults', 1) and insult_filter.scan(texte, norm)[0] >= 2:
         return f"{ton} contient une insulte."
-    if c.get('anti_offtopic', 1) and offtopic_filter.scan(texte, norm):
+    if c.get('anti_offtopic', 1) and _sujet_interdit(c, texte):
         return "Politique, religion et militantisme n'ont pas leur place ici."
     return ""
 
@@ -25122,7 +25184,7 @@ async def _scan_security_on_edit(after) -> bool:
         # — OFF-TOPIC (politique / religion / militantisme) —
         if c.get('anti_offtopic', 1):
             try:
-                _ot = offtopic_filter.scan(ct, _normalize_for_scan(ct))
+                _ot = _sujet_interdit(c, ct, after)
             except Exception:
                 _ot = None
             if _ot:
@@ -25134,6 +25196,8 @@ async def _scan_security_on_edit(after) -> bool:
                     _ots = _register_protection_strike(guild.id, author.id, 'offtopic')
                 except Exception:
                     _ots = 1
+                if _ot.startswith("extremisme"):   # la plus grave : la pause tout de suite
+                    _ots = max(_ots, 3)
                 if _ots >= 3:
                     try:
                         await author.timeout(timedelta(minutes=5),
@@ -26435,10 +26499,10 @@ async def on_message(msg):
                 _ilvl, _iterm = 0, None
             # Rien dans le texte PARLÉ → regarder le GIF/lien (slug), jaugé différemment.
             if _ilvl == 0:
-                _slug = _msg_url_slugs(ct)
+                _slug = _gif_texte(msg, ct)
                 if _slug:
                     try:
-                        _slvl, _sterm = insult_filter.scan(_slug)
+                        _slvl, _sterm = insult_filter.scan(_slug, lg=insult_filter.langue(_slug, "en"))
                     except Exception:
                         _slvl, _sterm = 0, None
                     if _slvl >= 3:
@@ -26655,7 +26719,7 @@ async def on_message(msg):
         # salons immunisés/tickets déjà exclus. FAIL-SAFE.
         if c.get('anti_offtopic', 1):
             try:
-                _ot = offtopic_filter.scan(ct, _normalize_for_scan(ct))
+                _ot = _sujet_interdit(c, ct, msg)
             except Exception:
                 _ot = None
             if _ot:
@@ -26667,6 +26731,8 @@ async def on_message(msg):
                     _ots = _register_protection_strike(msg.guild.id, msg.author.id, 'offtopic')
                 except Exception:
                     _ots = 1
+                if _ot.startswith("extremisme"):   # la plus grave : la pause tout de suite
+                    _ots = max(_ots, 3)
                 if _ots >= 3:
                     try:
                         await msg.author.timeout(
