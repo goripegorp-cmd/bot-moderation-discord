@@ -603,7 +603,7 @@ SITE_CATEGORIES = (
 #  et ses deux vues, les vues d'Équipage, les onglets de Réglages.
 SITE_SOUS = (
     ("port", "tickets", (("tous", "Tous"), ("normaux", "Tickets normaux"), ("clan", "Clan · RELL Seas"))),
-    ("port", "salons", (("questions", "Questions"), ("avis", "Idées & sondages"), ("idees", "Idées"), ("sondages", "Sondages"),
+    ("port", "salons", (("questions", "Réponses du bot"), ("avis", "Idées & sondages"), ("idees", "Idées"), ("sondages", "Sondages"),
                         ("entraide", "Entraide & trade"), ("annonces", "Annonces"), ("droits", "Droits des salons"))),
     ("equipage", "membres", (("presence", "Présence"), ("fiches", "Fiches techniques"), ("equipes", "Équipes"),
                              ("hierarchie", "Hiérarchie"))),

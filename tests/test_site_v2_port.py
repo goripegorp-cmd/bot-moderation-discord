@@ -66,7 +66,7 @@ def _corps_de_la_page() -> dict:
 def test_P1_chaque_action_de_la_page_existe_et_chaque_champ_est_lu():
     bot = _actions_du_bot()
     page = _corps_de_la_page()
-    assert len(page) >= 18, sorted(page)
+    assert len(page) >= 17, sorted(page)   # 28/10/2026 : « question » (traitée / ignorée) a quitté la page — le bot répond
     for nom, champs in page.items():
         assert nom in bot, f"action inconnue du bot : {nom}"
         source = ast.unparse(_fonction(bot[nom]))

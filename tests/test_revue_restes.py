@@ -55,7 +55,7 @@ def test_X3_le_demarrage_par_etapes_une_erreur_n_arrete_pas_les_suivantes():
     etapes = [n for n in boot.body if isinstance(n, _ast.With)]
     noms = [_ast.unparse(n.items[0].context_expr) for n in etapes]
     assert len(etapes) >= 30 and all(x.startswith("_Etape(") for x in noms)
-    for module in ("cadeaux", "annonces", "sondages", "entraide", "tableau", "recrutements", "faq", "vocaux"):
+    for module in ("cadeaux", "annonces", "sondages", "entraide", "tableau", "recrutements", "reponses", "vocaux"):
         assert f"_Etape('{module}')" in noms, module
     hors = [_ast.unparse(n) for n in boot.body if not isinstance(n, (_ast.With, _ast.AsyncFunctionDef, _ast.FunctionDef))
             and not (isinstance(n, _ast.Expr) and isinstance(n.value, _ast.Constant))]
