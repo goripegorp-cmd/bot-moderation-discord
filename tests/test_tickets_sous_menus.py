@@ -29,11 +29,23 @@ def _classes(conf: dict, affiches: list):
         affiches.append(vue)
     ns = {"discord": discord, "Button": Button, "LayoutView": LayoutView, "Palette": Palette, "visuels": visuels,
           "v2_title": title, "v2_body": body, "v2_subtitle": subtitle, "v2_container": container,
-          "cfg": cfg, "db_set": db_set, "_afficher_panneau": afficher, "PanelEditViewV2": object, "AddQModal": object}
+          "cfg": cfg, "db_set": db_set, "_afficher_panneau": afficher, "PanelEditViewV2": object, "AddQModal": object,
+          "tickets_interdits": Obj(noter=_noter, apres_levee=_levee)}
     for n in ARBRE.body:
         if isinstance(n, ast.ClassDef) and n.name in ("PanelBlacklistView", "PanelQsView"):
             exec(ast.unparse(n), ns)  # noqa: S102 — code du dépôt
     return ns
+
+
+NOTES, LEVEES = [], []
+
+
+async def _noter(g, uid, pids, **k):
+    NOTES.append((uid, list(pids), k.get("source")))
+
+
+async def _levee(g, auteur, uid, pids, source=""):
+    LEVEES.append((uid, list(pids), source))
 
 
 def _membre(uid, admin=False, bot=False):
@@ -65,12 +77,16 @@ def test_T1_liste_noire_en_v2_avec_pages_ajout_et_retrait():
 
     async def suivre(_m, **k):
         pass
-    i = Obj(followup=Obj(send=suivre))
+    i = Obj(followup=Obj(send=suivre), user=Obj(id=5))
     sel = Obj(values=[_membre(7), _membre(8, admin=True), _membre(9, bot=True)])
     asyncio.run(vue._cb_ajout(i, sel))
     assert conf["ticket_panels"]["p1"]["blacklist"][-1] == 7 and 8 not in conf["ticket_panels"]["p1"]["blacklist"]
     asyncio.run(vue._cb_retrait(i, Obj(values=["100", "101"])))
     assert 100 not in conf["ticket_panels"]["p1"]["blacklist"] and len(conf["ticket_panels"]["p1"]["blacklist"]) == 11
+    #  28/10/2026 (défaut connu) : /configure note l'interdiction sur la fiche, et un retrait lève la liste noire du
+    #  recrutement (tickets_interdits.apres_levee), comme /mod ticketblacklist.
+    assert NOTES[-1] == (7, ["p1"], "configure")
+    assert sorted(x[0] for x in LEVEES[-2:]) == [100, 101] and all(x[1:] == (["p1"], "configure") for x in LEVEES[-2:])
     asyncio.run(vue.render_to(object(), confirmer=True))
     assert "Oui, retirer les 11" in _textes(affiches[-1])
 

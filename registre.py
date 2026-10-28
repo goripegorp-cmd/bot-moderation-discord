@@ -31,7 +31,7 @@ PLAFOND_BRUIT = 100_000   # au-delà, messages et vocal partent d'abord (les plu
 BRUIT = ("Messages", "Vocal")
 GRAVITES = {"mod.warn": 1, "mod.mute": 2, "mod.timeout": 2, "mod.kick": 3, "mod.ban": 3,
             "sec.spam": 1, "sec.badword": 1, "sec.link": 1, "sec.invite": 1, "sec.mention": 1,
-            "sec.image": 1, "sec.alt": 1, "sec.toxicite": 1, "sec.qrcode": 2, "sec.escalation": 2,
+            "sec.image": 1, "sec.alt": 1, "sec.profil": 1, "sec.toxicite": 1, "sec.qrcode": 2, "sec.escalation": 2,
             "sec.raid": 3, "sec.phishing": 3, "sec.scam": 3, "sec.nsfw": 3}
 #  Les mêmes purges servent au grand nettoyage hebdomadaire (`data_cleanup`) et, ici, toutes
 #  les PURGE_TOUTES écritures : la rétention est tenue au jour près, sans attendre dimanche.

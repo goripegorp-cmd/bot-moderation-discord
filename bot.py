@@ -4146,16 +4146,14 @@ async def _flag_dangerous_profile(member, *, on_join=False):
                 pass
         if not flags:
             return
+        #  28/10/2026, le fondateur : « les comptes doubles… ça crée des gros warnings dans un salon et ça spamme tout ».
+        #  Ce n'est qu'un signal (aucune sanction) : il va au journal du site, sur la fiche du membre — plus une alerte
+        #  « escalade » postée dans Discord à chaque arrivée d'un ancien sanctionné.
         try:
-            await ulogger2026.log_event(
-                bot, member.guild, ulogger2026.EventType.SEC_ESCALATION,
-                description=(
-                    f"🔎 **Profil à surveiller** — {member.mention} `{member.id}` "
-                    f"({'arrivée' if on_join else 'changement de nom'})\n"
-                    + "\n".join(f"• {f}" for f in flags)
-                    + "\n_Aucune sanction automatique — à toi de vérifier et de décider._"),
-                user=member,
-            )
+            await _au_journal(member.guild, "Sécurité", "sec.profil",
+                              f"Profil à surveiller : {member} ({'arrivée' if on_join else 'changement de nom'})",
+                              membre_id=member.id, detail=" · ".join(re.sub(r"[*|`]", "", f) for f in flags)[:300],
+                              gravite=1)
         except Exception as ex:
             print(f"[_flag_dangerous_profile alert] {ex}")
     except Exception as ex:
@@ -4863,6 +4861,26 @@ async def _badword_strike(msg, c):
         print(f"[BadwordStrike] outer error: {ex}")
         import traceback; traceback.print_exc()
 
+_CARTES_PROTECTION: dict = {}   # (serveur, protection, membre) → dernière carte ; (serveur, protection) → [instants]
+
+
+def _carte_protection_permise(gid: int, key: str, uid: int, t: float | None = None) -> bool:
+    """FONCTION (mémoire bornée) : une carte de protection au salon ? Une par (protection, membre) toutes les 10
+    minutes, 6 par protection et par serveur en 5 minutes."""
+    t = time.time() if t is None else t
+    if len(_CARTES_PROTECTION) > 5000:
+        _CARTES_PROTECTION.clear()
+    if t - _CARTES_PROTECTION.get((gid, key, int(uid or 0)), -1e12) < 600:
+        return False
+    recents = [x for x in _CARTES_PROTECTION.get((gid, key), []) if t - x < 300]
+    if len(recents) >= 6:
+        _CARTES_PROTECTION[(gid, key)] = recents
+        return False
+    _CARTES_PROTECTION[(gid, key)] = recents + [t]
+    _CARTES_PROTECTION[(gid, key, int(uid or 0))] = t
+    return True
+
+
 async def send_log(g, key, m, msg, reason, extra=None):
     """Envoie un log détaillé dans le salon configuré.
 
@@ -4910,6 +4928,10 @@ async def send_log(g, key, m, msg, reason, extra=None):
         c = await cfg(g.id)
         ch = None if c.get('logs_sur_site_v1') else g.get_channel(c.get(f'log_{key}', 0))
         if not ch: return
+        #  28/10/2026 : pas de rafale — la même protection pour le même membre une fois par 10 minutes, et 6 cartes au
+        #  plus par protection en 5 minutes (un raid ne noie plus le salon ; le salon unifié et le site gardent tout).
+        if not _carte_protection_permise(g.id, key, getattr(m, 'id', 0)):
+            return
         
         # Couleurs par type de protection
         colors = {
@@ -4976,8 +4998,9 @@ async def send_log(g, key, m, msg, reason, extra=None):
         elif key == 'anti_compromised':
             action_taken = c.get('compromised_action', 'mute')
         
-        action_emoji = {'delete': '🗑️', 'mute': '🔇', 'kick': '👢', 'ban': '🔨'}.get(action_taken, '⚡')
-        e.add_field(name="Action", value=f"{action_emoji} {action_taken.upper()}", inline=True)
+        #  28/10/2026 : plus de champ « Action » — il montrait le RÉGLAGE (« MUTE ») même quand seul le message était
+        #  retiré ; la raison dit ce qui a été fait.
+        _ = action_taken
         
         # Raison détaillée
         e.add_field(name="⚠️ Raison", value=reason[:1024], inline=False)
@@ -11866,6 +11889,26 @@ async def save_ban_info(guild_id, user_id, username, avatar_hash, reason):
             await db.commit()
     except Exception as ex:
         print(f"[ALT] Erreur save ban: {ex}")
+
+_ALT_ALERTES: dict = {}   # (serveur, compte principal) → dernière ligne postée ; serveur → [instants]
+
+
+def _alt_alerte_permise(gid: int, main_id: int, t: float | None = None) -> bool:
+    """FONCTION (mémoire bornée) : une ligne au salon pour ce compte principal ? Une par jour et par compte principal, 3
+    par serveur en 10 minutes."""
+    t = time.time() if t is None else t
+    if len(_ALT_ALERTES) > 5000:
+        _ALT_ALERTES.clear()
+    if t - _ALT_ALERTES.get((gid, int(main_id or 0)), -1e12) < 86400:
+        return False
+    recents = [x for x in _ALT_ALERTES.get(gid, []) if t - x < 600]
+    if len(recents) >= 3:
+        _ALT_ALERTES[gid] = recents
+        return False
+    _ALT_ALERTES[gid] = recents + [t]
+    _ALT_ALERTES[(gid, int(main_id or 0))] = t
+    return True
+
 
 async def detect_alt_account(guild, new_member):
     """
@@ -21587,14 +21630,17 @@ class PanelBlacklistView(LayoutView):
         await _afficher_panneau(self, i, edit)
 
     async def _cb_ajout(self, i, sel):
-        liste, refuses = await self._liste(), []
+        liste, refuses, ajoutes = await self._liste(), [], []
         for m in sel.values:
             if (getattr(m, "bot", False) or m.id == self.g.owner_id
                     or getattr(getattr(m, "guild_permissions", None), "administrator", False)):
                 refuses.append(m.mention)
             elif m.id not in liste:
                 liste.append(m.id)
+                ajoutes.append(m.id)
         await self._ecrire(liste)
+        for uid in ajoutes:   # 28/10/2026 : qui, depuis quand — lu sur sa fiche (le site), comme /mod ticketblacklist
+            await tickets_interdits.noter(self.g, uid, [self.pid], par=i.user.id, source="configure")
         await self.render_to(i, edit=True)
         if refuses:
             await i.followup.send(f"Jamais sur la liste noire (administration ou bot) : {', '.join(refuses)}",
@@ -21603,6 +21649,10 @@ class PanelBlacklistView(LayoutView):
     async def _cb_retrait(self, i, sel):
         retirer = {int(v) for v in sel.values}
         await self._ecrire([uid for uid in await self._liste() if uid not in retirer])
+        #  28/10/2026 (défaut connu) : retiré d'un panneau du clan par /configure → sa liste noire du recrutement est
+        #  levée aussi, et le décor de sa fiche suit (comme /mod ticketblacklist remove).
+        for uid in retirer:
+            await tickets_interdits.apres_levee(self.g, i.user, uid, [self.pid], source="configure")
         await self.render_to(i, edit=True)
 
 
@@ -24536,19 +24586,16 @@ async def on_member_join(m):
                 await _au_journal(m.guild, "Sécurité", "sec.alt",
                                   f"Compte secondaire présumé : {m} · ressemble à {main_txt} · confiance {confidence} %",
                                   membre_id=m.id, detail=" · ".join(str(r) for r in reasons[:5]), gravite=1)
-                log_ch = m.guild.get_channel(c.get('log_anti_alt', 0))
-                if log_ch:
-                    e = discord.Embed(
-                        title="COMPTE SECONDAIRE DÉTECTÉ !",
-                        description=f"**Compte secondaire:** {m.mention} (`{m.id}`)\n**Compte principal:** {main_txt}\n**Confiance:** {confidence}%",
-                        color=0xE74C3C
-                    )
-                    e.add_field(name="Raisons", value="\n".join([f"• {r}" for r in reasons[:5]]), inline=False)
-                    e.add_field(name="Action auto", value="✅ Activée" if auto_action else "❌ Désactivée", inline=True)
-                    e.set_thumbnail(url=m.display_avatar.url if m.display_avatar else None)
-                    e.timestamp = now()
-                    await log_ch.send(view=carte_embed(e, _vue_alerte(m.id)),
-                                      allowed_mentions=discord.AllowedMentions.none())
+                #  28/10/2026, le fondateur : « les comptes doubles… ça crée des gros warnings dans un salon et ça spamme
+                #  tout ». Le journal du site garde chaque détection ; le salon reçoit UNE ligne courte, au plus une par
+                #  compte principal et par jour, et 3 par serveur en 10 minutes (un raid ne noie plus le salon) ; rien
+                #  quand les journaux vivent sur le site.
+                log_ch = None if c.get('logs_sur_site_v1') else m.guild.get_channel(c.get('log_anti_alt', 0))
+                if log_ch and _alt_alerte_permise(m.guild.id, main_id):
+                    await log_ch.send(view=_vue_ticket_message(
+                        f"👥 **Compte secondaire présumé** : {m.mention} · ressemble à {main_txt} · confiance {confidence} %"
+                        f"\n-# {' · '.join(str(r) for r in reasons[:3])[:300]}", Palette.WARNING),
+                        allowed_mentions=discord.AllowedMentions.none())
                 
                 # Appliquer l'action automatique si activée
                 if auto_action:
