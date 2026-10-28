@@ -11,6 +11,7 @@ import { E, T, sceau } from "./equipage_commun.js";
 import * as accueil from "./equipage_accueil.js";
 import { rendreMur } from "./equipage_mur.js";
 import { rendreEquipes, avecEquipes } from "./equipage_equipes.js";
+import { rendreHierarchie, titreHierarchie } from "./hierarchie.js";
 import { boutonLienEquipage } from "./lien_equipage.js";
 
 /** La version des fichiers : celle de la balise <script> de cette page (s/vitrine.js?v=…), posée par le serveur. */
@@ -38,7 +39,7 @@ async function demarrer() {
   E.peutEditer = false;
   E.modeEdition = false;
   E.equipage = { affiches: d.affiches || [], catalogue: d.catalogue || { types: [], elements: [] }, moi: null,
-    equipes: d.equipes || [], sans_equipe: [] };
+    equipes: d.equipes || [], sans_equipe: [], hierarchie: d.hierarchie || null };
   E.accueil = d.accueil || { blocs: [], donnees: {} };
   monterEntete(d);
   rendre();
@@ -91,12 +92,21 @@ function rendre() {
     ajouter(zone, [h("p", { classe: "vitrine-phrase" }, T("vitrine.phrase", "Les avis de recherche de tout l'équipage, rangés par métier."))]);
     rendreMur(zone, { cle: "vitrine-equipage", vide: [T("vitrine.vide", "Les avis de recherche arrivent bientôt."), ""] });
   };
-  if (!avecEquipes()) { murSeul(mur); return; }
-  //  Les équipes du clan, leurs chefs mis en avant (par les seules affiches de la vitrine) — ou toutes les affiches.
-  const f = filtres("vitrine-vue", { vue: "equipes" });
+  //  Les équipes du clan, leurs chefs mis en avant (par les seules affiches de la vitrine), la hiérarchie (27/10/2026 :
+  //  les rangs, par les affiches montrées) — ou toutes les affiches.
+  const vues = [avecEquipes() ? ["equipes", libelle("site.equipes.titre", "Les équipes")] : null,
+    E.equipage.hierarchie ? ["hierarchie", titreHierarchie()] : null, ["affiches", "Toutes les affiches"]].filter(Boolean);
+  if (vues.length === 1) { murSeul(mur); return; }
+  const f = filtres("vitrine-vue", { vue: vues[0][0] });
+  if (!vues.some(([k]) => k === f.vue)) f.vue = vues[0][0];
   const zone = h("div", { classe: "pile" });
-  const dessiner = () => { remplacer(zone); if (f.vue === "affiches") murSeul(zone); else rendreEquipes(zone, { cle: "vitrine-equipes" }); };
-  remplacer(mur, segment(f.vue, [["equipes", libelle("site.equipes.titre", "Les équipes")], ["affiches", "Toutes les affiches"]], (v) => { f.vue = v; dessiner(); }, "Afficher"), zone);
+  const dessiner = () => {
+    remplacer(zone);
+    if (f.vue === "affiches") murSeul(zone);
+    else if (f.vue === "hierarchie") rendreHierarchie(zone, { cle: "vitrine-hierarchie" });
+    else rendreEquipes(zone, { cle: "vitrine-equipes" });
+  };
+  remplacer(mur, segment(f.vue, vues, (v) => { f.vue = v; dessiner(); }, "Afficher"), zone);
   dessiner();
 }
 

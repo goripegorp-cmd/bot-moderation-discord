@@ -584,7 +584,7 @@ SITE_CATEGORIES = (
         ("salons", "Salons & questions", "Questions, idées, sondages, entraide, annonces, et ce que chacun peut faire "
                                          "dans chaque salon."))),
     ("equipage", "L'Équipage", "Équipage", "Clan GoRP", (
-        ("membres", "Équipage", "Les membres du clan : leur présence, leurs fiches techniques, leurs équipes."),
+        ("membres", "Équipage", "Les membres du clan : leur présence, leurs fiches techniques, leurs équipes, leur rang."),
         ("annonces", "Annonces & événements", "Composer pour le salon Info : événements avec minuteur et réponses, "
                                                "annonces, métiers, listing."))),
     ("capitainerie", "La Capitainerie", "Capitainerie", "Fondateur & direction", (
@@ -605,7 +605,8 @@ SITE_SOUS = (
     ("port", "tickets", (("tous", "Tous"), ("normaux", "Tickets normaux"), ("clan", "Clan · RELL Seas"))),
     ("port", "salons", (("questions", "Questions"), ("avis", "Idées & sondages"), ("idees", "Idées"), ("sondages", "Sondages"),
                         ("entraide", "Entraide & trade"), ("annonces", "Annonces"), ("droits", "Droits des salons"))),
-    ("equipage", "membres", (("presence", "Présence"), ("fiches", "Fiches techniques"), ("equipes", "Équipes"))),
+    ("equipage", "membres", (("presence", "Présence"), ("fiches", "Fiches techniques"), ("equipes", "Équipes"),
+                             ("hierarchie", "Hiérarchie"))),
     ("capitainerie", "recrutement", (("candidatures", "Candidatures"), ("chefs", "Chefs d'équipe"), ("questions", "Questions"),
                                      ("reglages", "Réglages"))),
     ("equipage", "annonces", (("composer", "Composer"), ("brouillons", "Brouillons"), ("a_venir", "À venir"),

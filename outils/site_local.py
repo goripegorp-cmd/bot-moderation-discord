@@ -463,6 +463,11 @@ async def construire(dossier: Path | None = None, port: int = PORT, qui: int = F
         tableau.monter(annonces_modifiables)
     tableau.monter_equipage(site_equipage.LECTURES, medias=site_equipage.medias_permis)
     zones.brancher_site_equipage(site_equipage.section_guide)   # sa ligne dans le guide du clan de démonstration
+    #  La hiérarchie de l'équipage (27/10/2026), comme l'étape « hierarchie » du bot (après celle des affiches).
+    import hierarchie
+    hierarchie.setup(get_db=get_db, cfg=cfg, log=print)
+    await hierarchie.init_db()
+    tableau.monter(hierarchie)
     #  Le site sur plusieurs années (26/10/2026), comme l'étape « longevite » du bot : la suite des listes, les règles
     #  de nettoyage de chaque famille, les orphelins, l'état du stockage.
     import longevite
@@ -481,6 +486,7 @@ async def construire(dossier: Path | None = None, port: int = PORT, qui: int = F
                                   direction=DIRECTION)
     await _candidature_demo(get_db, g, ticket_ouvert)
     await _equipage_demo(g)
+    await _hierarchie_demo(g)
     if not await zones.assurer_guide_clan(g):   # le guide du clan posé une première fois (son message d'ouverture)
         print("[SITE LOCAL] guide du clan non posé")
     if lourd:
@@ -1186,6 +1192,19 @@ async def _evenements_demo(ev, g, clan_r, get_db) -> None:
     c = await publier(c) if c else None
     if c:
         await ev.annuler(g, chef, c["id"], prevenir=False)
+
+
+async def _hierarchie_demo(g) -> None:
+    """La hiérarchie de démonstration : les rangs de départ (posés par le VRAI module), un Charpentier et un Corsaire
+    nommés par la vraie adresse. Le Commandant et la Vigie restent à nommer (le parcours de la hiérarchie le fait)."""
+    import hierarchie
+    chef = g.get_member(FONDATEUR)
+    if await hierarchie.assurer(g) is None:
+        return
+    for membre, rang in ((1006, "charpentier"), (1007, "corsaire")):   # Ishmael, Tortuga
+        st, rep = await hierarchie._route_attribuer(g, chef, {}, {"membre": str(membre), "rang": rang, "version": 0})
+        if st != 200:
+            print(f"[SITE LOCAL] rang de démonstration refusé : {rep}")
 
 
 async def _equipage_demo(g) -> None:

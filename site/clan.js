@@ -16,6 +16,8 @@ import { affiche, afficheVierge, nomAffiche, metiersDe, gradeDe, insigneImage } 
 import { ligne, lignes, groupes, outilsGroupes, badgeRestreint, avance } from "./rangement.js";
 import { avecVerrou } from "./direct.js";
 import { vueParEquipe } from "./equipes_admin.js";
+import { vueHierarchie, lireHierarchie, pastilleRangMembre, rangDuMembre, rangsLus } from "./hierarchie_admin.js";
+import { sceauRang } from "./hierarchie.js";
 
 const resetPages = (p) => { for (const k of Object.keys(etat.pages)) if (k.startsWith(p)) delete etat.pages[k]; };
 
@@ -23,16 +25,17 @@ const resetPages = (p) => { for (const k of Object.keys(etat.pages)) if (k.start
 // 27/10/2026 : « Équipage » est UNE liste et ses trois vues, un sous-onglet chacune — Présence (#equipage/membres),
 // Fiches techniques (…/fiches : l'ancienne rubrique) et Équipes (…/equipes : l'ancien « Par équipe ») ; on passe de
 // l'une à l'autre sans quitter la page (la recherche, les tuiles et « Ajouter au clan » restent).
-export const VUES_EQUIPAGE = nommerOnglets("site.sous.equipage.membres", [["presence", "Présence", "membres"], ["fiches", "Fiches techniques", "fiches"], ["equipes", "Équipes", "equipage"]]);
+export const VUES_EQUIPAGE = nommerOnglets("site.sous.equipage.membres", [["presence", "Présence", "membres"], ["fiches", "Fiches techniques", "fiches"], ["equipes", "Équipes", "equipage"], ["hierarchie", "Hiérarchie", "grade"]]);
 const vueEquipage = (sous) => (VUES_EQUIPAGE.some(([k]) => k === sous) ? sous : "presence");
 export function membres(vue, ctx = {}) {
   const f = filtres("clan", { q: "", rang: "tous", ajout: "" });
   let v = vueEquipage(ctx.sous);
-  let fic = null;   // la vue « Fiches techniques » : son contrôleur (fiches())
+  let fic = null;   // la vue « Fiches techniques » (ou « Hiérarchie », 27/10/2026) : son contrôleur
   const onglets = h("div", { classe: "sous-onglets", role: "tablist", "aria-label": "L'équipage" });
   const haut = h("div", { classe: "pile" }), resultats = h("div", { classe: "pile" }), bas = h("div", { classe: "pile" });
   const lot = h("div", { classe: "lot-hote" });
   const changer = () => { resetPages("clan"); if (fic) fic.chercher(); else majResultats(); };
+  lireHierarchie().then(() => { if (!fic && resultats.isConnected) majResultats(); });   // le rang de chacun sur sa ligne
   const champRecherche = recherche(f.q, "Rechercher un membre ou un identifiant…", (q) => { f.q = q; changer(); });
   const copierListe = bouton("Copier la liste", { icone: "copier", classe: "avance", onclick: () => {
     const l = (etat.d && etat.d.clan && etat.d.clan.membres) || [];
@@ -53,6 +56,10 @@ export function membres(vue, ctx = {}) {
       etat.selection.clear();
       remplacer(lot); remplacer(bas); remplacer(resultats);
       fic = fiches(resultats, { q: () => f.q, outils: (commandes) => outils.append(...commandes) });
+    } else if (v === "hierarchie") {
+      etat.selection.clear();
+      remplacer(lot); remplacer(bas); remplacer(resultats);
+      fic = vueHierarchie(resultats, { q: () => f.q });
     } else {
       fic = null;
       outils.append(copierListe);
@@ -157,8 +164,8 @@ function ligneClan(m, teinte, surSelection, badgeSup) {
   l = ligne({
     visuel: [coche, avatar(m, "p")], titre: nomDe(m), libelleOuvrir: "Ouvrir la fiche de " + nomDe(m), ouvrir: () => ouvrirFiche(m.id),
     sous: ["@" + m.pseudo, h("span", { classe: "ident" }, " · " + m.id), " · arrivé le " + m.arrivee],
-    badges: [badgeSup || null, m.jours !== "—" ? h("span", { classe: "jauge", vars: { "--teinte": teinte }, title: quantite(m.jours, "jour(s) actif(s)") + " sur 7" }, Array.from({ length: 7 }, (_, k) => h("i", { classe: k < presents ? "on" : "" }))) : null,
-      pastilleRappel(m.rappel), badgeRestreint(m.id), pastille(m.statut, teinte)], maxBadges: badgeSup ? 5 : 4,
+    badges: [badgeSup || null, pastilleRangMembre(m.id), m.jours !== "—" ? h("span", { classe: "jauge", vars: { "--teinte": teinte }, title: quantite(m.jours, "jour(s) actif(s)") + " sur 7" }, Array.from({ length: 7 }, (_, k) => h("i", { classe: k < presents ? "on" : "" }))) : null,
+      pastilleRappel(m.rappel), badgeRestreint(m.id), pastille(m.statut, teinte)], maxBadges: badgeSup ? 6 : 5,
     date: m.derniere, dateTitre: "Dernière activité : " + m.derniere,
     actions: [peutAgir() ? { icone: "supprimer", libelle: "Retirer du clan", danger: true, reseau: true, onclick: () => agir({ action: "clan_retirer", membre: m.id }, "Retirer " + nomDe(m) + " du clan ?", "Seul le rôle du clan lui est retiré, sur Discord.", {}, "Retirer du clan", "danger") } : null],
     classe: etat.selection.has(m.id) ? "choisie" : "", donnees: { membre: m.id },
@@ -236,6 +243,7 @@ export function fiches(vue, o) {
   let pret = false;
   const maj = async () => {
     const [cat, aff] = [await charger("catalogue"), await charger("affiches")];
+    if (f.vue === "grade") await lireHierarchie();
     if (!resultats.isConnected) return;
     if (!etat.d || !etat.d.clan) { remplacer(resultats, indisponible()); return; }
     if (!aff || aff.erreur) { remplacer(resultats, vide("Affiches indisponibles", aff && aff.erreur, "hors_ligne")); return; }
@@ -266,17 +274,22 @@ export function fiches(vue, o) {
         contenu: () => paginer("fic-az-" + l, g, rendre, { classe: "grille affiches", pas: 18 }) })), { ouverts: equipage.length <= 40 ? parL.size : 1, forcer: !!q() }));
     } else {
       const t = f.vue === "metier" ? typeMetier(cat) : typeGrade(cat);
+      //  27/10/2026 : « Par grade » suit la hiérarchie — le rang de chacun (hierarchie_admin.js), dans l'ordre des rangs.
+      const rangs = f.vue === "grade" ? rangsLus() : [];
+      const rang = (k) => rangs.find((r) => r.id === k) || null;
       const parCle = new Map();
       for (const x of equipage) {
-        const cles = !x.a ? ["__sans"] : f.vue === "metier" ? (metiersDe(x.a, cat).length ? metiersDe(x.a, cat) : ["__aucun"]) : [x.a.grade || "__aucun"];
+        const cles = !x.a ? ["__sans"] : f.vue === "metier" ? (metiersDe(x.a, cat).length ? metiersDe(x.a, cat) : ["__aucun"])
+          : [(rangs.length ? rangDuMembre(x.m.id) : x.a.grade) || "__aucun"];
         for (const k of cles) { if (!parCle.has(k)) parCle.set(k, []); parCle.get(k).push(x); }
       }
-      const ordre = t ? elementsDe(cat, t.cle).map((e) => e.cle) : [];
+      const ordre = rangs.length ? rangs.map((r) => r.id) : t ? elementsDe(cat, t.cle).map((e) => e.cle) : [];
       const cles = [...parCle.keys()].sort((a, b) => (a.startsWith("__") - b.startsWith("__")) || ((ordre.indexOf(a) + 1 || 999) - (ordre.indexOf(b) + 1 || 999)) || a.localeCompare(b));
       ajouter(zone, groupes(cles.map((k) => {
-        const e = t && !k.startsWith("__") ? element(cat, t.cle, k) : null;
-        const titre = k === "__sans" ? "Sans affiche" : k === "__aucun" ? (f.vue === "metier" ? "Sans métier" : "Sans grade") : e ? e.nom : sansEmoji(k);
-        return { titre, compte: parCle.get(k).length, visuel: e ? insigneImage(e, "groupe-visuel") : null, icone: !e ? (k === "__sans" ? "plume" : "drapeau") : null, cle: "fic-" + f.vue + "-" + k,
+        const r = rang(k);
+        const e = !r && t && !k.startsWith("__") ? element(cat, t.cle, k) : null;
+        const titre = k === "__sans" ? "Sans affiche" : k === "__aucun" ? (f.vue === "metier" ? "Sans métier" : "Sans grade") : r ? sansEmoji(r.nom) : e ? e.nom : sansEmoji(k);
+        return { titre, compte: parCle.get(k).length, visuel: r ? sceauRang(r, "groupe-visuel") : e ? insigneImage(e, "groupe-visuel") : null, icone: !e && !r ? (k === "__sans" ? "plume" : "drapeau") : null, cle: "fic-" + f.vue + "-" + k,
           contenu: () => (k === "__sans" ? lignes("fic-" + f.vue + "-" + k, parCle.get(k), ligneSans) : paginer("fic-" + f.vue + "-" + k, parCle.get(k), rendre, { classe: "grille affiches", pas: 18 })) };
       }), { ouverts: cles.length <= 3 ? cles.length : 2, forcer: !!q() }));
     }

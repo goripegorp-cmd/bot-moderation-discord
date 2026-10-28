@@ -32,7 +32,7 @@ export const CATEGORIES = [
   {
     cle: "equipage", titre: "L'Équipage", court: "Équipage", sous: "Clan GoRP", icone: "equipage",
     rubriques: [
-      { cle: "membres", titre: "Équipage", icone: "membres", phrase: "Les membres du clan : leur présence, leurs fiches techniques, leurs équipes." },
+      { cle: "membres", titre: "Équipage", icone: "membres", phrase: "Les membres du clan : leur présence, leurs fiches techniques, leurs équipes, leur rang." },
       { cle: "annonces", titre: "Annonces & événements", icone: "annonces", phrase: "Composer pour le salon Info : événements avec minuteur et réponses, annonces, métiers, listing." },
     ],
   },
@@ -177,7 +177,7 @@ export function lireAncre() {
   const membre = params.get("membre") || "";
   const ancien = params.get("onglet") || "";
   const recrutement = params.get("recrutement") || "";   // « Choisir sur le site » (Discord) : le dossier de ce ticket
-  return { cat, rub, sous: morceaux[2] || "", membre: /^\d{5,22}$/.test(membre) ? membre : "", ancien,
+  return { cat, rub, sous: morceaux[2] || "", membre: /^\d{1,22}$/.test(membre) ? membre : "", ancien,
     recrutement: /^\d{1,12}$/.test(recrutement) ? recrutement : "", alias: morceaux !== bruts };
 }
 export function ancre(cat, rub, sous, extra) {

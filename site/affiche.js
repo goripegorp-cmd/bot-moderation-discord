@@ -44,6 +44,9 @@ export function insignes(a, cat) {
   return out;
 }
 export function gradeDe(a, cat) {
+  //  27/10/2026 : le grade montré vient du RANG du membre lié (hierarchie.py) — rien s'il a quitté le clan ; une affiche
+  //  sans membre lié (`rang` null ou absent) garde son grade écrit.
+  if (a.rang && typeof a.rang === "object") return sansEmoji(a.rang.nom || "");
   if (!a.grade) return "";
   const t = typeGrade(cat);
   const e = t ? element(cat, t.cle, a.grade) : null;

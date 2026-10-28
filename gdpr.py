@@ -110,6 +110,8 @@ DELETE_SUBJECT_KEEP_ACTOR = {
     "recrutement_chefs": {"subject": ["membre_id"], "actor": ["accepte_par"]},
     # 27/10/2026 — les interdictions de tickets (la fiche d'une personne) : qui, depuis quand, pourquoi, par qui
     "tickets_interdictions": {"subject": ["membre_id"], "actor": ["par"]},
+    # 27/10/2026 — la hiérarchie de l'équipage : son rang part avec lui ; qui l'a nommé est neutralisé ailleurs
+    "hierarchie_membres": {"subject": ["membre_id"], "actor": ["maj_par"]},
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -138,6 +140,9 @@ ANONYMIZE = {
     "equipage_vitrine": {"ids": ["maj_par"], "redact": []},
     # 27/10/2026 — les équipes du clan : chef effacé (l'équipe reste, sans chef), auteur neutralisé
     "equipes": {"ids": ["chef_id", "maj_par"], "redact": []},
+    # 27/10/2026 — la hiérarchie : les rangs et la reprise des anciens grades restent, leur auteur est neutralisé
+    "hierarchie_rangs": {"ids": ["maj_par"], "redact": []},
+    "hierarchie_reprise": {"ids": ["maj_par"], "redact": []},
     # 26/10/2026 — Textes & noms : qui a réécrit un texte (le texte reste, l'auteur est neutralisé)
     "site_textes": {"ids": ["maj_par"], "redact": []},
     # 26/10/2026 — recrutement configurable : qui a réglé un parcours, une question ou un rôle de chef

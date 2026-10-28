@@ -219,6 +219,9 @@ ACCES_STATIQUES = {
                #  27/10/2026 : les bannières, et le petit module des publications modifiables (son éditeur, annonces.js,
                #  n'est chargé qu'à la demande, par la tête : il reste à elle, comme l'adresse qui écrit).
                "banniere.js", "banniere.css", "equipage_publication.js",
+               #  27/10/2026 : la hiérarchie de l'équipage (son dessin, lu par la vitrine et le site de l'équipage ; son
+               #  éditeur, hierarchie_admin.js, reste à la tête).
+               "hierarchie.js", "hierarchie.css",
                #  26/10/2026 : la page du CANDIDAT (site/candidature.html) — son cookie est limité à `/tableau/candidature/` : son
                #  navigateur ne l'envoie jamais ici, ses deux fichiers propres sont donc publics (le reste qu'elle charge l'est
                #  déjà) ; la vue de la direction (candidature_direct.*) reste à la tête.

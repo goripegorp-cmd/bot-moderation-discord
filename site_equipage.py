@@ -46,6 +46,7 @@ from discord.ui import Button
 
 import affiches
 import diag
+import hierarchie
 import recrutements
 import rellseas_panneau
 import tableau
@@ -211,7 +212,7 @@ PAGE = tuple(f"{GROUPE}.{cle}" for cle, *_r in TEXTES
              if not cle.startswith(("lien.", "auto.", "vitrine.og.", "vitrine.banniere"))) + tuple(c for c, *_r in LIEN_PUBLIC) \
     + tuple(c for c, *_r in NOMS_EQUIPES)
 #  Les noms « site. » que les pages de l'équipage et la vitrine lisent par `libelle` (seulement ceux-là).
-PREFIXES_LIBELLES = ("site.affiche.", "site.equipage.", "site.equipes.")
+PREFIXES_LIBELLES = ("site.affiche.", "site.equipage.", "site.equipes.", "site.hierarchie.")
 
 
 def libelles_page(g) -> dict:
@@ -390,13 +391,17 @@ def _affiche_publique(g, a: dict, elements: dict) -> dict:
     Discord ou Roblox (le portrait seul, par son adresse)."""
     m = g.get_member(int(a["membre_id"])) if a["membre_id"] else None
     attributs = {t: [k for k in (cles or []) if (t, k) in elements] for t, cles in (a["attributs"] or {}).items()}
-    return {"id": a["id"],
-            "membre": {"nom": m.display_name if m is not None else (a["membre_nom"] or ""),
-                       "avatar": str(m.display_avatar.with_size(128).url) if m is not None else ""},
-            "roblox": {"nom": a["roblox_nom"] or "", "avatar": affiches._avatar_roblox(a["roblox_id"])},
-            "surnom": a["surnom"] or "", "prime": int(a["prime"] or 0), "niveau": int(a["niveau"] or 0),
-            "grade": a["grade"] or "", "statut": a["statut"] or "actif",
-            "attributs": {t: ks for t, ks in attributs.items() if ks}}
+    sortie = {"id": a["id"],
+              "membre": {"nom": m.display_name if m is not None else (a["membre_nom"] or ""),
+                         "avatar": str(m.display_avatar.with_size(128).url) if m is not None else ""},
+              "roblox": {"nom": a["roblox_nom"] or "", "avatar": affiches._avatar_roblox(a["roblox_id"])},
+              "surnom": a["surnom"] or "", "prime": int(a["prime"] or 0), "niveau": int(a["niveau"] or 0),
+              #  27/10/2026 : le grade montré vient du rang du membre lié (hierarchie.py) ; sans membre lié, le grade écrit.
+              "grade": hierarchie.grade_affiche(g, a), "statut": a["statut"] or "actif",
+              "attributs": {t: ks for t, ks in attributs.items() if ks}}
+    if hierarchie.connu(g):
+        sortie["rang"] = hierarchie.rang_affiche(g, a)
+    return sortie
 
 
 def _nom_affiche(g, a: dict) -> str:
@@ -738,9 +743,15 @@ async def analyses(g, maintenant: float | None = None, lignes=None, publications
     niveaux = [int(a["niveau"]) for a in lignes if int(a["niveau"] or 0) > 0]
     top = sorted((a for a in lignes if int(a["prime"] or 0) > 0), key=lambda a: (-int(a["prime"]), _cle_tri(g, a)))[:5]
     grade_t = _type_par(types, "grade", r"\bgrades?\b")
-    grades = Counter((a["grade"] or "").strip() for a in lignes if (a["grade"] or "").strip())
+    #  27/10/2026 : le grade montré (le rang du membre lié — hierarchie.py), rangé dans l'ordre de la hiérarchie.
+    st = await hierarchie.assurer(g)
+    place = {r["nom"]: n for n, r in enumerate(st["rangs"])} if st else {}
+    montres = [hierarchie.grade_affiche(g, a).strip() for a in lignes]
+    grades = Counter(x for x in montres if x)
 
     def nom_grade(k):
+        if k in place:
+            return k
         e = elements.get((grade_t, k)) if grade_t else None
         return e["nom"] if e else sans_emoji(k.replace("_", " ")).capitalize()
     statuts = Counter((a["statut"] or "actif") for a in lignes)
@@ -769,7 +780,7 @@ async def analyses(g, maintenant: float | None = None, lignes=None, publications
         "races": _repartition(lignes, _type_par(types, "race", r"\braces?\b"), elements),
         "factions": _repartition(lignes, _type_par(types, "faction", r"\bfactions?\b"), elements),
         "grades": sorted(({"cle": k, "nom": nom_grade(k), "n": n} for k, n in grades.items()),
-                         key=lambda r: (-r["n"], r["nom"].casefold())),
+                         key=lambda r: (place.get(r["cle"], len(place)), -r["n"], r["nom"].casefold())),
         "statuts": sorted(({"cle": k, "nom": STATUTS_AFFICHE.get(k, sans_emoji(k).capitalize() or "En service"), "n": n}
                            for k, n in statuts.items()), key=lambda r: (-r["n"], r["nom"].casefold())),
         "primes": {"total": sum(primes), "moyenne": round(sum(primes) / len(primes)) if primes else 0,
@@ -955,9 +966,13 @@ async def equipes_lues(g, lignes: list, *, publiques=None) -> dict:
     affiche_de = {int(a["membre_id"]): a for a in lignes if a["membre_id"]}
     clan = _membres_clan(await _role_clan(g))
     tous = {m.id: m for m in clan}
+    #  27/10/2026 : « le tri par hiérarchie suit l'ordre des rangs partout » — le rang (hierarchie.py) d'abord, puis la
+    #  hiérarchie d'avant (le grade du catalogue, la prime, le nom). Sans hiérarchie lue : comme avant.
+    avec_rangs = await hierarchie.assurer(g) is not None
     pour_tous = sorted({e["chef_id"] for e in equipes if e["chef_id"]} | {m for e in equipes for m in e["membres"]}
                        | (set(tous) if publiques is None else set()),
-                       key=lambda mid: cle_hierarchie(affiche_de.get(mid), _nom_membre(g, mid), rangs))
+                       key=lambda mid: (hierarchie.ordre_de(g, mid),
+                                        *cle_hierarchie(affiche_de.get(mid), _nom_membre(g, mid), rangs)))
     rang_de = {mid: n for n, mid in enumerate(pour_tous)}
 
     def personne(mid):
@@ -965,9 +980,13 @@ async def equipes_lues(g, lignes: list, *, publiques=None) -> dict:
         if publiques is not None:
             return {"affiche": publiques[a["id"]], "h": rang_de.get(mid, 0)} if a is not None and a["id"] in publiques else None
         m = tous.get(mid) or g.get_member(int(mid))
-        return {"nom": sans_emoji(m.display_name) if m is not None else "Membre parti",
-                "avatar": str(m.display_avatar.with_size(64).url) if m is not None else "",
-                "affiche": a["id"] if a is not None else None, "h": rang_de.get(mid, 0)}
+        p = {"nom": sans_emoji(m.display_name) if m is not None else "Membre parti",
+             "avatar": str(m.display_avatar.with_size(64).url) if m is not None else "",
+             "affiche": a["id"] if a is not None else None, "h": rang_de.get(mid, 0)}
+        if avec_rangs:   # son rang (l'identifiant d'un rang de `hierarchie`), aussi pour qui n'a pas d'affiche
+            r = hierarchie.rang_de(g, mid)
+            p["rang"] = r["id"] if r else ""
+        return p
     sortie, places, chefs = [], {}, {}
     for n, e in enumerate(equipes, start=1):
         membres = [p for p in (personne(m) for m in sorted(e["membres"], key=lambda mid: rang_de.get(mid, 0))) if p]
@@ -1131,6 +1150,7 @@ async def lecture_depart(g, membre, session: dict, requete: dict):
 async def lecture_equipage(g, membre, session: dict, requete: dict):
     """`GET equipage` : toutes les affiches (nettoyées), le catalogue qu'elles citent, et la mienne."""
     types, elements = await affiches._catalogue()
+    await hierarchie.assurer(g)   # 27/10/2026 : le rang de chacun, lu avant les affiches (leur grade montré en vient)
     lignes = sorted(await _affiches_actives(g), key=lambda a: _cle_tri(g, a))
     publiques = [_affiche_publique(g, a, elements) for a in lignes]
     cites = {(t, k) for a in publiques for t, ks in a["attributs"].items() for k in ks}
@@ -1150,8 +1170,14 @@ async def lecture_equipage(g, membre, session: dict, requete: dict):
     eq = await equipes_lues(g, lignes)
     mien = int(getattr(membre, "id", 0) or 0)
     mon = {"id": eq["places"][mien], "role": "chef" if mien in eq["chefs"] else "membre"} if mien in eq["places"] else None
+    #  La hiérarchie (27/10/2026) : chaque rang, dans l'ordre, et ses membres (lecture seule) ; le mien.
+    rangs = await hierarchie.vue_equipage(g, lignes)
+    if rangs is not None:
+        r = hierarchie.rang_de(g, mien) if mien else None
+        rangs["mon_rang"] = r["id"] if r else ""
     return 200, {
         "affiches": publiques, "moi": moi, **({"vitrine": vitrine} if vitrine is not None else {}),
+        **({"hierarchie": rangs} if rangs is not None else {}),
         "equipes": eq["equipes"], "sans_equipe": eq["sans_equipe"], "mon_equipe": mon,
         "catalogue": {
             "types": [{"cle": t["cle"], "nom": t["nom"], "ordre": int(t["ordre"]), "multiple": bool(t["multiple"]),

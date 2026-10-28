@@ -32,6 +32,7 @@ const SOUS = () => [["port", "salons", "questions", "Questions des salons"], ["p
   ["port", "tickets", "clan", "Tickets · " + nomDans(FAMILLES_TICKETS, "clan"), "tickets du clan"],
   ["equipage", "membres", "fiches", nomDans(VUES_EQUIPAGE, "fiches"), "fiches techniques affiches"],
   ["equipage", "membres", "equipes", "Équipes du clan", nomDans(VUES_EQUIPAGE, "equipes") + " chefs d'équipe"],
+  ["equipage", "membres", "hierarchie", nomDans(VUES_EQUIPAGE, "hierarchie"), "hiérarchie rangs grades capitaine second"],
   ["capitainerie", "reglages", "textes", nomDans(SOUS_REGLAGES, "textes"), "textes et noms renommer"],
   ["capitainerie", "reglages", "nettoyage", nomDans(SOUS_REGLAGES, "nettoyage"), "nettoyage ménage durées"],
   ["capitainerie", "reglages", "securite", nomDans(SOUS_REGLAGES, "securite"), "sécurité sessions appareils permissions"]];

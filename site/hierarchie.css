@@ -1,0 +1,122 @@
+/* La hiérarchie de l'équipage (27/10/2026) — l'organigramme (hierarchie.js), ses pastilles de rang, l'éditeur d'un
+   rang et la ligne « Rang » de la fiche (hierarchie_admin.js). La couleur de chaque rang arrive par --teinte (CSSOM).
+   Aucun style en ligne (CSP). */
+
+/* ─── Le sceau et la pastille d'un rang ───────────────────────────────── */
+.rang-sceau {
+  --teinte: #7a5a22; flex: none; display: grid; place-items: center; width: 38px; height: 38px; border-radius: 50%;
+  color: var(--clair);
+  background: radial-gradient(circle at 38% 32%, color-mix(in srgb, var(--teinte) 70%, #fff), var(--teinte) 55%, color-mix(in srgb, var(--teinte) 70%, #000));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--teinte) 28%, transparent), 0 1px 2px rgba(43, 29, 18, .4);
+}
+.rang-sceau .ic { width: 21px; height: 21px; color: var(--clair); }
+.rang-sceau.grand { width: 56px; height: 56px; }
+.rang-sceau.grand .ic { width: 31px; height: 31px; }
+.rang-sceau.groupe-visuel { width: 26px; height: 26px; }
+.rang-sceau.groupe-visuel .ic { width: 15px; height: 15px; }
+.rang-pastille {
+  --teinte: #7a5a22; display: inline-flex; align-items: center; gap: 5px; max-width: 100%; padding: 1px 9px 1px 6px;
+  border: 1px solid color-mix(in srgb, var(--teinte) 55%, transparent); border-left-width: 4px; border-radius: 3px;
+  background: color-mix(in srgb, var(--teinte) 12%, var(--papier-2)); color: var(--encre);
+  font: 700 13.5px/1.5 var(--police-sc); letter-spacing: .02em; white-space: nowrap; vertical-align: middle;
+}
+.rang-pastille > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.rang-pastille .ic { width: 15px; height: 15px; flex: none; color: color-mix(in srgb, var(--teinte) 85%, #000); }
+
+/* ─── L'organigramme ──────────────────────────────────────────────────── */
+.organigramme { display: grid; gap: 22px; min-width: 0; }
+.org-haut-zone { display: grid; justify-items: center; gap: 26px; min-width: 0; }
+.org-haut {
+  --teinte: #8e2a24; position: relative; display: grid; gap: 12px; width: min(100%, 620px); min-width: 0; padding: 16px 18px 18px;
+  border: 2px solid var(--teinte); border-radius: var(--rayon-2);
+  background: color-mix(in srgb, var(--teinte) 9%, var(--papier)); box-shadow: var(--ombre-papier), inset 0 0 0 1px rgba(43, 29, 18, .16);
+}
+.org-haut:not(:last-child)::after {   /* la corde qui relie le Capitaine à son Second */
+  content: ""; position: absolute; left: 50%; bottom: -28px; width: 3px; height: 26px; transform: translateX(-50%);
+  background: var(--corde-fonce); border-radius: 2px;
+}
+.org-haut.second { width: min(100%, 560px); }
+.org-ruban {
+  position: absolute; top: -13px; left: 50%; transform: translateX(-50%); max-width: 90%; padding: 2px 12px; border-radius: 2px;
+  background: var(--teinte); color: var(--clair); font: 700 13px/1.45 var(--police-sc); letter-spacing: .04em; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; box-shadow: 0 2px 3px rgba(43, 29, 18, .3);
+}
+.org-tete-rang { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 4px 12px; min-width: 0; }
+.org-tete-rang .org-outils { grid-column: 1 / -1; }
+.org-titre { display: grid; gap: 1px; min-width: 0; }
+.org-titre h3 { margin: 0; font: 400 26px/1.15 var(--police-titre); color: var(--encre); overflow-wrap: anywhere; }
+.org-haut .org-titre h3 { font-size: 30px; }
+.org-phrase { margin: 0; font: italic 400 15px/1.35 var(--police-texte); color: var(--encre-2); overflow-wrap: anywhere; }
+.org-compte {
+  display: grid; place-items: center; min-width: 34px; height: 34px; padding: 0 8px; border-radius: 17px;
+  background: color-mix(in srgb, var(--teinte) 16%, var(--papier-2)); border: 1px solid color-mix(in srgb, var(--teinte) 45%, transparent);
+  font: 700 16px/1 var(--police-chiffres); color: var(--encre);
+}
+.org-outils { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.org-paliers { display: grid; gap: 12px; min-width: 0; }
+.org-palier {
+  --teinte: #7a5a22; display: grid; gap: 10px; min-width: 0; padding: 12px 14px 14px; border: 1px solid var(--trait);
+  border-left: 6px solid var(--teinte); border-radius: var(--rayon); background: rgba(248, 240, 221, .72); box-shadow: var(--ombre-papier);
+}
+.org-palier.dernier { background: rgba(248, 240, 221, .5); }
+.org-gens { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 176px), 1fr)); gap: 8px; min-width: 0; }
+.org-gens.haut { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
+.org-membre {
+  display: grid; grid-template-columns: 40px minmax(0, 1fr); grid-template-rows: auto auto; align-items: center; column-gap: 9px;
+  min-width: 0; min-height: 50px; padding: 5px 10px 5px 6px; border: 1px solid var(--trait); border-radius: var(--rayon);
+  background: var(--papier-2); color: inherit; font: inherit; text-align: left;
+}
+.org-membre > img, .org-membre > .avatar { grid-row: 1 / span 2; }
+button.org-membre { cursor: pointer; }
+button.org-membre:hover { border-color: var(--trait-fort); background: #fbf5e6; }
+button.org-membre:focus-visible { outline: 3px solid var(--laiton); outline-offset: 2px; }
+.org-portrait { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; background: var(--parchemin-2); box-shadow: 0 0 0 2px color-mix(in srgb, var(--teinte, #7a5a22) 45%, transparent); }
+.org-nom { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 700 15px/1.3 var(--police-texte); color: var(--encre); }
+.org-sous { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: italic 400 13px/1.25 var(--police-texte); color: var(--encre-2); }
+.org-membre.grande { grid-template-columns: minmax(0, 1fr); justify-items: center; gap: 6px; width: 176px; padding: 10px 8px; text-align: center; }
+.org-membre.grande > img, .org-membre.grande > .avatar { grid-row: auto; }
+.org-membre.grande .org-portrait { width: 84px; height: 84px; }
+.org-membre.grande .org-nom { max-width: 100%; }
+.org-vacant, .org-note { margin: 0; font: italic 400 15px/1.4 var(--police-texte); color: var(--encre-2); }
+.org-haut .org-vacant, .org-haut .org-note { text-align: center; }
+.org-liste { margin: 0; }
+
+/* ─── L'éditeur d'un rang ─────────────────────────────────────────────── */
+.rang-apercu { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 8px 12px; border: 1px dashed var(--trait-fort); border-radius: var(--rayon); }
+.rang-apercu b { min-width: 0; overflow-wrap: anywhere; font: 400 26px/1.2 var(--police-titre); }
+.rang-choix { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.rang-choix > legend { width: 100%; margin-bottom: 4px; padding: 0; }
+.rang-option {
+  position: relative; display: grid; place-items: center; width: 46px; height: 46px; border: 1px solid var(--trait); border-radius: var(--rayon);
+  background: var(--papier-2); cursor: pointer;
+}
+.rang-option > input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.rang-option .ic { width: 26px; height: 26px; color: var(--encre); }
+.rang-option:has(input:checked) { border: 2px solid var(--encre); background: rgba(168, 130, 63, .2); }
+.rang-option:has(input:focus-visible) { outline: 3px solid var(--laiton); outline-offset: 2px; }
+.rang-goutte { --teinte: #7a5a22; width: 28px; height: 28px; border-radius: 50%; background: var(--teinte); box-shadow: inset 0 0 0 2px rgba(255, 244, 214, .35); }
+.rang-role { gap: 8px; }
+.rang-role h3 { margin: 0; }
+.rang-liste { display: grid; gap: 4px; }
+.rang-radio { display: grid; grid-template-columns: auto auto minmax(0, 1fr); align-items: center; gap: 10px; min-height: 46px; }
+.rang-radio > input { position: absolute; opacity: 0; }
+.rang-radio.inactif { opacity: .6; }
+
+/* ─── Les anciens grades, la ligne « Rang » de la fiche ───────────────── */
+.reprise-liste { display: grid; gap: 4px; }
+.reprise-ligne { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 6px 12px; padding: 6px 4px; border-bottom: 1px dotted var(--trait-fort); }
+.reprise-nom { display: grid; min-width: 0; }
+.reprise-nom b, .reprise-nom small { min-width: 0; overflow-wrap: anywhere; }
+.reprise-nom small { font-size: 13.5px; color: var(--encre-2); }
+.fiche-rang-h { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
+.fiche-rang-h .ic { width: 16px; height: 16px; }
+
+@media (max-width: 519px) {
+  .org-haut { padding: 16px 12px 14px; }
+  .org-titre h3 { font-size: 23px; }
+  .org-haut .org-titre h3 { font-size: 26px; }
+  .org-gens { grid-template-columns: repeat(auto-fill, minmax(min(100%, 140px), 1fr)); }
+  .org-membre.grande { width: 140px; }
+  .org-membre.grande .org-portrait { width: 70px; height: 70px; }
+  .reprise-ligne { grid-template-columns: minmax(0, 1fr); }
+}

@@ -121,6 +121,13 @@ REGISTRE = {"tete": frozenset(x.strip() for x in """
     POST direct/envoi
     GET direct/candidat
     GET equipage/equipes
+    GET equipage/hierarchie
+    POST equipage/hierarchie/attribuer
+    POST equipage/hierarchie/rang
+    POST equipage/hierarchie/rang/deplacer
+    POST equipage/hierarchie/rang/role
+    POST equipage/hierarchie/rang/supprimer
+    POST equipage/hierarchie/reprise
     POST equipage/equipe
     POST equipage/equipe/deplacer
     POST equipage/equipe/supprimer
@@ -209,6 +216,11 @@ REGISTRE = {"tete": frozenset(x.strip() for x in """
 LECTURES = {"accueil": "equipage", "depart": "equipage", "equipage": "equipage"}
 #  Les ÉQUIPES du clan (27/10/2026) : écrites par la tête seule ; la portée « equipage » reçoit 403 partout ici.
 EQUIPES = ("GET equipage/equipes", "POST equipage/equipe", "POST equipage/equipe/supprimer", "POST equipage/equipe/deplacer")
+#  La HIÉRARCHIE de l'équipage (27/10/2026, hierarchie.py) : lue et écrite par la tête seule ; « equipage » → 403 partout
+#  ici (l'équipage lit les rangs dans sa propre lecture `equipage`, la vitrine dans ses données publiques).
+HIERARCHIE = ("GET equipage/hierarchie", "POST equipage/hierarchie/rang", "POST equipage/hierarchie/rang/supprimer",
+              "POST equipage/hierarchie/rang/deplacer", "POST equipage/hierarchie/rang/role", "POST equipage/hierarchie/attribuer",
+              "POST equipage/hierarchie/reprise")
 #  Une publication modifiée depuis le site de l'équipage (27/10/2026, annonces_modifiables.py) : la tête seule —
 #  l'éditeur s'ouvre sur la page de l'équipage, mais l'adresse est celle de la direction ; « equipage » → 403.
 PUBLICATIONS = ("GET equipage/publication", "POST equipage/publication", "POST equipage/publication/apercu")
@@ -369,6 +381,7 @@ def test_A1_toute_adresse_du_serveur_est_declaree(local):
     import candidature_site
     assert (set(candidature_site.LECTURES), set(candidature_site.ECRITURES)) == (LECTURES_CANDIDAT, ECRITURES_CANDIDAT),         "lectures et écritures du candidat : les déclarer ici"
     assert set(EQUIPES) <= declares, "les équipes du clan sont dans le registre"
+    assert set(HIERARCHIE) <= declares, "la hiérarchie de l'équipage est dans le registre"
     #  Le site local monte EXACTEMENT les adresses du bot, plus sa seule entrée de démonstration.
     assert {(r.method, r.resource.canonical) for r in local.client.server.app.router.routes()
             if r.method in ("GET", "POST")} == routeur | DEMO
@@ -465,7 +478,7 @@ def test_A2_chaque_case_de_la_table(local, portees):
     #  de l'équipage : la tête seule, « equipage » → 403.
     recrutement = [a for a in sorted(set().union(*REGISTRE.values())) if a.split(" ", 1)[1].startswith(RECRUTEMENT)]
     assert len(recrutement) >= 30, len(recrutement)
-    for a in (*EQUIPES, *PUBLICATIONS, *recrutement, *NETTOYAGE, *MORCEAUX):
+    for a in (*EQUIPES, *HIERARCHIE, *PUBLICATIONS, *recrutement, *NETTOYAGE, *MORCEAUX):
         m, nom = a.split(" ", 1)
         st = statuts[(m, f"/tableau/espace/api/{nom}")]
         assert st["equipage"] == st["candidat"] == st["anonyme"] == 403 and st["tout"] not in (401, 403), (a, st)
@@ -629,7 +642,7 @@ def test_A5c_la_vitrine_ne_montre_que_des_champs_publics(local):
         if " " in nom.strip():
             assert nom not in tout, f"le nom Discord « {nom} » sort sur la vitrine"
     for a in d.get("affiches", []):
-        assert set(a) == {"id", "roblox", "surnom", "prime", "niveau", "grade", "statut", "attributs"}, sorted(a)
+        assert set(a) == {"id", "roblox", "surnom", "prime", "niveau", "grade", "statut", "attributs", "rang"}, sorted(a)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

@@ -124,6 +124,7 @@ import securite_site  # 26/10/2026 : la trace de ce que le site fait sur Discord
 import affiches  # le site, Capitainerie : catalogue RELL Seas, affiches, rôles des métiers
 import metiers  # les rôles de métier du clan : choisis dans le guide, créés au besoin, retirés en quittant le clan
 import site_equipage  # 26/10/2026 : le site de l'équipage — le clan en lecture seule, l'accueil composé par la direction
+import hierarchie  # 27/10/2026 : la hiérarchie de l'équipage — les rangs, leur attribution, leurs rôles Discord en option
 import longevite  # 26/10/2026 : le site sur plusieurs années — la suite des listes, une règle par famille, les orphelins
 import compactage  # 26/10/2026 : la base rend sa place au disque, la nuit (auto_vacuum incrémental)
 import candidature_site  # 26/10/2026 : le questionnaire en ligne du candidat (son lien, sa page) et son direct
@@ -22196,6 +22197,14 @@ async def _activite_boot():
         tableau.monter(annonces_modifiables)   # modifier une annonce publiée, en place, depuis l'accueil (la tête)
         tableau.monter_equipage(site_equipage.LECTURES, medias=site_equipage.medias_permis)
         zones.brancher_site_equipage(site_equipage.section_guide)
+    with _Etape("hierarchie"):
+        #  27/10/2026 : la hiérarchie de l'équipage — Capitaine (le fondateur) et Second (la direction) suivent TETE_IDS ;
+        #  les autres rangs s'attribuent par la tête (`/tableau/espace/api/equipage/hierarchie/…`), un rôle Discord en
+        #  option ; le rang montré sur les affiches, le site de l'équipage et la vitrine. Après « affiches » (son `setup`
+        #  défait le branchement) et « site_equipage ».
+        hierarchie.setup(get_db=get_db, cfg=cfg, log=print)
+        await hierarchie.init_db()
+        tableau.monter(hierarchie)
     with _Etape("longevite"):
         #  26/10/2026 : « est-ce qu'il peut tenir le coup sur plusieurs années ? » — la suite des longues listes (journal,
         #  tickets fermés, casier), une règle de nettoyage visible par famille, les fichiers orphelins, l'état du

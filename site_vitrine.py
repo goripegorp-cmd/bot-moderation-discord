@@ -39,6 +39,7 @@ from collections import OrderedDict
 
 import affiches
 import diag
+import hierarchie
 import site_equipage
 import tableau
 
@@ -202,6 +203,8 @@ async def _construire(g) -> dict:
         return s if FORMAT_STATIQUE.fullmatch(s) else ""
 
     ids = {a["id"]: _jeton("affiche", a["id"])[:12] for a in lignes}
+    #  27/10/2026 : la hiérarchie — le grade montré vient du rang du membre lié ; le rang (nom, couleur, insigne) est public.
+    avec_rangs = await hierarchie.assurer(g) is not None
     mur, portraits = [], {}
     for a in lignes:
         attributs = {ty: [k for k in (cles or []) if (ty, k) in elements] for ty, cles in (a["attributs"] or {}).items()}
@@ -210,8 +213,11 @@ async def _construire(g) -> dict:
             portraits[a["id"]] = tableau._chemin_media(f"avatar/{int(a['roblox_id'])}")[0]
         mur.append({"id": ids[a["id"]], "roblox": {"nom": site_equipage.sans_emoji(a["roblox_nom"])[:40], "avatar": avatar},
                     "surnom": site_equipage.sans_emoji(a["surnom"])[:60], "prime": int(a["prime"] or 0),
-                    "niveau": int(a["niveau"] or 0), "grade": str(a["grade"] or "")[:64],
+                    "niveau": int(a["niveau"] or 0), "grade": site_equipage.sans_emoji(hierarchie.grade_affiche(g, a))[:64],
                     "statut": str(a["statut"] or "actif")[:20], "attributs": {ty: ks for ty, ks in attributs.items() if ks}})
+        if avec_rangs:
+            r = hierarchie.rang_affiche(g, a)
+            mur[-1]["rang"] = None if r is None else dict(r, nom=site_equipage.sans_emoji(r["nom"])[:40])
     cites = {(ty, k) for x in mur for ty, ks in x["attributs"].items() for k in ks}
     grade_t = site_equipage._type_par(types, "grade", r"\bgrades?\b")
     if grade_t:
@@ -289,6 +295,10 @@ async def _construire(g) -> dict:
         "affiches": mur, "catalogue": catalogue, "accueil": {"blocs": sorties, "donnees": donnees_blocs}, "equipes": equipes,
         "maintenant": int(t), "version": tableau.version_page(),
     }
+    #  La hiérarchie : chaque rang et combien ils sont ; ses membres SEULEMENT par les affiches montrées ici (leurs jetons).
+    rangs = await hierarchie.vue_publique(g, lignes, ids) if avec_rangs else None
+    if rangs is not None:
+        donnees["hierarchie"] = rangs
 
     #  L'aperçu du lien (Discord, autres messageries) : le titre, la phrase, et ce que la bannière dessine.
     titre = site_equipage._t(g, f"{site_equipage.GROUPE}.titre")
@@ -310,7 +320,9 @@ async def _construire(g) -> dict:
             "mention": clan or titre,
             "affiches": [{"nom": _nom_public(a), "surnom": site_equipage.sans_emoji(a["surnom"])[:40],
                           "prime": int(a["prime"] or 0),
-                          "grade": noms_grades.get(a["grade"], site_equipage.sans_emoji(a["grade"]).capitalize())[:24],
+                          "grade": (site_equipage.sans_emoji(hierarchie.grade_affiche(g, a))
+                                    if avec_rangs and a["membre_id"] else
+                                    noms_grades.get(a["grade"], site_equipage.sans_emoji(a["grade"]).capitalize()))[:24],
                           "portrait": str(portraits.get(a["id"]) or "")} for a in top3],
         },
     }
