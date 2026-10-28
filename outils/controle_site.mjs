@@ -17,7 +17,7 @@
 //                                 --entree http://localhost:8790/tableau/demo   (pose la session d'abord)
 
 import { spawn } from "node:child_process";
-import { mkdirSync, writeFileSync, existsSync, rmSync, mkdtempSync } from "node:fs";
+import { mkdirSync, writeFileSync, existsSync, rmSync, mkdtempSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -31,7 +31,13 @@ const PORT = 9339 + Math.floor(Math.random() * 400);
 const NAVIGATEURS = [opt("navigateur", ""), process.env.CHROME || "",
   "C:/Program Files/Google/Chrome/Application/chrome.exe", "C:/Program Files (x86)/Google/Chrome/Application/chrome.exe",
   "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe", "C:/Program Files/Microsoft/Edge/Application/msedge.exe",
-  "C:/Program Files (x86)/Microsoft/EdgeCore/155.0.4283.62/msedge.exe", "/usr/bin/google-chrome", "/usr/bin/chromium"].filter(Boolean);
+  ...edgeCore(), "/usr/bin/google-chrome", "/usr/bin/chromium"].filter(Boolean);
+// Edge rangé par version (EdgeCore/<version>/msedge.exe) : la version change à chaque mise à jour, on la lit.
+function edgeCore() {
+  const dossier = "C:/Program Files (x86)/Microsoft/EdgeCore";
+  if (!existsSync(dossier)) return [];
+  return readdirSync(dossier).sort().reverse().map((v) => `${dossier}/${v}/msedge.exe`);
+}
 
 // Ouvrir le brouillon « Sortie en mer » (le vrai site local et la maquette en ont un) dans le composeur.
 const OUVRIR_BROUILLON = "[...document.querySelectorAll('article.evt-carte')].find(a => a.textContent.includes('Sortie en mer')).querySelector('.feuillet-pied button').click()";
@@ -482,7 +488,8 @@ const CONTROLE = `(() => {
   for (const el of zone.querySelectorAll("*")) {
     if (el.closest("svg")) continue;
     const cs = getComputedStyle(el);
-    if (cs.display === "none" || cs.visibility === "hidden") continue;
+    // Transparent (opacity 0) : rien ne se voit — la case d'un « choix-insigne » couvre sa carte pour le clic.
+    if (cs.display === "none" || cs.visibility === "hidden" || parseFloat(cs.opacity) === 0) continue;
     if (!el.matches(".monogramme") && cs.borderTopLeftRadius !== "50%") continue;
     const r = el.getBoundingClientRect();
     if (r.width < 6 || r.height < 6) continue;
