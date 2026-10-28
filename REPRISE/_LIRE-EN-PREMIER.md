@@ -1,5 +1,17 @@
 # 🚀 REPRISE — bot-moderation-discord
 
+> **28/10/2026 (23 h) — L'ÉTAT ACTUEL EST ICI ; le reste de ce fichier date d'août (utile pour les pièges, pas pour
+> l'état).** Les notes de Claude sur le PC du fondateur font foi : `bot-reprise-28-10.md`, `bot-demandes-28-10-soir.md`.
+>
+> En ligne (main, vérifié en ligne, ~1710 tests verts) : hiérarchie de l'équipage · filtres du chat (`sujets_interdits.py`,
+> insultes par langue, texte des images et des GIF Tenor/Giphy par OCR) · réponses automatiques (`reponses_auto.py`,
+> plus de « Question sans réponse ») · métiers à places (`metiers_au_ticket`, champ « metier » de la fiche) · vitrine
+> (avatar Discord copié par le serveur, portraits Roblox pris tout seuls) · annonces (retirer depuis le site de
+> l'équipage, 6 modèles, barre de mise en forme) · alertes sans rafale (comptes doubles, profil à surveiller, cartes de
+> protection) · JSON imbriqué refusé (`tableau.PROFONDEUR_MAX`) · CI sur les vraies dépendances, Python 3.13.
+> Méthode : `outils/site_local.py --port 8797` + `outils/controle_site.mjs` (Brave) + `outils/parcours_site.mjs` ;
+> jamais de rebase ; textes dans `textes.py` ; une seule vérification complète avant chaque mise en ligne.
+
 > Écrit le 15/08/2026 en fin de session. **Lis ce fichier en entier avant
 > d'ouvrir un seul autre fichier.** Il te fait gagner deux heures et t'évite de
 > refaire cinq erreurs qui ont chacune coûté un correctif.

@@ -2315,6 +2315,24 @@ async def _lire_corps(request, maximum: int) -> bytes:
     return data
 
 
+#  28/10/2026 : un corps imbriqué plus profond que ça est un piège (aucun formulaire du site n'en écrit) — refusé tel
+#  quel. Python 3.11 levait une RecursionError bien plus loin ; Python 3.13 (la production) lit des imbrications bien
+#  plus profondes : la limite est donc posée ici, la même partout.
+PROFONDEUR_MAX = 32
+
+
+def _trop_profond(x, limite: int = PROFONDEUR_MAX) -> bool:
+    """FONCTION PURE : une imbrication de listes / objets plus profonde que `limite` (sans récursion)."""
+    pile = [(x, 1)]
+    while pile:
+        v, n = pile.pop()
+        if isinstance(v, (dict, list)):
+            if n > limite:
+                return True
+            pile.extend((e, n + 1) for e in (v.values() if isinstance(v, dict) else v))
+    return False
+
+
 async def _lire_json(request, maximum: int) -> dict:
     brut = await _lire_corps(request, maximum)
     if not brut.strip():
@@ -2323,7 +2341,7 @@ async def _lire_json(request, maximum: int) -> dict:
         corps = json.loads(brut.decode("utf-8"))
     except (UnicodeDecodeError, ValueError, RecursionError):
         raise _Refus(400, "Corps illisible.") from None
-    if not isinstance(corps, dict):
+    if not isinstance(corps, dict) or _trop_profond(corps):
         raise _Refus(400, "Corps illisible.")
     return corps
 
