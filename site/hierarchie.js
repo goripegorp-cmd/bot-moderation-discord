@@ -66,7 +66,7 @@ export function organigramme(rangs, o = {}) {
     const i = rangs.indexOf(r);
     const dernier = r.verrou === "defaut";
     const corps = !l.length ? (!n(r) ? h("p", { classe: "org-vacant" }, L("vacant", "À nommer")) : o.filtre ? h("p", { classe: "org-vacant" }, "Personne pour cette recherche.") : null)
-      : dernier ? groupe({ titre: L("liste", "Voir la liste"), compte: l.length, cle: (o.cle || "org") + "-dernier", ouvert: o.filtre ? true : undefined,
+      : dernier ? groupe({ titre: L("liste", "Voir la liste"), compte: l.length, cle: (o.cle || "org") + "-dernier", ouvert: o.filtre ? true : undefined, defaut: l.length <= 30,   // 28/10/2026 : rien de caché tant que la liste reste courte
         classe: "org-liste" }, () => paginer((o.cle || "org") + "-dernier", l, (p) => carte(p), { classe: "org-gens", pas: 24 }))
         : h("div", { classe: "org-gens" }, l.map((p) => carte(p)));
     return h("section", { classe: "org-palier" + (dernier ? " dernier" : ""), vars: { "--teinte": teinte(r) }, "aria-label": sansEmoji(r.nom) },
