@@ -14,6 +14,10 @@ les jeux (`zones.JEUX` : un nouveau jeu y entre tout seul). Réponse en françai
 sinon en anglais. Une fois par membre et par sujet par demi-heure ; une fois par salon et par sujet toutes
 les 5 minutes. La carte s'efface au bout de 30 minutes : le chat reste propre. Jamais un bouton qui ment :
 un endroit inconnu n'a pas de bouton, et sans aucun bouton, pas de carte.
+
+27/10/2026 : « c'est le bot qui doit leur répondre » — ce fichier ne garde que le savoir (les sujets, les endroits, la
+carte) ; QUAND et À QUI répondre (l'aide de chaque jeu, l'anti-spam, la surveillance sur le site) est dans
+`reponses_auto.py`. Les textes des sujets sont dans le registre (« Textes & noms », famille « Réponses du bot »).
 """
 from __future__ import annotations
 
@@ -26,11 +30,8 @@ from discord.ui import Button
 
 import config_salons
 import questions
+import textes
 from ui_v2 import LayoutView, Palette
-
-MEMBRE_S = 1800          # le même sujet pour le même membre : une fois par demi-heure
-SALON_S = 300            # le même sujet dans le même salon : une fois toutes les 5 minutes
-EFFACER_S = 1800         # la carte part d'elle-même
 
 
 @dataclass(frozen=True)
@@ -166,32 +167,27 @@ MOTS_AUTRES = re.compile(r"[¿¡]|\b(d[oó]nde|c[oó]mo|cu[aá]ndo|est[aá]n?|ha
                          r"|wo|wie|ist|sind|gibt|kann|ich|dove|sono|posso|qual)\b")
 ROBLOX = re.compile(r"\broblox\b")
 
-_cfg = _langue = _est_staff = _destinations = None
-_exclus = _effacer_plus_tard = None
-_log = print
-_membres: dict = {}
-_salons: dict = {}
+#  27/10/2026 : les textes des sujets, réécrits par la direction (« Textes & noms ») — la clé, son texte d'origine.
+GROUPE_TEXTES = "reponses"
+textes.nommer_groupe(GROUPE_TEXTES, "Réponses du bot", 35)
+_PARTIE = "Les questions fréquentes"
+for _n, _s in enumerate(SUJETS):
+    for _l, _defaut in (("fr", _s.texte_fr), ("en", _s.texte_en)):
+        textes.declarer(f"faq.{_s.cle}.{_l}", _defaut, groupe=GROUPE_TEXTES, partie=_PARTIE, ordre=100 + 2 * _n
+                        + (_l == "en"), titre=f"{_s.titre_fr} · {'anglais' if _l == 'en' else 'français'}", max_=600,
+                        variables=(("type", "le type de ticket du clan, entre parenthèses"),) if "{type}" in _defaut
+                        else (), aide="La réponse à une question sur ce sujet ; les boutons mènent aux bons salons.")
+for _n, (_cle, (_fr, _en)) in enumerate(TEXTES_JEU.items()):
+    for _l, _defaut in (("fr", _fr), ("en", _en)):
+        textes.declarer(f"faq.jeu.{_cle}.{_l}", _defaut, groupe=GROUPE_TEXTES, partie=_PARTIE, ordre=200 + 2 * _n
+                        + (_l == "en"), titre=f"Un jeu nommé · {_cle} · {'anglais' if _l == 'en' else 'français'}",
+                        max_=600, variables=(("jeu", "le nom du jeu"),) if "{jeu}" in _defaut else (),
+                        aide="La même réponse quand la question nomme un jeu (ou vient de son salon).")
 
 
-def setup(*, cfg, destinations, est_staff, langue=None, log=None):
-    """`destinations(g, c)` → {« ticket » | « suggestions » | « game_link » | « annonces » | « roblox » |
-    « goripe » : lien, « type_clan » : nom du type de ticket du clan, « jeux » : [{« cle », « nom », « emoji »,
-    « mots », « forum », « trade », « help », « annonces », « lien »}]} ; `est_staff(g, membre, c)` → bool ;
-    `langue(membre)` (async) → « fr » ou « en »."""
-    global _cfg, _destinations, _est_staff, _langue, _log
-    _cfg, _destinations, _est_staff, _langue = cfg, destinations, est_staff, langue
-    _log = log or print
-
-
-def set_hooks(*, exclus=None, effacer_plus_tard=None) -> None:
-    """`exclus(g, c)` → les salons et posts où la FAQ se tait (🛟 Help, 🤝 Trade : on y répond aux cartes) ;
-    `effacer_plus_tard(message, secondes)` (async) → la suppression différée qui survit à un redémarrage."""
-    global _exclus, _effacer_plus_tard
-    _exclus, _effacer_plus_tard = exclus, effacer_plus_tard
-
-
-def _attente(cle: tuple, delai: float, registre: dict, t: float) -> bool:
-    return t - registre.get(cle, -1e9) < delai
+def _t(gid, cle: str, **valeurs) -> str:
+    """Le texte de ce serveur (Textes & noms), sinon celui d'origine ; `gid` None : celui d'origine."""
+    return textes.texte_cache(int(gid or 0), cle, **valeurs)
 
 
 def langue_du_texte(t: str) -> str:
@@ -252,14 +248,15 @@ def jeux_du_salon(salon, jeux: list) -> list:
     return [j for j in jeux if pid and int(j.get("forum") or 0) == pid]
 
 
-def reponse(s: Sujet, texte: str, salon, liens: dict, langue: str) -> tuple | None:
+def reponse(s: Sujet, texte: str, salon, liens: dict, langue: str, gid=None) -> tuple | None:
     """(titre, texte, [(bouton, lien)]) — un bouton par bon endroit, cinq au plus ; None si aucun endroit
-    n'est connu (jamais un bouton qui ment)."""
+    n'est connu (jamais un bouton qui ment). `gid` : les textes réécrits de ce serveur (Textes & noms)."""
     en = langue == "en"
+    lg = "en" if en else "fr"
     titre = f"{s.emoji} {s.titre_en if en else s.titre_fr}"
     precision = f" (type « {liens.get('type_clan')} »)" if liens.get("type_clan") and s.cle in ("clan", "aide_clan") \
         else ""
-    corps = (s.texte_en if en else s.texte_fr).format(type=precision)
+    corps = _t(gid, f"faq.{s.cle}.{lg}", type=precision)
     if not s.vers.startswith("jeu:"):
         url = liens.get(s.vers)
         return (titre, corps, [(BOUTONS.get(s.vers, ("Ouvrir", "Open"))[1 if en else 0], url)]) if url else None
@@ -268,7 +265,7 @@ def reponse(s: Sujet, texte: str, salon, liens: dict, langue: str) -> tuple | No
     nommes = jeux_nommes(texte, jeux) or jeux_du_salon(salon, jeux)
     if cle == "annonces" and not nommes and ROBLOX.search(texte):
         url = liens.get("roblox")
-        return (f"📰 {'Roblox news' if en else 'Les actus Roblox'}", TEXTES_JEU["roblox"][1 if en else 0],
+        return (f"📰 {'Roblox news' if en else 'Les actus Roblox'}", _t(gid, f"faq.jeu.roblox.{lg}"),
                 [("📰 Roblox", url)]) if url else None
     choisis = nommes or jeux
     if cle == "lien":
@@ -277,11 +274,11 @@ def reponse(s: Sujet, texte: str, salon, liens: dict, langue: str) -> tuple | No
     else:
         boutons = [(f"{EMOJI_JEU[cle]} {j['nom']}", j.get(cle)) for j in choisis if j.get(cle)]
     if len(nommes) == 1 and boutons:
-        corps = TEXTES_JEU[cle][1 if en else 0].format(jeu=nommes[0]["nom"])
+        corps = _t(gid, f"faq.jeu.{cle}.{lg}", jeu=nommes[0]["nom"])
     if cle == "lien" and liens.get("game_link"):
         boutons.insert(0, ("🎮 Game Link", liens["game_link"]))
         if not nommes or len(boutons) == 1:
-            corps = s.texte_en if en else s.texte_fr
+            corps = _t(gid, f"faq.{s.cle}.{lg}", type="")
     if cle == "annonces" and not nommes and liens.get("annonces"):
         boutons.insert(0, ("📜 " + ("Server" if en else "Serveur"), liens["annonces"]))
     if cle == "help" and not nommes and boutons and liens.get("ticket"):
@@ -289,18 +286,19 @@ def reponse(s: Sujet, texte: str, salon, liens: dict, langue: str) -> tuple | No
     if not boutons:
         return None
     if cle == "help" and nommes:
-        corps = TEXTES_JEU["help"][1 if en else 0].format(jeu=nommes[0]["nom"])
+        corps = _t(gid, f"faq.jeu.help.{lg}", jeu=nommes[0]["nom"])
     elif cle == "help" and not liens.get("ticket"):
         corps = corps.replace(" Pour le staff : un ticket.", "").replace(" For the staff: a ticket.", "")
     return titre, corps, boutons[:5]
 
 
-def vue_reponse(titre: str, corps: str, boutons: list) -> LayoutView:
+def vue_reponse(titre: str, corps: str, boutons: list, pied: str = "Réponse automatique · Automatic answer") \
+        -> LayoutView:
     v = LayoutView(timeout=None)
     v.add_item(discord.ui.Container(
         discord.ui.TextDisplay(f"### {titre}\n{corps}"),
         discord.ui.ActionRow(*[Button(label=libelle[:80], url=url) for libelle, url in boutons[:5]]),
-        discord.ui.TextDisplay("-# Réponse automatique · Automatic answer"), accent_color=Palette.INFO))
+        discord.ui.TextDisplay(f"-# {pied}"), accent_color=Palette.INFO))
     return v
 
 
@@ -311,61 +309,3 @@ def vue(s: Sujet, langue: str, lien: str, type_clan: str = "") -> LayoutView:
     texte = (s.texte_en if en else s.texte_fr).format(type=precision)
     libelle = BOUTONS.get(s.vers, ("Ouvrir", "Open"))[1 if en else 0]
     return vue_reponse(f"{s.emoji} {s.titre_en if en else s.titre_fr}", texte, [(libelle, lien)])
-
-
-def _libre(cle: tuple, delai: float, registre: dict, t: float) -> bool:
-    if t - registre.get(cle, -1e9) < delai:
-        return False
-    registre[cle] = t
-    if len(registre) > 2000:
-        for k in [k for k, v in registre.items() if t - v > delai]:
-            registre.pop(k, None)
-    return True
-
-
-async def sur_message(msg, maintenant: float | None = None) -> bool:
-    """Rend True si une carte a été posée."""
-    g, m = getattr(msg, "guild", None), getattr(msg, "author", None)
-    if g is None or m is None or getattr(m, "bot", False) or getattr(msg, "webhook_id", None) or _cfg is None:
-        return False
-    texte = getattr(msg, "content", "") or ""
-    s, langue_q = reconnaitre(texte)
-    if s is None or not questions.salon_public(msg.channel):
-        return False
-    c = await _cfg(g.id)
-    if _est_staff(g, m, c):
-        return False
-    if _exclus is not None:
-        ici = {getattr(msg.channel, "id", 0), getattr(msg.channel, "parent_id", 0) or 0} - {0}
-        if ici & set(_exclus(g, c) or ()):
-            return False
-    langue = langue_q or "fr"
-    if not langue_q and _langue is not None:  # rien dans la question : sa langue à lui
-        try:
-            langue = "en" if await _langue(m) == "en" else "fr"
-        except Exception as ex:
-            _log(f"[FAQ:DETAIL] langue {type(ex).__name__} {ex}")
-    r = reponse(s, questions.nettoyer(texte).lower(), msg.channel, _destinations(g, c) or {}, langue)
-    if r is None:
-        return False
-    t = maintenant or time.monotonic()
-    #  Les deux délais sont vérifiés AVANT d'en prendre un : un membre retenu ne bloque plus le salon.
-    cle_salon, cle_membre = (g.id, msg.channel.id, s.cle), (g.id, m.id, s.cle)
-    if _attente(cle_salon, SALON_S, _salons, t) or _attente(cle_membre, MEMBRE_S, _membres, t):
-        return False
-    _libre(cle_salon, SALON_S, _salons, t)
-    _libre(cle_membre, MEMBRE_S, _membres, t)
-    try:
-        rep = await msg.reply(view=vue_reponse(*r), mention_author=False,
-                              allowed_mentions=discord.AllowedMentions.none(), delete_after=EFFACER_S)
-    except discord.HTTPException as ex:
-        _log("[FAQ][E1] réponse non posée")
-        _log(f"[FAQ][E1:DETAIL] sujet={s.cle} {type(ex).__name__} {ex}")
-        return False
-    if rep is not None and _effacer_plus_tard is not None:   # un redémarrage n'oublie pas l'effacement
-        try:
-            await _effacer_plus_tard(rep, EFFACER_S)
-        except Exception as ex:
-            _log("[FAQ][E2] effacement différé non noté")
-            _log(f"[FAQ][E2:DETAIL] {type(ex).__name__} {ex}")
-    return True
