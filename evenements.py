@@ -2408,6 +2408,57 @@ MODELES = [
     {"cle": "annonce", "nom": "Annonce officielle", "type": "annonce",
      "description": "Titre, texte, image : « Vu » pour savoir qui l'a lue.",
      "valeurs": {"titre": "", "texte": "", "mention": "clan"}},
+    #  28/10/2026, le fondateur : « qu'on puisse faire de belles annonces, pas des trucs moches avec des textes pourris,
+    #  genre de vraies annonces ». Des annonces écrites et mises en forme (titres, gras, listes, ligne anglaise) :
+    #  on remplace les « … », on garde la forme.
+    {"cle": "recrutement", "nom": "Recrutement ouvert", "type": "annonce",
+     "description": "Les portes s'ouvrent : ce qu'on cherche, comment postuler.",
+     "valeurs": {"titre": "L'équipage recrute", "mention": "aucune", "texte":
+                 "## ⚓ Les portes de l'équipage sont ouvertes\n"
+                 "Nous cherchons de nouveaux matelots pour prendre la mer avec nous.\n\n"
+                 "**Ce que nous cherchons**\n- …\n- …\n- Un bon esprit d'équipage\n\n"
+                 "**Pour postuler** : ouvre un ticket de recrutement, remplis ta fiche, et la direction te répond.\n"
+                 "-# The crew is recruiting: open a recruitment ticket to apply."}},
+    {"cle": "nouveautes", "nom": "Nouveautés & mise à jour", "type": "annonce",
+     "description": "Ce qui change, en trois points clairs.",
+     "valeurs": {"titre": "Les nouveautés de l'équipage", "mention": "clan", "texte":
+                 "## 📜 Ce qui change\n"
+                 "- **…** — …\n- **…** — …\n- **…** — …\n\n"
+                 "Une question ? Demande dans le salon de l'équipage.\n"
+                 "-# What's new for the crew."}},
+    {"cle": "felicitations", "nom": "Félicitations & résultats", "type": "annonce",
+     "description": "Saluer une victoire, un exploit, des promus.",
+     "valeurs": {"titre": "Bravo à l'équipage", "mention": "clan", "texte":
+                 "## 🏆 Hissez les couleurs !\n"
+                 "Belle prise pour l'équipage : …\n\n"
+                 "**À l'honneur**\n- …\n- …\n\n"
+                 "Merci à tous ceux qui ont pris la mer. On remet ça bientôt.\n"
+                 "-# Congratulations to the crew!"}},
+    {"cle": "regles", "nom": "Le code de l'équipage", "type": "annonce",
+     "description": "Les règles, courtes et nettes.",
+     "valeurs": {"titre": "Le code de l'équipage", "mention": "aucune", "texte":
+                 "## 🏴‍☠️ Le code de l'équipage\n"
+                 "**1.** On ne laisse jamais un équipier à la mer.\n"
+                 "**2.** Le butin se partage, les tempêtes aussi.\n"
+                 "**3.** La parole d'un pirate vaut de l'or : on la tient.\n"
+                 "**4.** …\n\n"
+                 "> Qui manque au code en répond devant la direction.\n"
+                 "-# The crew's code."}},
+    {"cle": "bienvenue", "nom": "Bienvenue aux nouveaux", "type": "annonce",
+     "description": "Accueillir les derniers arrivés.",
+     "valeurs": {"titre": "Bienvenue à bord", "mention": "aucune", "texte":
+                 "## 🧭 Bienvenue à bord, matelots !\n"
+                 "L'équipage s'agrandit : souhaitez la bienvenue à …\n\n"
+                 "**Pour bien commencer**\n- Lis le guide du clan\n- Complète ton affiche\n- Rejoins la prochaine sortie en mer\n"
+                 "-# Welcome aboard!"}},
+    {"cle": "pause", "nom": "Pause ou maintenance", "type": "annonce",
+     "description": "Prévenir d'une absence, d'un arrêt, d'un retard.",
+     "valeurs": {"titre": "Petite escale", "mention": "clan", "texte":
+                 "## ⏳ Petite escale\n"
+                 "… du **…** au **…**.\n\n"
+                 "Pendant ce temps : …\n"
+                 "On reprend la mer très vite, merci de votre patience.\n"
+                 "-# A short break: we'll be back soon."}},
     {"cle": "metiers", "nom": "Annonce officielle des métiers", "type": "metiers",
      "description": "Chaque métier et qui l'exerce, d'après les affiches.",
      "valeurs": {"titre": "Les métiers de l'équipage", "groupement": "metier", "champs": ["grade"]}},

@@ -144,6 +144,7 @@ REGISTRE = {"tete": frozenset(x.strip() for x in """
     GET equipage/publication
     POST equipage/publication
     POST equipage/publication/apercu
+    POST equipage/publication/retirer
     POST media
     GET nettoyage
     GET nettoyage/apercu
@@ -225,7 +226,8 @@ HIERARCHIE = ("GET equipage/hierarchie", "POST equipage/hierarchie/rang", "POST 
               "POST equipage/hierarchie/reprise")
 #  Une publication modifiée depuis le site de l'équipage (27/10/2026, annonces_modifiables.py) : la tête seule —
 #  l'éditeur s'ouvre sur la page de l'équipage, mais l'adresse est celle de la direction ; « equipage » → 403.
-PUBLICATIONS = ("GET equipage/publication", "POST equipage/publication", "POST equipage/publication/apercu")
+PUBLICATIONS = ("GET equipage/publication", "POST equipage/publication", "POST equipage/publication/apercu",
+                "POST equipage/publication/retirer")
 #  Le recrutement et les chefs d'équipe (27/10/2026, questionnaire.py) : la tête seule, toutes leurs adresses.
 RECRUTEMENT = "recrutement/"
 #  Le site sur plusieurs années (27/10/2026, longevite.py) : les règles et les actions du Nettoyage (l'aperçu d'une

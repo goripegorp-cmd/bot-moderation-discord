@@ -533,3 +533,17 @@ def test_S7_le_controle_des_imports_lit_le_js_comme_le_navigateur():
     assert "saisie(" in propre and "inconnue(" in propre and "x / 2 / 3" in propre, "le code reste : une division n'est pas une expression régulière"
     assert "class Emprise" in CI.sans_chaines("class Emprise {\n  async relire(x) {\n  }\n}\n")
     assert {"Emprise", "relire"} <= CI.declares(CI.sans_chaines("class Emprise {\n  async relire(x) {\n  }\n}\n"))
+
+
+def test_S9_retirer_une_ancienne_annonce_depuis_le_site_de_l_equipage(local):
+    """28/10/2026, le fondateur : « on peut aussi supprimer les anciens posts annonces » — la tête seule ; les messages
+    Discord partent, l'annonce quitte l'accueil, rien ne se republie."""
+    a = _annonce(local)
+    st, rep = local.ecrire("equipage/publication/retirer", {"id": a["id"]}, local.kolax)
+    assert st == 403, "l'équipage ne retire rien"
+    st, rep = local.ecrire("equipage/publication/retirer", {"id": a["id"]}, local.tete)
+    assert st == 200, rep
+    assert courir(EV.charger(a["id"]))["statut"] == "retire"
+    assert "Le Movie 3" not in json.dumps(rep.get("accueil") or {}, ensure_ascii=False), "elle quitte l'accueil"
+    st, rep = local.ecrire("equipage/publication/retirer", {"id": a["id"]}, local.tete)
+    assert st == 200 and rep.get("deja"), "deux fois : sans effet"

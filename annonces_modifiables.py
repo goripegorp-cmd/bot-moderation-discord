@@ -117,7 +117,29 @@ async def route_apercu(g, auteur, requete, corps):
     return statut, rep
 
 
+async def route_retirer(g, auteur, requete, corps):
+    """`POST equipage/publication/retirer` `{id}` (28/10/2026, le fondateur : « on peut aussi supprimer les anciens posts
+    annonces ») : une annonce retirée — ses messages Discord supprimés — ou un événement annulé, sans prévenir personne
+    (le code de l'administration : `evenements.annuler`) ; puis l'accueil relu."""
+    refus = evenements._refus(g, auteur)
+    if refus:
+        return refus
+    eid = evenements._id(corps.get("id")) if isinstance(corps, dict) else None
+    if eid is None:
+        return 400, {"erreur": "Identifiant manquant.", "champ": "id"}
+    statut, rep = await evenements.annuler(g, auteur, eid, prevenir=False)
+    if statut != 200:
+        return statut, rep
+    site_equipage._apres_ecriture(g)
+    el = rep.get("element") or {}
+    quoi = "événement annulé" if el.get("type") == "evenement" else "annonce retirée de Discord"
+    return 200, {**rep, "accueil": await site_equipage._accueil_direction(g),
+                 "_journal": None if rep.get("deja") else f"Site de l'équipage : {quoi} « {el.get('titre') or 'sans titre'} »"}
+
+
 ROUTES_SITE = {
+    "equipage/publication/retirer": {"methode": "POST", "fn": route_retirer, "ecriture": True, "corps_max": 256,
+                                     "verrou": _objet},
     "equipage/publication": [
         {"methode": "GET", "fn": route_lire, "corps_max": 0},
         {"methode": "POST", "fn": route_modifier, "ecriture": True, "corps_max": evenements.TAILLE_CORPS,
@@ -127,4 +149,4 @@ ROUTES_SITE = {
                                     "corps_max": evenements.TAILLE_CORPS},
 }
 
-__all__ = ["ROUTES_SITE", "CHAMPS_EDITEUR", "route_lire", "route_modifier", "route_apercu"]
+__all__ = ["ROUTES_SITE", "CHAMPS_EDITEUR", "route_lire", "route_modifier", "route_apercu", "route_retirer"]

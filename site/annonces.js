@@ -664,7 +664,7 @@ function compteurCaracteres(entree, max) {
   maj();
   return c;
 }
-function barreMarkdown(zone, apres) {
+export function barreMarkdown(zone, apres) {
   const entourer = (avant, apres_ = avant) => () => {
     const d = zone.selectionStart, f = zone.selectionEnd, s = zone.value;
     zone.value = s.slice(0, d) + avant + s.slice(d, f) + apres_ + s.slice(f);

@@ -77,6 +77,8 @@ export async function editerPublication(a, o = {}) {
   texte.addEventListener("input", () => { v.texte = texte.value; changer(); });
   const champTitre = champ("Titre", titre, { aide: compteur(titre, lim.titre || 100) });
   const champTexte = champ("Texte", texte, { aide: h("span", {}, compteur(texte, lim.texte || 2000), " · Markdown de Discord.") });
+  //  28/10/2026 : la barre de mise en forme de l'administration (gras, titre, liste, citation…), chargée à la demande.
+  import("./annonces.js").then((m) => { if (m.barreMarkdown && texte.isConnected !== false) texte.before(m.barreMarkdown(texte, () => { v.texte = texte.value; changer(); })); }).catch(() => null);
   const liens = h("div", { classe: "liens-editeur" });
   const majLiens = () => {
     remplacer(liens, ...v.liens.map((x, k) => {
@@ -191,7 +193,22 @@ export async function editerPublication(a, o = {}) {
     toast(rep.erreur || d.erreur || "Modification refusée.", "erreur");
     chercherApercu();
   }
-  ajouter(p.pied, [bouton("Annuler", { classe: "discret", onclick: () => p.fermer() }), ok]);
+  //  28/10/2026 : retirer une ancienne annonce (ses messages supprimés de Discord), ou annuler un événement — sans prévenir.
+  const retirer = bouton(P.type === "evenement" ? "Annuler l'événement" : "Retirer de Discord", { classe: "discret danger", icone: "supprimer", reseau: true, onclick: async () => {
+    const oui = await confirmer({ titre: (P.type === "evenement" ? "Annuler « " : "Retirer « ") + sansEmoji(P.titre || "Sans titre").slice(0, 60) + " » ?", style: "danger",
+      texte: P.type === "evenement" ? "La carte dit « annulé » sur Discord ; personne n'est prévenu." : "Ses messages sont supprimés de Discord et elle quitte l'accueil. Rien ne se republie.",
+      libelleOk: P.type === "evenement" ? "Annuler l'événement" : "Retirer" });
+    if (!oui) return;
+    retirer.disabled = true;
+    const rep = await poster("equipage/publication/retirer", { id });
+    retirer.disabled = false;
+    if (!rep.ok) { toast(rep.erreur || "Impossible pour le moment.", "erreur"); return; }
+    sale = false;
+    if (o.apres && rep.donnees && rep.donnees.accueil) o.apres(rep.donnees.accueil);
+    toast(P.type === "evenement" ? "Événement annulé." : "Annonce retirée de Discord.", "succes");
+    p.fermer();
+  } });
+  ajouter(p.pied, [retirer, bouton("Annuler", { classe: "discret", onclick: () => p.fermer() }), ok]);
   dessinerApercu();
   chercherApercu();
   requestAnimationFrame(() => titre.focus({ preventScroll: true }));   // la fenêtre reste en haut (« Rédiger · Aperçu » en vue)
