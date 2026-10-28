@@ -231,7 +231,7 @@ const OUVRIR_GROUPE_TEXTES = (n) => `(async () => { const g = document.querySele
 const ATTENDUS_404 = /\/tableau\/espace\/s\/(icones\/rell|logos)\//;
 const SCENES = [
   // L'accueil « Ce qui t'attend », la recherche universelle, le mode simple et « Tout afficher » (rangement, 26/10).
-  { nom: "accueil", ancre: "#accueil/attente" },
+  { nom: "accueil", ancre: "#accueil/attente", interdits: ["sans réponse"] },
   //  27/10/2026 : l'accueil a absorbé l'Aperçu — ses tuiles et ses « Tendances » (dépliées), en « Tout afficher ».
   { nom: "accueil-tout-afficher", ancre: "#accueil/attente", geste: TOUT_AFFICHER, geste2: OUVRIR_GROUPE_TITRE("Tendances"), apres: MODE_SIMPLE },
   { nom: "recherche-membre", ancre: "#accueil/attente", geste: RECHERCHER("mi") },
@@ -247,7 +247,10 @@ const SCENES = [
   { nom: "port-tickets-clan", ancre: "#port/tickets/clan" },
   { nom: "port-tickets-normaux", ancre: "#port/tickets/normaux" },
   { nom: "port-repertoire", ancre: "#port/repertoire" },
-  { nom: "port-salons-questions", ancre: "#port/salons/questions" },
+  //  28/10/2026 : « Réponses du bot » (le bot répond lui-même ; plus rien « sans réponse » à traiter) et ses réglages.
+  { nom: "port-salons-questions", ancre: "#port/salons/questions", interdits: ["Sans réponse", "undefined"] },
+  { nom: "port-salons-reponses-reglages", ancre: "#port/salons/questions", interdits: ["undefined"],
+    geste: "(async () => { for (let i = 0; i < 30 && !document.querySelector('details.groupe'); i++) await new Promise(r => setTimeout(r, 200)); const d = [...document.querySelectorAll('details.groupe')].find((x) => x.textContent.includes('Où le bot répond')); if (!d) throw new Error('réglages absents'); d.open = true; d.scrollIntoView({ block: 'start' }); return 1; })()" },
   { nom: "port-salons-idees", ancre: "#port/salons/idees" },
   { nom: "port-salons-sondages", ancre: "#port/salons/sondages" },
   { nom: "port-salons-droits", ancre: "#port/salons/droits" },

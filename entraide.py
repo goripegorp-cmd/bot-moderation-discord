@@ -480,6 +480,19 @@ async def reputation(guild_id: int, membre_id: int, zone: str = "trade") -> int:
             return int((await cur.fetchone())[0])
 
 
+async def demandes_aide(guild_id: int, membre_id: int) -> tuple:
+    """27/10/2026 (`reponses_auto`) : (création de sa dernière demande d'aide, combien sont encore ouvertes). FAIL-SAFE."""
+    try:
+        async with _get_db() as db:
+            async with db.execute("SELECT MAX(cree), SUM(CASE WHEN statut IN ('ouverte', 'prise') THEN 1 ELSE 0 END)"
+                                  " FROM entraide_demandes WHERE guild_id=? AND auteur_id=? AND zone LIKE 'aide%'"
+                                  " AND supprime=0", (int(guild_id), int(membre_id))) as cur:
+                r = await cur.fetchone()
+        return int((r and r[0]) or 0), int((r and r[1]) or 0)
+    except Exception:
+        return 0, 0
+
+
 async def compter_ouvertes(guild_id: int) -> dict:
     async with _get_db() as db:
         async with db.execute("SELECT zone, COUNT(*) FROM entraide_demandes WHERE guild_id=?"

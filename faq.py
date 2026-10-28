@@ -53,12 +53,12 @@ SUJETS = (
           "privé.",
           "To join the GoRP clan, open an application ticket{type}: the clan staff answers privately.",
           "ticket",
-          (r"\b(rejoindre|int[ée]grer|entrer dans|faire partie d[ue]|candidat\w*|postuler|recrut\w*)\b.{0,40}"
+          (r"\b(rejoi\w*|int[ée]grer|entrer dans|faire partie d[ue]|candidat\w*|postuler|recrut\w*)\b.{0,40}"
            r"\b(clan|gorp\w*|team|guilde)\b",
            #  « Comment je fais pour venir dans l'équipage » : l'équipage, c'est le clan.
-           r"\b(rejoindre|venir dans|entrer dans|int[ée]grer|faire partie d[ue])\b.{0,30}\b([ée]quipage|crew)\b",
+           r"\b(rejoi\w*|venir dans|entrer dans|int[ée]grer|faire partie d[ue])\b.{0,30}\b([ée]quipage|crew)\b",
            r"\b(join|get into|be part of)\b.{0,30}\bcrew\b",
-           r"\b(clan|gorp\w*)\b.{0,40}\b(rejoindre|recrut\w*|candidat\w*|postuler)\b",
+           r"\b(clan|gorp\w*)\b.{0,40}\b(rejoi\w*|recrut\w*|candidat\w*|postuler)\b",
            r"\b(join|apply|get into|be part of)\b.{0,40}\b(clan|gorp\w*|team|guild)\b",
            r"\b(unirme|unirse|entrar|ingresar|participar|beitreten|entrare|unirmi)\b.{0,30}\b(clan|cl[aã]|gorp\w*)\b",
            r"\b(clan|gorp\w*)\b.{0,30}\b(beitreten)\b")),

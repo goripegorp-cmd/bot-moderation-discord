@@ -270,7 +270,7 @@ function majFondus() {
 function compteurs() {
   const d = etat.d, n = Date.now() / 1000;
   if (!d) return {};
-  const qOuvertes = ((d.questions && d.questions.liste) || []).filter((q) => q.statut === "ouverte").length;
+  const qOuvertes = 0;   // 28/10/2026 : le bot répond lui-même aux questions — plus rien à traiter sur le site
   const oublies = d.tickets.ouverts.filter((t) => !t.pris_par && t.ouvert && n - t.ouvert > 86400 && !t.rellseas).length;
   const echus = ((d.clan && d.clan.membres) || []).filter((m) => m.rappel && m.rappel.statut === "echu").length;
   const aDecider = d.en_cours.filter((c) => ["decider", "corriger"].includes(etapeCandidature(c))).length;

@@ -254,6 +254,7 @@ async def construire(dossier: Path | None = None, port: int = PORT, qui: int = F
     import questions
     import recrutements
     import registre
+    import reponses_auto
     import rellseas_panneau
     import sondages
     import suggestions
@@ -319,6 +320,9 @@ async def construire(dossier: Path | None = None, port: int = PORT, qui: int = F
     recrutements.setup(get_db=get_db, cfg=cfg, db_set=db_set, salon=None, role=lambda _g, _c: clan_r,
                        panneaux=rellseas_panneau.panneaux_tickets, log=silence)
     questions.setup(get_db=get_db, est_staff=lambda _g, m, _c: a_la_tete(_g, m), log=silence)
+    #  28/10/2026 : les réponses du bot (Le Port › Salons › Réponses du bot) — aucune n'est envoyée ici.
+    reponses_auto.setup(get_db=get_db, cfg=cfg, db_set=db_set, destinations=lambda _g, _c: {}, est_staff=lambda _g, m, _c: a_la_tete(_g, m),
+                        exclus=lambda _g, _c: set(), log=silence)
 
     async def salon_alertes(*_a):  # aucun salon des logs : alertes et idées restent sur le site
         return None
@@ -382,11 +386,12 @@ async def construire(dossier: Path | None = None, port: int = PORT, qui: int = F
                   actions=site_local_port.actions_du_bot(g=g, X=X, get_db=get_db, cfg=cfg, tete=TETE,
                                                          fondateur=FONDATEUR, carnet=carnet), log=print)
     for module in (registre, recrutements, questions, vigilance, clan, casier, sondages, suggestions, entraide,
-                   annonces, tableau, questionnaire):
+                   annonces, tableau, questionnaire, reponses_auto):
         await module.init_db()
     await _tables_du_bot(get_db)
     tableau.monter(textes)
     tableau.monter(questionnaire.ROUTES_SITE)
+    tableau.monter(reponses_auto.ROUTES_SITE)
     for regle in questionnaire.REGLES_RECRUTEMENT:   # comme `_activite_boot` (26/10/2026)
         tableau.ajouter_regle(**regle)
 
@@ -809,6 +814,16 @@ async def _remplir(get_db, g, clan_r, salon_annonces, X) -> None:
             await db.execute("INSERT INTO questions (guild_id, salon_id, message_id, auteur_id, texte, quand, statut)"
                              " VALUES (?,?,?,?,?,?,?)", (SERVEUR_ID, salon_annonces.id, 7000 + n, membres[n].id, texte,
                                                          int(maintenant - n * 7200), "ouverte" if n else "repondue"))
+        #  Ce que le bot a répondu (28/10/2026) : une réponse, un rappel, une retenue, un message pas su classer.
+        for n, (texte, genre, sujet, jeux, raison) in enumerate((
+                ("Quelqu'un peut m'aider pour le boss de l'île ?", "reponse", "aide", "rell", ""),
+                ("Comment on ouvre un ticket ?", "reponse", "ticket", "", ""),
+                ("Toujours besoin d'aide pour le boss svp", "rappel", "aide", "rell", ""),
+                ("aidez moi pour le boss", "retenue", "aide", "rell", "deja"))):
+            await db.execute("INSERT INTO reponses_bot (guild_id, salon_id, message_id, auteur_id, texte, quand, genre, sujet,"
+                             " jeux, langue, raison, reponse_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                             (SERVEUR_ID, salon_annonces.id, 7100 + n, membres[n % 3].id, texte, int(maintenant - n * 5400),
+                              genre, sujet, jeux, "fr", raison, 7200 + n if genre != "retenue" else 0))
         await db.execute("INSERT INTO sondages (message_id, guild_id, channel_id, auteur_id, question, choix, comptes,"
                          " total, cree_le, fin_le) VALUES (?,?,?,?,?,?,?,?,?,?)",
                          (8001, SERVEUR_ID, salon_annonces.id, FONDATEUR, "Un raid samedi soir ?",

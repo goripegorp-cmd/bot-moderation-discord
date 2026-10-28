@@ -37,19 +37,19 @@ BAVARDAGE = re.compile(
 #  (« vous aimez… », « ton avis »), les questions personnelles, la présence (« y a quelqu'un ? »), l'envie de jouer
 #  ensemble, « how are you ».
 SOCIAL = re.compile(
-    r"(?:ma|mon|mes)\s+(?:pp|pdp|pfp|photo(?: de profil)?|avatar|skin|pseudo|tenue|outfit|look|tete|perso|dessin|edit"
-    r"|montage|banniere|bio).{0,30}(?:bien|beau|belle|beaux|bo|jolie?s?|stylee?s?|cool|swag|nulle?s?|moche|bg|ok"
-    r"|correcte?|valide|propre|potable|mignonn?e?)"
-    r"|(?:je suis|jsuis|chui|j'?suis|suis[- ]je) (?:beau|belle|bg|moche|nulle?|bo|mignonn?e?|drole)"
-    r"|(?:vous|tu) (?:aimez|aimes|kiffez|kiffes|trouvez|trouves|preferez|preferes|pensez|penses)"
-    r"|(?:votre|ton|vos|tes) avis|(?:vous en|t'?en) pensez? quoi"
-    r"|quel age|(?:tu viens|vous venez|tu habites|vous habitez) d'?ou"
-    r"|(?:fille|gars|garcon|meuf|mec) ou (?:fille|gars|garcon|meuf|mec)"
+    r"\b(?:ma|mon|mes)\s+(?:pp|pdp|pfp|photo(?: de profil)?|avatar|skin|pseudo|tenue|outfit|look|tete|perso|dessin|edit"
+    r"|montage|banniere|bio)\b.{0,30}\b(?:bien|beau|belle|beaux|bo|jolie?s?|stylee?s?|cool|swag|nulle?s?|moche|bg|ok"
+    r"|correcte?|valide|propre|potable|mignonn?e?)\b"
+    r"|\b(?:je suis|jsuis|chui|j'?suis|suis[- ]je) (?:beau|belle|bg|moche|nulle?|bo|mignonn?e?|drole)\b"
+    r"|\b(?:vous|tu) (?:aimez|aimes|kiffez|kiffes|trouvez|trouves|preferez|preferes|pensez|penses)\b"
+    r"|\b(?:votre|ton|vos|tes) avis\b|\b(?:vous en|t'?en) pensez? quoi\b"
+    r"|\bquel age\b|\b(?:tu viens|vous venez|tu habites|vous habitez) d'?ou\b"
+    r"|\b(?:fille|gars|garcon|meuf|mec) ou (?:fille|gars|garcon|meuf|mec)\b"
     r"|^(?:y'?a|ya|il y a|y a|quelqu'?un|qqn|qui)\s+(?:quelqu'?un|qqn|du monde|des gens|personne|la|co|connecte|en ligne"
     r"|on|dispo|ici|present)\s*\?*\s*$"
-    r"|(?:qui|quelqu'?un|qqn) (?:veut|vient|joue|est chaud|chaud|est co|est la) (?:jouer|en voc|en vocal|un raid|farm"
+    r"|\b(?:qui|quelqu'?un|qqn) (?:veut|vient|joue|est chaud|chaud|est co|est la) (?:jouer|en voc|en vocal|un raid|farm"
     r"|avec moi|ce soir)?"
-    r"|(?:how are you|how r u|hru|wbu|hbu|what'?s up|wassup)|(?:are you|r u|anyone) (?:there|here|online)\s*\?*\s*$")
+    r"|\b(?:how are you|how r u|hru|wbu|hbu|what'?s up|wassup)\b|\b(?:are you|r u|anyone) (?:there|here|online)\s*\?*\s*$")
 RESOLU = re.compile(r"\b(merci|thanks|thx|c'?est bon|r[ée]solu|trouv[ée]|[çc]a marche|nickel|parfait)\b", re.I)
 MIN_CARACTERES = 15
 MIN_MOTS = 3
@@ -100,7 +100,7 @@ def plat(texte: str) -> str:
     """Le texte en minuscules, sans accents (l'apostrophe typographique gardée), les lettres répétées ramenées à une."""
     t = str(texte or "").replace("’", "'").replace("‘", "'")
     t = unicodedata.normalize("NFKD", t).encode("ascii", "ignore").decode().lower()
-    return re.sub(r"([a-z]){2,}", r"", t)
+    return re.sub(r"([a-z])\1{2,}", r"\1", t)
 
 
 def est_question(texte: str) -> bool:

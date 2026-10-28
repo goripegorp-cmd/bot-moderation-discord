@@ -114,6 +114,7 @@ import recrutements  # suivi des candidatures Rell Seas, bilan du mois
 import questionnaire  # le recrutement du clan en deux étapes : banque de questions, cartes du ticket, site
 import registre  # le journal du serveur, lu sur le site (19/10/2026)
 import questions  # les questions posées dans les salons publics (onglet du site)
+import reponses_auto  # le bot répond lui-même aux demandes d'aide et aux questions fréquentes (27/10/2026)
 import publications  # une publication des réseaux = un seul message (réservation atomique)
 import casier  # amnistie de 3 mois, effacer une personne ou une zone du casier, défaire pendant 30 jours
 import clan  # le clan Rell Seas depuis le site : ajouter, prévenir les inactifs, rappel à 7 jours
@@ -14051,10 +14052,11 @@ bot.add_listener(salutations.sur_message, "on_message")
 
 
 async def _faq_hook(msg):
+    #  27/10/2026 : le bot oriente lui-même (demande d'aide du bon jeu, FAQ, vrais salons) — `reponses_auto`.
     try:
-        await faq.sur_message(msg)
+        await reponses_auto.sur_message(msg)
     except Exception as ex:
-        _logerr("faq.message", ex, guild_id=getattr(getattr(msg, "guild", None), "id", 0))
+        _logerr("reponses.message", ex, guild_id=getattr(getattr(msg, "guild", None), "id", 0))
 
 
 bot.add_listener(_faq_hook, "on_message")
@@ -14066,10 +14068,8 @@ def _dans_entraide(ch, c) -> bool:
     return bool(ici & (entraide.ids_salons(c) - {0}))
 
 
-#  24/10/2026 (revue) : la FAQ se tait dans 🛟 Help / 🤝 Trade, et l'effacement de ses réponses survit à un
-#  redémarrage (avant : `delete_after` seul, perdu au redémarrage — la carte restait pour toujours).
-faq.set_hooks(exclus=lambda g, c: entraide.ids_salons(c) - {0},
-              effacer_plus_tard=lambda m, secondes: _register_for_cleanup(m, secondes, "faq"))
+#  24/10/2026 (revue) : les réponses se taisent dans 🛟 Help / 🤝 Trade, et leur effacement survit à un redémarrage
+#  (branché dans l'étape « reponses » du démarrage).
 
 
 async def _entraide_message(msg):
@@ -22138,8 +22138,14 @@ async def _activite_boot():
                        role_clan=lambda g, c: g.get_role(int(c.get(rellseas_ui.CLE_ROLE_CIBLE, 0) or 0)),
                        langue=_langue_membre, log=print)
         await annonces.init_db()
-    with _Etape("faq"):
-        faq.setup(cfg=cfg, destinations=_faq_destinations, est_staff=_staff_ou_plus, langue=_langue_de_membre, log=print)
+    with _Etape("reponses"):
+        reponses_auto.setup(get_db=get_db, cfg=cfg, db_set=db_set, destinations=_faq_destinations, est_staff=_staff_ou_plus,
+                            langue=_langue_de_membre, exclus=lambda g, c: entraide.ids_salons(c) - {0},
+                            est_ticket=is_ticket_channel,
+                            effacer_plus_tard=lambda m, secondes: _register_for_cleanup(m, secondes, "faq"), log=print)
+        await reponses_auto.init_db()
+        if hasattr(tableau, "monter"):
+            tableau.monter(reponses_auto.ROUTES_SITE)
     with _Etape("invitations"):
         invitations.setup(get_db=get_db, log=print)
         await invitations.init_db()

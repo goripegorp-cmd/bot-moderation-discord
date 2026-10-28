@@ -45,6 +45,7 @@ from discord.ext import tasks
 import casier
 import publications
 import questions
+import reponses_auto
 import registre
 import tableau
 import vigilance
@@ -87,6 +88,7 @@ PURGES_CIBLEES = [
     ("casier : sanctions", "DELETE FROM infractions WHERE created_at < ?", 730, "sqlite"),
     *registre.PURGES,
     *questions.PURGES,
+    *reponses_auto.PURGES,
     *publications.PURGES,
     *vigilance.PURGES,
     *tableau.PURGES,

@@ -66,76 +66,7 @@ def test_F2_la_carte_mene_au_bon_endroit_dans_la_bonne_langue():
     assert all(len(x.titre_fr) <= 40 for x in faq.SUJETS)
 
 
-class Message:
-    def __init__(self, salon, auteur, texte):
-        self.guild, self.channel, self.author, self.content, self.webhook_id = salon.monde, salon, auteur, texte, None
-        self.reponses = []
-
-    async def reply(self, **kw):
-        self.reponses.append(kw)
-
-
-@pytest.fixture
-def faq_env():
-    conf = {"zones_posts": {}}
-    staff, langues = set(), {}
-
-    async def cfg(_gid):
-        return conf
-
-    def destinations(g, _c):
-        return {"ticket": "https://discord.com/channels/1/40", "suggestions": "https://discord.com/channels/1/43",
-                "type_clan": "Rell Seas",
-                "jeux": [{"cle": "rell", "nom": "Rell Seas", "emoji": "🌊", "mots": ("rell",), "forum": 0,
-                          "trade": "https://discord.com/channels/1/42", "help": "", "annonces": "", "lien": ""}]}
-
-    async def langue(m):
-        return langues.get(m.id, "fr")
-    faq._membres.clear()
-    faq._salons.clear()
-    faq.setup(cfg=cfg, destinations=destinations, est_staff=lambda g, m, c: m.id in staff, langue=langue,
-              log=lambda *a: None)
-    g = Monde()
-
-    class Public:
-        def permissions_for(self, _r):
-            return discord.Permissions(view_channel=True, send_messages=False, send_messages_in_threads=True)
-    chat = Fil(g, 900, Public(), "💬 Chat")
-    chat.is_private = lambda: False
-    chat.guild = g
-    return Obj(g=g, chat=chat, staff=staff, langues=langues)
-
-
-def test_F3_une_carte_en_reponse_qui_s_efface_et_ne_se_repete_pas(faq_env):
-    g, chat = faq_env.g, faq_env.chat
-    m = Message(chat, g.membre(7), "Comment on fait pour rejoindre le clan ?")
-    assert run(faq.sur_message(m, maintenant=1000.0))
-    kw = m.reponses[0]
-    assert kw["delete_after"] == faq.EFFACER_S and kw["mention_author"] is False, "le chat reste propre"
-    assert "(type « Rell Seas »)" in textes(kw["view"])
-    m2 = Message(chat, g.membre(8), "comment rejoindre le clan svp ?")
-    assert not run(faq.sur_message(m2, maintenant=1100.0)), "même sujet, même salon, 5 minutes : une seule carte"
-    assert run(faq.sur_message(m2, maintenant=1000.0 + faq.SALON_S + 1))
-    m3 = Message(chat, g.membre(7), "comment on rejoint le clan ?")
-    assert not run(faq.sur_message(m3, maintenant=1000.0 + 2 * faq.SALON_S + 2)), "le même membre : une demi-heure"
-
-
-def test_F4_le_staff_les_salons_prives_et_les_destinations_manquantes_n_ont_rien(faq_env):
-    g, chat = faq_env.g, faq_env.chat
-    faq_env.staff.add(7)
-    assert not run(faq.sur_message(Message(chat, g.membre(7), "comment créer un ticket ?"), maintenant=1.0))
-    chat.is_private = lambda: True
-    assert not run(faq.sur_message(Message(chat, g.membre(8), "comment créer un ticket ?"), maintenant=2.0))
-    chat.is_private = lambda: False
-    assert not run(faq.sur_message(Message(chat, g.membre(9), "quelqu'un peut m'aider pour le boss ?"),
-                                   maintenant=3.0)), "pas de post 🛟 Help connu : aucun bouton qui ment"
-
-
-def test_F5_la_langue_du_membre_quand_la_question_ne_la_dit_pas(faq_env):
-    g, chat = faq_env.g, faq_env.chat
-    faq_env.langues[7] = "en"
-    m = Message(chat, g.membre(7), "trade ? middleman ? svp ?")
-    assert run(faq.sur_message(m, maintenant=50.0)) and "Trading" in textes(m.reponses[0]["view"])
+#  27/10/2026 : les réponses du bot (cartes, cadence, rappel) sont testées dans tests/test_reponses_auto.py.
 
 
 # ─── Ouvrir ou fermer les types de ticket ────────────────────────────────────
@@ -194,7 +125,7 @@ def test_T2_branche_dans_le_bot():
     ouvrir = _source("_ticket_ouvrir")
     assert "sont fermés pour le moment" in ouvrir and "tickets are closed for now" in ouvrir
     assert "{'tickethub:open', 'tickethub:gerer'}" in _source("_salon_panneau_tickets")
-    assert "bot.add_listener(_faq_hook, 'on_message')" in ast.unparse(ARBRE) and "faq.setup(" in SRC
+    assert "bot.add_listener(_faq_hook, 'on_message')" in ast.unparse(ARBRE) and "reponses_auto.setup(" in SRC
     dest = _source("_faq_destinations")
     assert "zones_posts" in dest and "_salon_des_tickets(g)" in dest
 
