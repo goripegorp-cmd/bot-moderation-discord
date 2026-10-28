@@ -1134,6 +1134,39 @@ async def _route_avatar(g, auteur, requete, corps):
     return 200, {"ok": True, "roblox_id": str(rid), "nom": vrai, "avatar": avatar, "_journal": None}
 
 
+async def completer_portrait(guild_id: int, a: dict) -> bool:
+    """28/10/2026 (le fondateur : « l'idée est vachement bien ») : le portrait Roblox d'une affiche qui n'en a pas, pris
+    tout seul — par son pseudo (l'identifiant retrouvé est gardé sur l'affiche) ou par son identifiant. Même chemin et
+    même cadence que la recherche de la direction (`_route_avatar`). → True si un portrait existe désormais. FAIL-SAFE."""
+    try:
+        rid = int(a.get("roblox_id") or 0)
+        if rid and _avatar_roblox(rid):
+            return True
+        if not rid:
+            nom = str(a.get("roblox_nom") or "").strip()
+            if not FORMAT_ROBLOX.fullmatch(nom):
+                return False
+            statut, rep = await _route_avatar(None, None, {}, {"roblox_nom": nom})
+            if statut != 200:
+                return False
+            rid = int(rep["roblox_id"])
+            async with _get_db() as db:
+                await db.execute("UPDATE rell_affiches SET roblox_id=? WHERE guild_id=? AND id=? AND roblox_id=0",
+                                 (rid, int(guild_id), str(a["id"])))
+                await db.commit()
+            return bool(rep.get("avatar"))
+        t = time.time()
+        recents = [x for x in _appels_roblox if t - x < 60]
+        if len(recents) >= ROBLOX_PAR_MINUTE:
+            return False
+        _appels_roblox[:] = recents + [t]
+        return bool(await _portrait(rid))
+    except Exception as ex:
+        _log("[AFFICHES][E3] portrait Roblox indisponible")
+        _log(f"[AFFICHES][E3:DETAIL] affiche={a.get('id')} {type(ex).__name__} {ex}")
+        return False
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Les rôles des métiers
 # ═══════════════════════════════════════════════════════════════════════════════

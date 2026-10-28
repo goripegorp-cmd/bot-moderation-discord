@@ -267,6 +267,8 @@ MEDIAS_DOSSIER_MAX = 512 * 1024 * 1024
 MEDIAS_LIBRE_MIN = 300 * 1024 * 1024   # place libre minimale du volume pour accepter une image
 FORMAT_MEDIA = re.compile(r"[A-Za-z0-9_-]{16}")
 FORMAT_AVATAR = re.compile(r"avatar/([0-9]{1,20})")
+#  28/10/2026 : l'avatar Discord d'un membre, copié par le serveur (la vitrine, quand l'affiche n'a pas de portrait Roblox).
+FORMAT_DISCORD = re.compile(r"discord/([0-9]{5,22})")
 MAGIQUES = ((b"\x89PNG\r\n\x1a\n", "image/png"), (b"\xff\xd8\xff", "image/jpeg"), (b"GIF87a", "image/gif"),
             (b"GIF89a", "image/gif"))
 #  Le nettoyage du site.
@@ -2740,8 +2742,11 @@ def _chemin_media(ident: str):
     """(chemin, type) d'une image du site : `media/<id>` (envoyée) ou `media/avatar/<id Roblox>`."""
     ident = str(ident or "")
     m = FORMAT_AVATAR.fullmatch(ident)
+    d = FORMAT_DISCORD.fullmatch(ident)
     if m:
         sous, nom = "avatars", m.group(1)
+    elif d:
+        sous, nom = "avatars_discord", d.group(1)
     elif FORMAT_MEDIA.fullmatch(ident):
         sous, nom = "medias", ident
     else:

@@ -72,13 +72,14 @@ export function rendreMur(corps, o = {}) {
     const ordre = tm ? elementsDe(cat, tm.cle).map((e) => e.cle) : [];
     const cles = [...groupes.keys()].sort((a, b) => (a === "__aucun") - (b === "__aucun") || ((ordre.indexOf(a) + 1 || 999) - (ordre.indexOf(b) + 1 || 999)) || a.localeCompare(b));
     //  Rien à défiler sans fin : au départ, le premier métier ouvert, et les suivants tant que le mur ouvert garde au plus
-    //  douze affiches (un petit équipage reste tout ouvert) ; au téléphone (deux par rangée), « Voir plus » par 8.
+    //  trente affiches (28/10/2026, le fondateur : des métiers repliés « cachés » sur la vitrine) ; au téléphone (deux par
+    //  rangée), « Voir plus » par 8.
     const pas = matchMedia("(max-width: 519px)").matches ? 8 : 18;
     let ouvertes = 0, encore = true;   // contigus : le premier groupe qui ne tient pas ferme les suivants
     remplacer(resultats, ...cles.map((k, i) => {
       const e = tm && k !== "__aucun" ? element(cat, tm.cle, k) : null;
       const n = groupes.get(k).length;
-      const defaut = i === 0 || (encore && ouvertes + n <= 12);
+      const defaut = i === 0 || (encore && ouvertes + n <= 30);
       if (defaut) ouvertes += n; else encore = false;
       return groupe({ titre: k === "__aucun" ? "Sans métier" : e ? e.nom : sansEmoji(k), compte: n,
         visuel: e ? insigneImage(e, "groupe-visuel") : null, icone: e ? null : "drapeau", cle: "eq-g-" + k,

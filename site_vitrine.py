@@ -9,7 +9,8 @@ UNE PAGE SANS SESSION, SUR INTERNET : elle ne montre que ce que la direction a r
     visibles. Une actualité : celles de la direction seulement (jamais les automatiques, qui citent des noms Discord).
     Les annonces et événements : leurs mentions deviennent « @membre ».
   · Le mur des affiches « visibles sur la vitrine » (réglage par affiche, oui par défaut), en champs publics SEULEMENT :
-    pseudo Roblox, surnom, prime, niveau, grade, statut, insignes, portrait Roblox. Jamais le nom ni l'avatar Discord,
+    pseudo Roblox, surnom, prime, niveau, grade, statut, insignes, portrait Roblox (28/10/2026, le fondateur : sans
+    portrait Roblox, l'avatar Discord du membre, copié et servi par le serveur). Jamais le nom Discord,
     aucun identifiant (une affiche, une image : des jetons opaques signés), aucune note.
   · Les analyses : seulement les parties d'un bloc « Analyses » public, calculées sur les affiches de la vitrine.
 
@@ -161,6 +162,68 @@ def _verrou(guild_id: int) -> asyncio.Lock:
 #  Ce que la vitrine montre (et rien d'autre)
 # ═══════════════════════════════════════════════════════════════════════════════
 
+#  28/10/2026 : « ça affiche pas les images des Discord sur le lien » — une affiche sans portrait Roblox montre l'avatar
+#  Discord de son membre. Le SERVEUR le télécharge (Discord), le réencode et le garde (`avatars_discord/<id>`), renouvelé
+#  chaque semaine ; la page ne charge jamais rien de Discord (CSP). Au plus `AVATARS_PAR_TOUR` par construction, en fond.
+AVATAR_DISCORD_FRAIS = 7 * 86400
+AVATARS_PAR_TOUR = 25
+_AVATARS_EN_COURS: set = set()
+_TACHES_AVATARS: set = set()
+
+
+def _avatar_discord_age(uid: int) -> float | None:
+    """L'âge (s) de l'avatar Discord gardé, ou None s'il n'y en a pas."""
+    chemin = tableau._chemin_media(f"discord/{int(uid)}")[0]
+    if chemin is None:
+        return None
+    try:
+        return time.time() - chemin.stat().st_mtime
+    except OSError:
+        return None
+
+
+async def _copier_avatars(g, uids: list) -> None:
+    """Télécharge (Discord), réencode et garde l'avatar de ces membres ; puis la vitrine se reconstruit. FAIL-SAFE."""
+    faits = 0
+    try:
+        dossier = tableau.dossier_site("avatars_discord")
+        for uid in uids:
+            m = g.get_member(int(uid))
+            if m is None:
+                continue
+            try:
+                octets = await m.display_avatar.replace(size=256, static_format="png").read()
+                sortie, _l, _h, typ = await asyncio.to_thread(tableau.reencoder_image, octets, 256)
+                ext = "webp" if typ == "image/webp" else "png"
+                await asyncio.to_thread(tableau._ecrire_atomique, dossier / f"{int(uid)}.{ext}", sortie)
+                autre = dossier / f"{int(uid)}.{'png' if ext == 'webp' else 'webp'}"
+                if autre.exists():
+                    await asyncio.to_thread(autre.unlink)
+                faits += 1
+            except Exception as ex:   # un avatar illisible : la silhouette reste, les autres passent
+                _signaler("V7", "avatar Discord non copié", ex, f"membre={uid}")
+    except Exception as ex:
+        _signaler("V7", "avatars Discord non copiés", ex)
+    finally:
+        for uid in uids:
+            _AVATARS_EN_COURS.discard((g.id, int(uid)))
+    if faits:
+        oublier(g.id)
+
+
+async def _prendre_portraits(g, lot: list) -> None:
+    """Les portraits Roblox manquants (`affiches.completer_portrait`), un par un ; puis la vitrine se reconstruit. Un
+    portrait introuvable n'est redemandé qu'au prochain démarrage (pas d'appel Roblox à chaque visite)."""
+    faits = 0
+    for a in lot:
+        if await affiches.completer_portrait(g.id, a):
+            faits += 1
+            _AVATARS_EN_COURS.discard((g.id, "rb", a["id"]))
+        await asyncio.sleep(1.0)
+    if faits:
+        oublier(g.id)
+
+
 def _propre(texte, maximum: int = 600) -> str:
     """Un texte public : mentions en « @membre » / « #salon », sans mise en forme Discord, borné."""
     return site_equipage.texte_discord(texte, None, maximum)
@@ -205,12 +268,22 @@ async def _construire(g) -> dict:
     ids = {a["id"]: _jeton("affiche", a["id"])[:12] for a in lignes}
     #  27/10/2026 : la hiérarchie — le grade montré vient du rang du membre lié ; le rang (nom, couleur, insigne) est public.
     avec_rangs = await hierarchie.assurer(g) is not None
-    mur, portraits = [], {}
+    mur, portraits, a_copier, roblox_a_prendre = [], {}, [], []
     for a in lignes:
         attributs = {ty: [k for k in (cles or []) if (ty, k) in elements] for ty, cles in (a["attributs"] or {}).items()}
         avatar = image(f"avatar/{int(a['roblox_id'])}") if a["roblox_id"] else ""
         if avatar:
             portraits[a["id"]] = tableau._chemin_media(f"avatar/{int(a['roblox_id'])}")[0]
+        elif a["roblox_nom"] and (g.id, "rb", a["id"]) not in _AVATARS_EN_COURS:
+            roblox_a_prendre.append(a)   # le portrait Roblox se prend tout seul (en fond) ; d'ici là, l'avatar Discord
+        if not avatar and a["membre_id"]:   # sans portrait Roblox : l'avatar Discord du membre (copié par le serveur)
+            uid = int(a["membre_id"])
+            age = _avatar_discord_age(uid)
+            if age is not None:
+                avatar = image(f"discord/{uid}")
+                portraits[a["id"]] = tableau._chemin_media(f"discord/{uid}")[0]
+            if (age is None or age > AVATAR_DISCORD_FRAIS) and (g.id, uid) not in _AVATARS_EN_COURS:
+                a_copier.append(uid)
         mur.append({"id": ids[a["id"]], "roblox": {"nom": site_equipage.sans_emoji(a["roblox_nom"])[:40], "avatar": avatar},
                     "surnom": site_equipage.sans_emoji(a["surnom"])[:60], "prime": int(a["prime"] or 0),
                     "niveau": int(a["niveau"] or 0), "grade": site_equipage.sans_emoji(hierarchie.grade_affiche(g, a))[:64],
@@ -218,6 +291,18 @@ async def _construire(g) -> dict:
         if avec_rangs:
             r = hierarchie.rang_affiche(g, a)
             mur[-1]["rang"] = None if r is None else dict(r, nom=site_equipage.sans_emoji(r["nom"])[:40])
+    if roblox_a_prendre:
+        lot_r = roblox_a_prendre[:10]
+        _AVATARS_EN_COURS.update((g.id, "rb", a["id"]) for a in lot_r)
+        tache_r = asyncio.get_running_loop().create_task(_prendre_portraits(g, lot_r))
+        _TACHES_AVATARS.add(tache_r)
+        tache_r.add_done_callback(_TACHES_AVATARS.discard)
+    if a_copier:
+        lot = a_copier[:AVATARS_PAR_TOUR]
+        _AVATARS_EN_COURS.update((g.id, u) for u in lot)
+        tache = asyncio.get_running_loop().create_task(_copier_avatars(g, lot))
+        _TACHES_AVATARS.add(tache)
+        tache.add_done_callback(_TACHES_AVATARS.discard)
     cites = {(ty, k) for x in mur for ty, ks in x["attributs"].items() for k in ks}
     grade_t = site_equipage._type_par(types, "grade", r"\bgrades?\b")
     if grade_t:
