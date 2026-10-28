@@ -129,6 +129,7 @@ import compactage  # 26/10/2026 : la base rend sa place au disque, la nuit (auto
 import candidature_site  # 26/10/2026 : le questionnaire en ligne du candidat (son lien, sa page) et son direct
 import annonces_modifiables  # 26/10/2026 : une annonce publiée, modifiée EN PLACE depuis le site de l'équipage (la tête)
 import textes  # 26/10/2026 : les textes du bot et les noms du site, réécrits par la direction (Textes & noms)
+import tickets_interdits  # 27/10/2026 : interdire des tickets (serveur, clan) depuis la fiche d'une personne, en silence
 import offtopic_filter as offtopic_filter  # politique/religion/militantisme (anti-FP gaming)
 import trust_system as trust_system  # confiance progressive des nouveaux + liens/invitations
 import behavior_guard as behavior_guard  # anti-crash (zalgo/invisible) + spam inter-salons + anti-automation
@@ -8831,8 +8832,8 @@ async def _create_ticket_corps(i, pid, ans=None):
         # ne passe pas. Owner/super-owner exemptés. Blacklist per-panel indexée par pid.
         if i.user.id in (pnl.get('blacklist') or []) and not libre and \
                 getattr(i.user, 'id', 0) not in (SUPER_OWNER_ID, getattr(i.guild, 'owner_id', 0)):
-            return None, ("🚫 Vous avez été blacklisté de ce panel de tickets. "
-                          "Contactez un administrateur si vous pensez que c'est une erreur.")
+            #  27/10/2026 : un refus GÉNÉRIQUE, sans variable — jamais qui, pourquoi, depuis quand (tickets_interdits.py).
+            return None, await textes.texte(i.guild.id, "tickets.interdit.refus")
         cat = await _categorie_tickets(i.guild) or i.guild.get_channel(pnl.get('category', 0))
         
         # Le rôle staff du panel (sinon le rôle staff global) ; pour Rell Seas, les rôles du clan en
@@ -9065,10 +9066,9 @@ async def _ticket_ouvrir(i, pid):
             return await i.response.send_message(view=_vue_ticket_message(
                 await textes.texte(i.guild.id, "recrutement.liste_noire.refus"), Palette.WARNING), ephemeral=True)
         if i.user.id in blacklist and not libre:
-            return await i.response.send_message(
-                "🚫 **Accès refusé**\n\nVous avez été blacklisté de ce panel de tickets.\nContactez un administrateur si vous pensez que c'est une erreur.",
-                ephemeral=True
-            )
+            #  27/10/2026 : une interdiction est SILENCIEUSE — un avis pour lui seul, générique et sans variable.
+            return await i.response.send_message(view=_vue_ticket_message(
+                await textes.texte(i.guild.id, "tickets.interdit.refus"), Palette.WARNING), ephemeral=True)
 
         # ⏰ FENÊTRE HORAIRE (owner) : refus hors 07h–12h / 13h–22h30 (Paris) — feedback
         # IMMÉDIAT avant le modal/la création (pour ne pas faire remplir un formulaire
@@ -10639,10 +10639,13 @@ class TicketControlView(View):
             # En privé, sans « Par » : le membre ne voit pas qui l'a interdit (le journal le garde)
             await i.response.send_message(view=_vue_blacklist(
                 f"### Interdit de tickets\n<@{tk['user']}> ne peut plus ouvrir de ticket « {panel_name} ».",
-                ticket_user.display_avatar.url if ticket_user else None, Palette.DANGER), ephemeral=True)
-            
+                ticket_user.display_avatar.url if ticket_user else None, Palette.DANGER), ephemeral=True,
+                allowed_mentions=discord.AllowedMentions.none())
+
             # Log
             await send_ticket_log(i.guild, 'blacklist', tk['user'], tk, extra=i.user.id)
+            #  27/10/2026 : qui, depuis quand — lu sur la fiche de la personne (le site, « Tickets »). Silencieux.
+            await tickets_interdits.noter(i.guild, tk['user'], [panel_id], par=i.user.id, source="ticket")
 
         except Exception as ex:
             _logerr("ticket.blacklist", ex, guild_id=getattr(i.guild, 'id', 0))
@@ -22044,6 +22047,14 @@ async def _activite_boot():
             for _regle in questionnaire.REGLES_RECRUTEMENT:
                 tableau.ajouter_regle(**_regle)
         await questionnaire.demarrer(bot)
+    with _Etape("tickets_interdits"):
+        #  27/10/2026 : interdire des tickets (serveur, clan) depuis la fiche d'une personne — les MÊMES listes que lit le
+        #  contrôle d'ouverture ; le clan entier par la liste noire du recrutement. Silencieux pour la personne.
+        tickets_interdits.setup(get_db=get_db, cfg=cfg, db_set=db_set, tete=TETE_IDS, exempte=_ticket_sans_limite,
+                                robot=lambda: getattr(bot.user, "id", 0), log=print)
+        await tickets_interdits.init_db()
+        if hasattr(tableau, "monter"):
+            tableau.monter(tickets_interdits)
     with _Etape("registre"):
         registre.setup(get_db=get_db, log=print, apres_grave=vigilance.planifier)
         await registre.init_db()
@@ -29342,7 +29353,10 @@ async def ticketblacklist_cmd(
                           membre_id=membre.id, auteur_id=i.user.id)
         await i.response.send_message(view=_vue_blacklist(
             f"### Interdit de tickets\n{membre.mention} ne peut plus ouvrir de ticket « {panel_name} ».\n"
-            "-# S'il essaie, un message le lui dit.", membre.display_avatar.url, Palette.DANGER), ephemeral=True)
+            "-# Il n'est pas prévenu : s'il essaie, un avis générique le lui dit.", membre.display_avatar.url,
+            Palette.DANGER), ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+        #  27/10/2026 : qui, depuis quand — lu sur sa fiche (le site). Rien ne lui est envoyé.
+        await tickets_interdits.noter(i.guild, membre.id, [target_pid], par=i.user.id, source="commande")
 
     elif action == "remove":
         if membre.id not in blacklist:
@@ -29357,7 +29371,10 @@ async def ticketblacklist_cmd(
                           membre_id=membre.id, auteur_id=i.user.id)
         await i.response.send_message(view=_vue_blacklist(
             f"### Tickets de nouveau ouverts\n{membre.mention} peut à nouveau ouvrir un ticket « {panel_name} ».",
-            membre.display_avatar.url, Palette.SUCCESS), ephemeral=True)
+            membre.display_avatar.url, Palette.SUCCESS), ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+        #  27/10/2026 : un panneau du clan rouvert lève aussi l'entrée de la liste noire du recrutement (elle interdit tout
+        #  le clan) ; le décor de la fiche suit. Rien ne lui est envoyé.
+        await tickets_interdits.apres_levee(i.guild, i.user, membre.id, [target_pid])
 
 
 # Phase 119 : enregistrer /mod après toutes ses subcommands

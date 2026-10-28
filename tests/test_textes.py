@@ -42,6 +42,7 @@ import questionnaire as Q
 import registre
 import site_equipage  # noqa: F401 — le site de l'équipage déclare sa famille de textes à l'import (T1)
 import candidature_site  # noqa: F401 — 26/10/2026 : le questionnaire en ligne aussi (T1, T8)
+import tickets_interdits  # noqa: F401 — 27/10/2026 : les interdictions de tickets déclarent leur famille (T1)
 import tableau
 import textes
 import transcript_store
@@ -150,7 +151,7 @@ def test_T1_declarer_refuse_les_fautes_de_cablage(registre_textes):
     assert len(textes._DECLARES) > 230, "recrutement, métiers, guide, annonces & événements, le site : tout est déclaré"
     familles = {x["groupe"] for x in textes._DECLARES.values()} - {"essai"}
     assert familles == {"recrutement", "metiers", "guide", "evenements", "site", "equipage_site",
-                        "candidature_site"}, familles
+                        "candidature_site", "tickets"}, familles
 
 
 def test_T2_seules_les_variables_declarees_sont_remplacees(registre_textes):
@@ -395,8 +396,8 @@ def test_T8_les_adresses_du_site(tmp_path, monkeypatch, registre_textes):
     st, liste = out["liste"]
     assert st == 200 and [g["nom"] for g in liste["groupes"]] == ["Recrutement", "Le questionnaire en ligne",
                                                                     "Métiers", "Le guide du clan",
-                                                                    "Annonces & événements", "Le site",
-                                                                    "Le site de l'équipage"]
+                                                                    "Annonces & événements", "Les tickets",
+                                                                    "Le site", "Le site de l'équipage"]
     t = liste["groupes"][0]["textes"][0]
     assert set(t) >= {"cle", "titre", "aide", "defaut", "valeur", "modifie", "version", "max", "lignes", "variables",
                       "maj_le", "maj_par", "partie"}

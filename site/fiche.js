@@ -8,6 +8,7 @@ import { charger, vue as vueJeu } from "./donnees.js";
 import { pancarte, confirmer, bouton, avatar, pastille, tampon, vide, squelettes, boutonCopie, nomDe, lienNom, toast, liste, champ, zoneTexte } from "./ui.js";
 import { ligne, groupesParJours, outilsGroupes } from "./rangement.js";
 import { ligneEquipe } from "./equipes_admin.js";
+import { blocTickets } from "./tickets_interdits.js";
 
 // ─── Couleurs et libellés partagés ──────────────────────────────────────────
 export const COULEURS_CAT = {
@@ -196,6 +197,7 @@ function rendreFiche() {
   }
   if (lignesAgir.length) corps.push(h("div", { classe: "cadre pile serree fiche-agir" }, ...lignesAgir,
     h("p", { classe: "aide avance" }, "Même circuit que les commandes : fiche au casier, message privé au membre au nom du serveur, journal ; motif obligatoire. Un casier effacé se rétablit pendant 30 jours, dans Sanctions.")));
+  corps.push(blocTickets(m));   // 27/10/2026 : « Tickets » — ce qui lui est interdit, sous les sanctions (tickets_interdits.js)
   const enCours = ((etat.d && etat.d.en_cours) || []).some((c) => c.id === m.id);
   const nb = { chrono: null, sanctions: f.sanctions.length, tickets: f.tickets.length, candidatures: f.candidatures.length + (enCours ? 1 : 0),
     questions: f.questions.length, sondages: (f.sondages || []).length + (f.idees || []).length, journal: f.journal.length, donnees: f.donnees.length };

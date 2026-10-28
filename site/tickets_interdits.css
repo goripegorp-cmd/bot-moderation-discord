@@ -1,0 +1,31 @@
+/* tickets_interdits.css — le bloc « Tickets » de la fiche d'une personne et la fenêtre « Panneau par panneau »
+   (tickets_interdits.js, 27/10/2026). Ramassé : trois lignes, les actions alignées à droite ; au téléphone, chaque ligne
+   passe sur deux rangs et son bouton prend la largeur. */
+.fiche-tickets { gap: 6px; }
+.ti-tete { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; min-width: 0; }
+.ti-tete > .rangee { gap: 6px; }
+.ti-ligne {
+  display: grid; grid-template-columns: 9.5em max-content minmax(0, 1fr) auto; align-items: center; gap: 4px 12px;
+  min-width: 0; min-height: 44px; padding-top: 6px; border-top: 1px dashed rgba(90, 67, 48, .28);
+}
+.ti-nom { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+.ti-detail { min-width: 0; color: var(--encre-2); font-size: var(--t-petit); overflow-wrap: anywhere; }
+.ti-actions { justify-content: flex-end; gap: 6px; }
+.ti-squelette { grid-column: 2 / -1; height: 26px; }
+.ti-ferme { font-weight: 400; color: var(--encre-3); }
+/* La fenêtre « Panneau par panneau » : une ligne par panneau, rangés par famille. */
+.ti-famille { display: grid; gap: 4px; }
+.ti-panneaux { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
+.ti-panneau {
+  display: grid; grid-template-columns: minmax(0, 1fr) max-content auto; align-items: center; gap: 4px 10px;
+  min-height: 48px; padding: 6px 0; border-top: 1px dashed rgba(90, 67, 48, .28);
+}
+.ti-panneau > .ti-detail { grid-column: 1 / 3; grid-row: 2; }
+.ti-panneau > .bouton { grid-column: 3; grid-row: 1; }
+@media (max-width: 719px) {
+  .ti-ligne { grid-template-columns: minmax(0, 1fr) max-content; }
+  .ti-ligne > .ti-detail, .ti-ligne > .ti-actions { grid-column: 1 / -1; }
+  .ti-ligne .ti-actions .bouton.p, .ti-tete > .rangee > .bouton.p { flex: 1 1 auto; }
+  .ti-tete > .rangee { width: 100%; }
+  .ti-squelette { grid-column: 1 / -1; }
+}

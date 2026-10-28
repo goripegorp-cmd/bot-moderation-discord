@@ -611,7 +611,7 @@ def test_R12b_reponse_eliminatoire_aucun_ticket_message_prive_et_trace(tmp_path)
     assert suivi["elimines"][0]["champ"] == "Tranche d'âge"
     assert decidees["lignes"][0]["motif"] == "Éliminé d'office · Tranche d'âge" and decidees["comptes"]["elimine"] == 1
     assert noire["actifs"][0]["membre"]["id"] == str(CANDIDAT), "la liste noire (réglée sur le panneau)"
-    assert "Tu ne peux plus ouvrir de demande" in textes(apres.messages[0]), "le refus poli, sans ticket"
+    assert "Tu ne peux pas ouvrir ce type de ticket" in textes(apres.messages[0]), "le refus poli, sans ticket"
     sans_echec(b)
 
 
@@ -641,7 +641,7 @@ def test_R13_liste_noire_infos_lever_et_tout_lever(tmp_path):
     assert entree["motif"] == "étape 1 — pseudo introuvable" and entree["par"]["id"] == str(FONDATEUR)
     assert entree["ticket"] == tid and entree["depuis"] > 0 and entree["candidatures"] == 1
     assert avant["total"] == 2
-    assert "Tu ne peux plus ouvrir de demande" in textes(bloque.messages[0])
+    assert "Tu ne peux pas ouvrir ce type de ticket" in textes(bloque.messages[0])
     assert un[0] == 200 and un[1]["leves"] == 1 and [x["membre"]["id"] for x in apres_un["actifs"]] == [str(AUTRE)]
     assert apres_un["leves"][0]["leve_par"]["id"] == str(FONDATEUR), "la levée garde la trace"
     assert "Es-tu sûr" in textes(libre.messages[0]), "levé : il peut recandidater"

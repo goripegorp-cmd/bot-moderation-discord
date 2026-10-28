@@ -11,6 +11,7 @@
 //              recrutement » de bout en bout : le vrai chemin du bot sur le site local seulement), recrutement_decidees
 //              (les décidées par morceaux, « Voir plus » : sur la base --lourd).
 //              navigation (27/10/2026 : les rubriques regroupées, les anciennes adresses, les vues sur place, les noms).
+//              tickets_interdits (27/10/2026 : la fiche interdit les tickets du clan, refus au clic, serveur ouvert, levée).
 //   « textes » (Textes & noms) lit aussi ce que le FAUX Discord du site local a reçu (`/tableau/demo/discord`) : il ne se
 //   joue que sur le site local, jamais sur la maquette.
 //
@@ -1553,6 +1554,75 @@ async function parcoursNavigation(o) {
   });
 }
 
+// ═══ LES INTERDICTIONS DE TICKETS (27/10/2026) ═══════════════════════════════════════════════════════════════
+// La fiche d'une personne, son bloc « Tickets » : la tête interdit les tickets du clan à un membre ; il touche un panneau
+// du clan (le VRAI chemin du bot, faux Discord) : refusé, un avis générique ; un panneau du serveur : accepté ; aucun message
+// privé ; la tête lève l'interdiction. L'état est relu par l'API après chaque geste. Le site local seulement.
+const MEMBRE_TI = "1012";   // Corsaire, du clan, sans interdiction au départ
+async function parcoursTicketsInterdits(o) {
+  const etatTI = () => api(o, "tickets/interdictions?membre=" + MEMBRE_TI);
+  const demo = (chemin) => evaluer(o, `fetch(${JSON.stringify(BASE + chemin)}, { credentials: "same-origin" }).then((r) => r.json())`);
+  const bloc = (famille) => evaluer(o, `(() => { const l = document.querySelector('dialog[open] .fiche-tickets .ti-ligne[data-famille="${famille}"]'); return l ? { etat: l.dataset.etat, texte: l.innerText } : null; })()`);
+  const ouvrirFiche = async () => {
+    await aller(o, "#port/repertoire");   // « &membre= » ne lit que les identifiants de Discord (5 chiffres et plus)
+    await evaluer(o, "import('/tableau/espace/s/fiche.js').then((m) => { m.ouvrirFiche('" + MEMBRE_TI + "'); return 1; })");
+    return attendre(() => evaluer(o, "!!document.querySelector('dialog[open] .fiche-tickets .ti-ligne[data-etat]')"), 10000, 200);
+  };
+
+  await etape(o, "Fiche : le bloc « Tickets » sous les sanctions, serveur et clan autorisés", async () => {
+    if (!await ouvrirFiche()) return { ok: false, detail: "bloc Tickets absent de la fiche" };
+    const place = await evaluer(o, "(() => { const d = document.querySelector('dialog[open]'); const t = d.querySelector('.fiche-tickets'), on = d.querySelector('.onglets-fiche'), a = d.querySelector('.fiche-agir:not(.fiche-tickets)');"
+      + " return !!t && !!on && !!(t.compareDocumentPosition(on) & 4) && (!a || !!(a.compareDocumentPosition(t) & 4)); })()");
+    const s = await bloc("serveur"), c = await bloc("clan"), e = await etatTI();
+    const ok = place && s.etat === "autorise" && c.etat === "autorise" && e.familles.clan.etat === "autorise";
+    return { ok, detail: `place ${place} · serveur ${s.etat} · clan ${c.etat}` };
+  });
+
+  await etape(o, "La tête interdit les tickets du clan, avec un motif", async () => {
+    if (!await cliquer(o, 'dialog[open] .ti-ligne[data-famille="clan"] button', "Interdire")) return { ok: false, detail: "bouton « Interdire » absent" };
+    await attendre(() => evaluer(o, "!!document.querySelectorAll('dialog[open]')[1]"), 4000, 150);
+    await ecrire(o, "Motif (facultatif)", "Parcours : réponses copiées");
+    if (!await cliquer(o, "dialog[open] .pancarte-pied button", "Interdire")) return { ok: false, detail: "confirmation absente" };
+    const e = await attendre(async () => { const x = await etatTI(); return x.familles.clan.etat === "interdit" ? x : null; }, 8000);
+    if (!e) return { ok: false, detail: "le serveur n'a pas l'interdiction : " + JSON.stringify(await etatTI()).slice(0, 200) };
+    const c = await attendre(async () => { const x = await bloc("clan"); return x && x.etat === "interdit" ? x : null; }, 5000, 200);
+    const noire = await api(o, "recrutement/liste_noire");
+    const liste = (noire.actifs || []).some((x) => x.membre && x.membre.id === MEMBRE_TI);
+    const ok = e.familles.clan.motif === "Parcours : réponses copiées" && e.familles.serveur.etat === "autorise" && !!c && liste;
+    return { ok, detail: `clan ${e.familles.clan.etat} « ${e.familles.clan.motif} » · bloc ${c && c.texte.replace(/\s+/g, " ")} · liste noire du recrutement : ${liste}` };
+  });
+
+  await etape(o, "Le membre touche un panneau du clan : refusé, un avis générique", async () => {
+    const r = await demo("/tableau/demo/recrutement/ouvrir?membre=" + MEMBRE_TI + "&panneau=p1");
+    const lu = String(r.lu || "");
+    const ok = r.ok === false && lu.includes("Tu ne peux pas ouvrir ce type de ticket") && !/réponses copiées|liste noire|GoRipe/i.test(lu);
+    return { ok, detail: "lu : " + lu.slice(0, 160) };
+  });
+
+  await etape(o, "Il touche un panneau du serveur : accepté (un ticket s'ouvre)", async () => {
+    const r = await demo("/tableau/demo/recrutement/ouvrir?membre=" + MEMBRE_TI + "&panneau=p2");
+    return { ok: r.ok === true && Number(r.ticket) > 0, detail: "ticket " + r.ticket + " · " + String(r.confirmation || "").slice(0, 80) };
+  });
+
+  await etape(o, "Silence : aucun message privé ne lui est parti", async () => {
+    const mp = await demo("/tableau/demo/mp?membre=" + MEMBRE_TI);
+    return { ok: Array.isArray(mp.messages) && mp.messages.length === 0, detail: (mp.messages || []).length + " message(s) privé(s)" };
+  });
+
+  await etape(o, "La tête lève l'interdiction ; le panneau du clan se rouvre", async () => {
+    if (!await ouvrirFiche()) return { ok: false, detail: "fiche introuvable" };
+    if (!await cliquer(o, 'dialog[open] .ti-ligne[data-famille="clan"] button', "Lever")) return { ok: false, detail: "bouton « Lever l'interdiction » absent" };
+    await attendre(() => evaluer(o, "!!document.querySelectorAll('dialog[open]')[1]"), 4000, 150);
+    if (!await cliquer(o, "dialog[open] .pancarte-pied button", "Lever")) return { ok: false, detail: "confirmation absente" };
+    const e = await attendre(async () => { const x = await etatTI(); return x.familles.clan.etat === "autorise" ? x : null; }, 8000);
+    const c = await attendre(async () => { const x = await bloc("clan"); return x && x.etat === "autorise" ? x : null; }, 5000, 200);
+    const r = await demo("/tableau/demo/recrutement/ouvrir?membre=" + MEMBRE_TI + "&panneau=p1");
+    const mp = await demo("/tableau/demo/mp?membre=" + MEMBRE_TI);
+    const ok = !!e && !!c && r.ok === true && String(r.confirmation || "").includes("Es-tu sûr") && (mp.messages || []).length === 0;
+    return { ok, detail: `clan ${e && e.familles.clan.etat} · bloc ${c && c.etat} · p1 : ${r.ok} · MP ${(mp.messages || []).length}` };
+  });
+}
+
 // ─── Le tout ────────────────────────────────────────────────────────────────
 async function principal() {
   mkdirSync(SORTIE, { recursive: true });
@@ -1572,6 +1642,7 @@ async function principal() {
     if (PARCOURS.includes("recherche")) await parcoursRecherche(o);
     if (PARCOURS.includes("textes")) await parcoursTextes(o);
     if (PARCOURS.includes("navigation")) await parcoursNavigation(o);
+    if (PARCOURS.includes("tickets_interdits")) await parcoursTicketsInterdits(o);
   } finally {
     try { await envoyer("Browser.close"); } catch (e) { /* déjà fermé */ }
     await pause(400);

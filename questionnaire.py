@@ -39,7 +39,9 @@ vraie affiche dans le ticket… Il est complètement automatique. »
     connaissances), la liste noire des tickets de recrutement au refus (réglable), puis la fermeture — sans le MP de
     fermeture (la décision l'a déjà dit).
   · La LISTE NOIRE (`recrutement_liste_noire`) : qui, depuis quand, pourquoi, par qui ; levée une à une ou toutes ;
-    écrite aussi dans la liste noire des panneaux (le contrôle d'ouverture du bot la lit).
+    écrite aussi dans la liste noire des panneaux (le contrôle d'ouverture du bot la lit). 27/10/2026 : SILENCIEUSE —
+    aucun message ne la dit (ni le refus, ni la levée) ; au clic d'un panneau, un refus générique. C'est aussi « Tickets
+    du clan » sur la fiche d'une personne (tickets_interdits.py).
   · Le NETTOYAGE : des règles réglables (rubrique « Nettoyage ») et la purge exceptionnelle des candidatures refusées
     (aperçu, puis confirmation forte).
 
@@ -367,12 +369,15 @@ _declarer("recrutement.confirmation.annule", "Annulé : aucun ticket n'est cré�
           titre="Après « Non »", partie=_OUVERTURE, ordre=64, max_=300, aide="Pour la personne seule.")
 _declarer("recrutement.fiche.titre", "Ta fiche · Your form", titre="Le titre de la fiche", partie=_OUVERTURE,
           ordre=65, max_=45, lignes=False, aide="En haut de la fenêtre des premières questions (45 caractères au plus).")
+#  27/10/2026, le fondateur : une interdiction est SILENCIEUSE — « ils ne savent pas de qui, de quoi, comment ». Un avis
+#  GÉNÉRIQUE, sans aucune variable (le code ne lui passe ni qui, ni pourquoi, ni depuis quand : même réécrit, il ne peut
+#  pas les dire) ; jamais « liste noire ».
 LISTE_NOIRE_REFUS = _declarer(
     "recrutement.liste_noire.refus",
-    "Tu ne peux plus ouvrir de demande de recrutement : ta candidature a déjà été étudiée. Si tu penses que c'est une "
-    "erreur, écris à la direction.\n-# You can no longer open a recruitment request: your application was already "
-    "reviewed.", titre="Un candidat sur liste noire", partie=_OUVERTURE, ordre=66, max_=900,
-    aide="Pour la personne seule, si elle est sur la liste noire des tickets de recrutement : aucun ticket n'est créé.")
+    "Tu ne peux pas ouvrir ce type de ticket pour le moment.\n-# You can't open this type of ticket right now.",
+    titre="Refus à l'ouverture (tickets du clan interdits)", partie=_OUVERTURE, ordre=66, max_=900,
+    aide="Pour la personne seule, quand les tickets du clan lui sont interdits : aucun ticket n'est créé. Aucune "
+         "variable : jamais qui, pourquoi, ni depuis quand.")
 #  Les décisions : le message dans le ticket et le message privé.
 _CANDIDAT_V = (("candidat", "le candidat (mention)"),)
 _declarer("recrutement.decision.acceptee",
@@ -395,10 +400,8 @@ _declarer("recrutement.mp.demande_refusee",
           "Your request to join the GoRP clan was not accepted. Thank you for your interest.",
           titre="Demande refusée (message privé)", partie=_DECISIONS, ordre=103, max_=1500, requis=False,
           aide="Envoyé en privé quand la demande est refusée avant le questionnaire. Vide : pas de message privé.")
-_declarer("recrutement.mp.liste_noire",
-          "-# Tu ne pourras pas ouvrir de nouvelle demande de recrutement. · You won't be able to open a new "
-          "recruitment request.", titre="La liste noire (ajouté au message privé)", partie=_DECISIONS, ordre=104,
-          max_=400, requis=False, aide="Ajouté au message privé d'un refus quand le refus met sur liste noire.")
+#  27/10/2026 : plus de ligne « liste noire » ajoutée au message privé d'un refus — une interdiction est silencieuse
+#  (il apprend seulement « accepté » ou « refusé » ; le reste, en touchant un panneau).
 _declarer("recrutement.mp.questionnaire",
           "Ta demande de recrutement est acceptée : ton questionnaire t'attend dans ton ticket {ticket}.\n-# Your "
           "recruitment request is accepted: your quiz is waiting in your ticket.",
@@ -3520,10 +3523,9 @@ async def refuser(g, tid: int, auteur, *, depuis: str = "etape1", note: str = ""
             await _au_journal(g, "recrutement.etape1_refusee", f"Recrutement : demande refusée pour <@{int(tk['user'])}>"
                               f" par <@{auteur.id}>" + (f" — {note}" if note else ""),
                               membre_id=int(tk["user"]), auteur_id=auteur.id)
-    #  Hors du verrou : le message privé, la liste noire, puis la fermeture planifiée.
+    #  Hors du verrou : le message privé (la décision seule : jamais la liste noire, 27/10/2026), la liste noire, puis la
+    #  fermeture planifiée.
     mp = await textes_du_site.texte(g.id, "recrutement.mp.refusee" if final else "recrutement.mp.demande_refusee")
-    if mp.strip() and p["liste_noire"]:
-        mp += "\n" + await textes_du_site.texte(g.id, "recrutement.mp.liste_noire")
     mp_ok = await _mp(g, int(tk["user"]), mp)
     if not mp_ok:
         await _noter(g.id, tid, "mp_impossible", 0, "refus")
@@ -3680,6 +3682,17 @@ async def sur_liste_noire(guild_id: int, membre_id: int) -> bool:
     return r is not None
 
 
+async def entree_liste_noire(guild_id: int, membre_id: int) -> dict | None:
+    """27/10/2026 (la fiche d'une personne, tickets_interdits.py) : son entrée ACTIVE — depuis quand, pourquoi, par qui,
+    le ticket refusé — ou None."""
+    if _get_db is None:
+        return None
+    r = await _un("SELECT id, depuis, motif, par, ticket_id FROM recrutement_liste_noire WHERE guild_id=? AND"
+                  " membre_id=? AND leve_le=0 ORDER BY id DESC LIMIT 1", (int(guild_id), int(membre_id)))
+    return None if r is None else {"id": int(r[0]), "depuis": int(r[1] or 0), "motif": r[2] or "", "par": int(r[3] or 0),
+                                    "ticket": int(r[4] or 0)}
+
+
 async def _ecrire_liste_noire_cfg(g, membre_id, ajouter: bool) -> bool:
     """La liste noire des panneaux de recrutement — celle que lit le contrôle d'ouverture du bot (`liste_noire`,
     branché par bot.py). Un échec est dit : la liste du site reste juste, le bot la relit aussi à l'ouverture."""
@@ -3810,9 +3823,7 @@ async def eliminer(g, membre, panneau: str, champ: str, reponse: str) -> dict:
                                                      str(panneau or ""), _net(champ)[:CHAMP_TITRE_MAX],
                                                      _net(reponse)[:OPTION_MAX], _maintenant()))
         await db.commit()
-    mp = await textes_du_site.texte(g.id, "recrutement.mp.demande_refusee")
-    if mp.strip() and p["liste_noire"]:
-        mp += "\n" + await textes_du_site.texte(g.id, "recrutement.mp.liste_noire")
+    mp = await textes_du_site.texte(g.id, "recrutement.mp.demande_refusee")   # le refus seul : jamais la liste noire
     mp_ok = await _mp(g, uid, mp)
     noire = False
     if p["liste_noire"]:
@@ -5288,7 +5299,7 @@ async def _messages_parcours(g, pid: str, p: dict, pnl: dict, fiche: list, nb_e:
         if any(ch.get("eliminatoires") for ch in fiche):
             msgs.append({"cle": "elimine", "titre": "Éliminé d'office", "ou": "pour lui seul, et en message privé",
                          "quand": "Une réponse éliminatoire : aucun ticket n'est créé.",
-                         "cles": ["recrutement.elimine", "recrutement.mp.demande_refusee", "recrutement.mp.liste_noire"],
+                         "cles": ["recrutement.elimine", "recrutement.mp.demande_refusee"],
                          "blocs": _texte_blocs(gid, _t(gid, "recrutement.elimine"), couleur=COULEUR_CIRE)})
     etat_ouv = "direct" if mode == "direct" else "questionnaire" if mode == "automatique" else "demande"
     vues = [("affiche", "L'affiche", "dans le ticket (le seul message à l'ouverture)", "Le ticket s'ouvre.",
@@ -5317,7 +5328,6 @@ async def _messages_parcours(g, pid: str, p: dict, pnl: dict, fiche: list, nb_e:
             msgs.append({"cle": "mp_questionnaire", "titre": "Demande acceptée", "ou": "en message privé",
                          "quand": "La direction ouvre l'étape suivante (l'affiche est réécrite sans le prévenir).",
                          "cles": ["recrutement.mp.questionnaire"], "blocs": msgs_mp})
-    noire = "\n" + _t(gid, "recrutement.mp.liste_noire") if p["liste_noire"] else ""
     msgs += [
         {"cle": "acceptee", "titre": "Acceptée", "ou": "dans le ticket, puis en message privé",
          "quand": "La direction accepte : rôle du clan, puis fermeture.",
@@ -5325,16 +5335,17 @@ async def _messages_parcours(g, pid: str, p: dict, pnl: dict, fiche: list, nb_e:
          "blocs": _texte_blocs(gid, _t(gid, "recrutement.decision.acceptee", candidat=f"<@{cand}>"), couleur=COULEUR_VERT)
          + _texte_blocs(gid, _t(gid, "recrutement.mp.acceptee"))},
         {"cle": "refusee", "titre": "Refusée", "ou": "dans le ticket, puis en message privé",
-         "quand": "La direction refuse" + (" : liste noire, puis fermeture." if p["liste_noire"] else " : fermeture."),
-         "cles": ["recrutement.refus_final", "recrutement.mp.refusee", "recrutement.mp.liste_noire"],
+         "quand": "La direction refuse" + (" : fermeture, et ses tickets du clan interdits (sans le lui dire)."
+                                           if p["liste_noire"] else " : fermeture."),
+         "cles": ["recrutement.refus_final", "recrutement.mp.refusee"],
          "blocs": _texte_blocs(gid, f"<@{cand}>\n" + _t(gid, "recrutement.refus_final"), couleur=COULEUR_CIRE)
-         + _texte_blocs(gid, _t(gid, "recrutement.mp.refusee") + noire)}]
+         + _texte_blocs(gid, _t(gid, "recrutement.mp.refusee"))}]
     if mode == "approbation":
         msgs.append({"cle": "demande_refusee", "titre": "Demande refusée", "ou": "dans le ticket, puis en message privé",
                      "quand": "La direction refuse sa fiche (avant le questionnaire).",
-                     "cles": ["recrutement.refus_etape1", "recrutement.mp.demande_refusee", "recrutement.mp.liste_noire"],
+                     "cles": ["recrutement.refus_etape1", "recrutement.mp.demande_refusee"],
                      "blocs": _texte_blocs(gid, f"<@{cand}>\n" + _t(gid, "recrutement.refus_etape1"), couleur=COULEUR_CIRE)
-                     + _texte_blocs(gid, _t(gid, "recrutement.mp.demande_refusee") + noire)})
+                     + _texte_blocs(gid, _t(gid, "recrutement.mp.demande_refusee"))})
     msgs.append({"cle": "direction", "titre": "Le panneau « Direction »", "ou": "pour la tête seule",
                  "quand": "La direction touche « Direction » sur l'affiche.",
                  "cles": ["recrutement.direction.titre", "recrutement.equipe.decision", "recrutement.equipe.bouton.suivante",
