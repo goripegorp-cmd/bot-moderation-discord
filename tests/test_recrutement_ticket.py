@@ -1433,3 +1433,46 @@ def test_R28_un_identifiant_non_ascii_est_refuse_en_400_jamais_500(local):
     assert [Q_._chiffres(x) for x in ("0", "42", "007", "²", "١٢", "５", "-1", "", None, True, 12, -4)] == \
         [0, 42, 7, None, None, None, None, None, None, None, 12, None]
     assert Q_._chiffres("1" * 21) is None and Q_._chiffres("1" * 16, 15) is None
+
+
+# ═══ R16 : le questionnaire abandonné — un rappel à 2 jours, la fermeture une semaine après (28/10/2026) ════════════
+
+def test_R16_questionnaire_abandonne_rappel_puis_fermeture_sans_liste_noire(tmp_path):
+    b = banc(tmp_path)
+    fermes = []
+
+    async def fermer_ticket(g, tid, motif):
+        fermes.append((tid, motif))
+        return True, "fermé"
+
+    async def sc():
+        await b.preparer()
+        b.monter(fermer_ticket=fermer_ticket)
+        await parcours_regle(b, mode="automatique")
+        tid, fil = await b.ouvrir_ticket()
+        s = await Q._suivi(b.g.id, tid)
+        e = await Q._envoi(s["envoi_id"])
+        t0 = int(e["envoye_le"])
+        tot = await Q.veiller_relances(b.g, maintenant=t0 + Q.RELANCE_APRES_S - 60)
+        rappel = await Q.veiller_relances(b.g, maintenant=t0 + Q.RELANCE_APRES_S + 60)
+        encore = await Q.veiller_relances(b.g, maintenant=t0 + Q.RELANCE_APRES_S + 3600)
+        n_mp = len(b.candidat.mp)
+        avant = await Q.veiller_relances(b.g, maintenant=Q._maintenant() + Q.FERMETURE_APRES_S - 60)
+        fin = await Q.veiller_relances(b.g, maintenant=Q._maintenant() + Q.FERMETURE_APRES_S + 60)
+        return tid, tot, rappel, encore, n_mp, avant, fin, await Q._suivi(b.g.id, tid), await Q.sur_liste_noire(b.g.id, b.candidat.id)
+    tid, tot, rappel, encore, n_mp, avant, fin, s, noire = run(sc())
+    assert tot == {"relances": 0, "fermetures": 0}, "moins de 2 jours : rien"
+    assert rappel["relances"] == 1 and encore["relances"] == 0, "UN rappel, pas deux"
+    texte, kw = b.candidat.mp[0]
+    tout = (texte or "") + json.dumps([c.to_components() for c in [kw.get("view")] if c], ensure_ascii=False, default=str)
+    assert "pas terminé" in tout and "Reprendre mon questionnaire" in tout and f"/{b.g.id}/" in tout, "le lien de son ticket"
+    assert avant["fermetures"] == 0 and fin["fermetures"] == 1 and fermes == [(tid, fermes[0][1])]
+    assert s["etape"] == "ferme" and not noire, "fermé sans décision, jamais sur la liste noire"
+    assert n_mp >= 1 and len(b.candidat.mp) == n_mp + 1, "un message privé de fermeture"
+
+
+def test_R16b_il_reprend_le_compte_repart():
+    assert Q.decision_relance(activite=100, relance=0, t=100 + Q.RELANCE_APRES_S) == "relancer"
+    assert Q.decision_relance(activite=500, relance=200, t=500 + 86400) == "", "il a repris après le rappel : ni fermeture, ni rappel"
+    assert Q.decision_relance(activite=500, relance=200, t=500 + Q.RELANCE_APRES_S) == "relancer", "nouveau silence : nouveau rappel"
+    assert Q.decision_relance(activite=100, relance=200, t=200 + Q.FERMETURE_APRES_S) == "fermer"

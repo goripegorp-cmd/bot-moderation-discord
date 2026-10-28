@@ -344,6 +344,32 @@ _declarer("recrutement.reponse_manquante",
           "Chaque question demande une réponse : rouvre le formulaire avec « Répondre ».\n-# Every question needs an "
           "answer: open the form again with \"Answer\".", titre="Une réponse manque", partie=_BOUTONS, ordre=55,
           max_=600, aide="Pour le candidat seul, quand un champ est resté vide.")
+_declarer("recrutement.relance.mp",
+          "### ⚓ Ton questionnaire de recrutement t'attend\nTu l'as commencé mais il n'est **pas terminé**. Reprends-le "
+          "depuis ton ticket (le bouton ci-dessous).\n**Sans réponse d'ici le {date}, ton ticket sera fermé** : il faudra en "
+          "rouvrir un et tout recommencer.\n-# Your recruitment questionnaire isn't finished: resume it from your ticket. "
+          "Without an answer by {date}, the ticket will be closed.",
+          titre="Le rappel en privé (2 jours sans nouvelles)", partie="Les questionnaires abandonnés", ordre=1, max_=1200,
+          variables=(("date", "la date de fermeture, JJ/MM"),),
+          aide="Envoyé une fois, après 2 jours sans aucune réponse ni brouillon du candidat.")
+_declarer("recrutement.relance.ticket",
+          "Ton questionnaire n'est pas terminé : reprends-le ici. **Sans réponse d'ici le {date}, ce ticket sera fermé** "
+          "(il faudra tout recommencer).\n-# Your questionnaire isn't finished: without an answer by {date}, this ticket "
+          "will be closed.", titre="Le rappel dans le ticket (messages privés fermés)", partie="Les questionnaires abandonnés",
+          ordre=2, max_=800, variables=(("date", "la date de fermeture, JJ/MM"),),
+          aide="Quand ses messages privés sont fermés, le rappel est posté dans son ticket (il est mentionné).")
+_declarer("recrutement.relance.bouton", "Reprendre mon questionnaire · Resume", titre="Le bouton du rappel",
+          partie="Les questionnaires abandonnés", ordre=3, max_=80, lignes=False, aide="Il mène à son ticket.")
+_declarer("recrutement.relance.fermeture",
+          "Sans nouvelles depuis le rappel : ce ticket se ferme. Pour candidater de nouveau, ouvre un nouveau ticket.\n"
+          "-# No news since the reminder: this ticket is closing. Open a new ticket to apply again.",
+          titre="Le message de fermeture (questionnaire abandonné)", partie="Les questionnaires abandonnés", ordre=4,
+          max_=800, aide="Posté dans le ticket juste avant sa fermeture, une semaine après le rappel.")
+_declarer("recrutement.relance.mp_ferme",
+          "Ton ticket de recrutement est fermé : ton questionnaire n'a pas été terminé. Tu peux en ouvrir un nouveau quand "
+          "tu veux.\n-# Your recruitment ticket is closed: the questionnaire wasn't finished. You can open a new one anytime.",
+          titre="Le message privé de fermeture (questionnaire abandonné)", partie="Les questionnaires abandonnés", ordre=5,
+          max_=800, aide="Aucune liste noire : il peut rouvrir un ticket.")
 _declarer("recrutement.lien_candidat",
           "Ton lien personnel pour répondre : il est à toi seul, ne le partage pas.\n-# Your personal link to answer: "
           "it's yours only, don't share it.", titre="Son lien personnel (pour lui)", partie=_BOUTONS, ordre=56,
@@ -661,6 +687,7 @@ _clan = _metiers_liste = _metiers_membre = None
 _web_absent = 0.0      # le module de la page web manque : on ne le recherche pas avant cette heure
 _bot = None
 _log = print
+_fermer_ticket = None
 _fichier_banque, _fichier_liens = FICHIER_BANQUE, FICHIER_LIENS
 _semes: set = set()        # les serveurs dont la banque a été semée par ce processus
 _verrous: dict = {}        # (serveur, ticket) → asyncio.Lock : une décision à la fois par ticket
@@ -672,7 +699,7 @@ _verrou_semis = None
 
 def setup(*, get_db, cfg, panneaux, ticket_ouvert, decider, autorise, lien=None, journal=None,
           fichier_banque=None, fichier_liens=None, log=None, extras=None, liste_noire=None, web=None,
-          metier=None, est_tete=None, clan=None, metiers=None, metiers_membre=None):
+          metier=None, est_tete=None, clan=None, metiers=None, metiers_membre=None, fermer_ticket=None):
     """`panneaux(c)` → les panneaux de tickets du clan ; `ticket_ouvert(g, ticket)` → (salon, ticket) ou (None, None) ;
     `decider(g, ticket, auteur, accepte, motif, annonce=, mp=)` → (ok, message) — le circuit de décision du bot (rôle,
     `annonce()` juste avant la fermeture, fermeture sans le message privé de fermeture si `mp` est faux, transcript,
@@ -687,7 +714,8 @@ def setup(*, get_db, cfg, panneaux, ticket_ouvert, decider, autorise, lien=None,
     du clan, `metiers(g)` → [{cle, nom}] du catalogue, `metiers_membre(g, membre)` → les clés de ses métiers."""
     global _get_db, _cfg, _panneaux, _ticket_ouvert, _decider, _autorise, _lien, _journal, _log
     global _fichier_banque, _fichier_liens, _verrou_semis, _extras, _liste_noire_cfg, _web_module, _metier, _est_tete
-    global _web_absent, _clan, _metiers_liste, _metiers_membre
+    global _web_absent, _clan, _metiers_liste, _metiers_membre, _fermer_ticket
+    _fermer_ticket = fermer_ticket   # 28/10/2026 : `fermer_ticket(g, ticket, motif)` → (ok, message), sans décision
     _get_db, _cfg, _panneaux, _ticket_ouvert = get_db, cfg, panneaux, ticket_ouvert
     _decider, _autorise, _lien, _journal = decider, autorise, lien, journal
     _extras, _liste_noire_cfg, _web_module, _metier, _est_tete = extras, liste_noire, web, metier, est_tete
@@ -4862,6 +4890,133 @@ async def demarrer(bot) -> None:
     n = await reprendre_fermetures()
     if n:
         _log(f"[RECRUTEMENT] {n} fermeture(s) reprise(s)")
+    global _veille
+    if _veille is None or _veille.done():
+        _veille = _garder(_veiller_toujours())
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Les questionnaires abandonnés (28/10/2026)
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Le fondateur : « ils commencent à répondre au questionnaire, puis d'un seul coup ils arrêtent… plus aucune nouvelle.
+#  Si au bout de 2 jours il n'y a plus de nouvelles, ça les reping en privé… tu leur renvoies le lien, leur disant
+#  attention, ton questionnaire n'est toujours pas rempli, d'ici une semaine il sera fermé… il sera obligé de refaire un
+#  ticket et de refaire tout. Sauf si c'est nous qui décidons de refuser son ticket, et donc il sera blacklist. »
+#  Un questionnaire envoyé (ticket ouvert, aucune décision) sans AUCUNE activité du candidat (une réponse, un brouillon)
+#  depuis `RELANCE_APRES_S` → UN rappel en privé, avec le lien de son ticket (dans le ticket s'il n'accepte pas les
+#  messages privés). Toujours rien `FERMETURE_APRES_S` après ce rappel → le ticket se ferme, sans décision et SANS liste
+#  noire (il peut en rouvrir un). Il reprend entre-temps → le compte repart de zéro. Tout est noté (historique, journal).
+RELANCE_APRES_S = 2 * 86400
+FERMETURE_APRES_S = 7 * 86400
+VEILLE_S = 1800
+_veille = None
+
+
+def decision_relance(activite: float, relance: float, t: float) -> str:
+    """FONCTION PURE : « relancer », « fermer » ou "" — `activite` : sa dernière activité (l'envoi, une réponse, un
+    brouillon) ; `relance` : le dernier rappel (0 : aucun)."""
+    if relance and relance >= activite:
+        return "fermer" if t - relance >= FERMETURE_APRES_S else ""
+    return "relancer" if t - activite >= RELANCE_APRES_S else ""
+
+
+async def _activite(e_id: int, envoye_le: int) -> int:
+    """La dernière activité du candidat sur ce questionnaire : l'envoi, ses réponses, ses brouillons (la page web)."""
+    quand = int(envoye_le or 0)
+    r = await _un("SELECT MAX(recu_le) FROM recrutement_reponses WHERE envoi_id=?", (int(e_id),))
+    quand = max(quand, int((r and r[0]) or 0))
+    for x in await _lire_tolerant("SELECT MAX(maj_le) FROM candidature_brouillons WHERE envoi_id=?", (int(e_id),)):
+        quand = max(quand, int(x[0] or 0))
+    return quand
+
+
+async def veiller_relances(g, maintenant: float | None = None) -> dict:
+    """Un passage : les rappels à envoyer, les tickets à fermer. → {"relances", "fermetures"}. FAIL-SAFE par ticket."""
+    t = float(maintenant or _maintenant())
+    bilan = {"relances": 0, "fermetures": 0}
+    rows = await _lire("SELECT e.id, e.ticket_id, e.candidat_id, e.envoye_le, s.salon_id FROM recrutement_envois e"
+                       " JOIN recrutement_suivi s ON s.guild_id=e.guild_id AND s.ticket_id=e.ticket_id"
+                       " WHERE e.guild_id=? AND e.ticket_id>0 AND e.statut IN (?, ?) AND e.envoye_le>0"
+                       " AND s.fermeture_le=0 AND s.etape IN (?, ?, ?)", (g.id, *EN_ATTENTE, *OUVERTES))
+    for eid, tid, uid, envoye_le, salon_id in rows:
+        try:
+            activite = await _activite(eid, envoye_le)
+            r = await _un("SELECT MAX(quand) FROM recrutement_historique WHERE guild_id=? AND ticket_id=? AND quoi='relance'",
+                          (g.id, int(tid)))
+            geste = decision_relance(activite, int((r and r[0]) or 0), t)
+            if geste == "relancer":
+                await _relancer(g, int(tid), int(uid), int(salon_id or 0), t)
+                bilan["relances"] += 1
+            elif geste == "fermer" and await _fermer_abandon(g, int(tid), int(uid)):
+                bilan["fermetures"] += 1
+        except Exception as ex:   # un ticket illisible n'arrête pas les autres
+            _log("[RECRUTEMENT][E21] relance d'un questionnaire impossible")
+            _log(f"[RECRUTEMENT][E21:DETAIL] ticket={tid} {type(ex).__name__} {ex}")
+    return bilan
+
+
+async def _relancer(g, tid: int, uid: int, salon_id: int, t: float) -> None:
+    lien = f"https://discord.com/channels/{g.id}/{salon_id}" if salon_id else ""
+    await textes_du_site.texte(g.id, "recrutement.relance.mp")   # le cache des textes est chargé
+    date = time.strftime("%d/%m", time.gmtime(t + FERMETURE_APRES_S))
+    texte = _t(g.id, "recrutement.relance.mp", date=date)
+    boutons = [discord.ui.Button(label=_t(g.id, "recrutement.relance.bouton")[:80], url=lien)] if lien else []
+    mp_ok = await _mp(g, uid, texte, boutons)
+    if not mp_ok and salon_id:   # ses messages privés sont fermés : le rappel dans son ticket
+        ch = g.get_channel_or_thread(salon_id) if hasattr(g, "get_channel_or_thread") else g.get_channel(salon_id)
+        if ch is not None:
+            try:
+                await ch.send(view=_vue_candidat(uid, _t(g.id, "recrutement.relance.ticket", date=date)),
+                              allowed_mentions=_ping(uid))
+            except discord.HTTPException as ex:
+                _log("[RECRUTEMENT][E21] rappel non posté")
+                _log(f"[RECRUTEMENT][E21:DETAIL] ticket={tid} {type(ex).__name__} {getattr(ex, 'status', '')}")
+    await _noter(g.id, tid, "relance", 0, "message privé" if mp_ok else "dans le ticket")
+    await _au_journal(g, "recrutement.relance", f"Recrutement : <@{uid}> relancé (questionnaire sans nouvelles depuis "
+                      f"{RELANCE_APRES_S // 86400} jours) — fermeture le {date} s'il ne reprend pas", membre_id=uid)
+
+
+async def _fermer_abandon(g, tid: int, uid: int) -> bool:
+    """Le ticket d'un questionnaire abandonné : le message dans le ticket, le message privé, la fermeture SANS décision
+    et sans liste noire (`fermer_ticket`, le circuit de « Fermer le ticket sans décider »)."""
+    if _fermer_ticket is None:
+        return False
+    ch, _tk = await _ticket_ouvert(g, tid)
+    if ch is None:
+        return False
+    await textes_du_site.texte(g.id, "recrutement.relance.fermeture")
+    try:
+        await ch.send(view=_vue_candidat(uid, _t(g.id, "recrutement.relance.fermeture")), allowed_mentions=_ping(uid))
+    except discord.HTTPException:
+        pass
+    await _mp(g, uid, _t(g.id, "recrutement.relance.mp_ferme"))
+    t = _maintenant()
+    async with _get_db() as db:
+        await db.execute("UPDATE recrutement_suivi SET etape='ferme', fermeture_motif=?, maj_le=? WHERE guild_id=? AND"
+                         " ticket_id=?", ("questionnaire abandonné", t, g.id, int(tid)))
+        await db.execute("UPDATE recrutement_envois SET statut='clos' WHERE guild_id=? AND ticket_id=? AND statut IN (?, ?)",
+                         (g.id, int(tid), *EN_ATTENTE))
+        await db.commit()
+    ok, _message = await _fermer_ticket(g, int(tid), "Questionnaire abandonné (aucune nouvelle après le rappel)")
+    await _noter(g.id, tid, "ferme", 0, "questionnaire abandonné")
+    await _au_journal(g, "recrutement.abandon", f"Recrutement : ticket de <@{uid}> fermé — questionnaire abandonné "
+                      "(aucune nouvelle une semaine après le rappel) ; il peut en rouvrir un", membre_id=uid)
+    return bool(ok)
+
+
+async def _veiller_toujours() -> None:
+    """Toutes les `VEILLE_S` secondes, chaque serveur qui a des panneaux de recrutement. Ne meurt jamais en silence."""
+    while True:
+        await asyncio.sleep(VEILLE_S)
+        for g in list(getattr(_bot, "guilds", []) or []):
+            try:
+                if _panneaux(await _cfg(g.id)):
+                    b = await veiller_relances(g)
+                    if b["relances"] or b["fermetures"]:
+                        _log(f"[RECRUTEMENT] {b['relances']} rappel(s), {b['fermetures']} fermeture(s) d'abandon")
+            except Exception as ex:
+                diag.compter("questionnaire", "relances", ex)
+                _log(f"[RECRUTEMENT][E21:DETAIL] serveur={g.id} {type(ex).__name__} {ex}")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

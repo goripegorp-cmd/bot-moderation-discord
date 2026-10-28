@@ -22212,7 +22212,9 @@ async def _activite_boot():
                             journal=lambda g, type_, texte, **kw: _au_journal(g, "Clan", type_, texte, **kw), log=print,
                             extras=_recrutement_extras, liste_noire=_liste_noire_recrutement, web=_candidature_site,
                             metier=metiers.invitation, est_tete=lambda m: getattr(m, "id", 0) in TETE_IDS,
-                            clan=_role_clan_de, metiers=_metiers_catalogue, metiers_membre=metiers.metiers_du_membre)
+                            clan=_role_clan_de, metiers=_metiers_catalogue, metiers_membre=metiers.metiers_du_membre,
+                            #  28/10/2026 : un questionnaire abandonné ferme son ticket sans décision (« Fermer sans décider »).
+                            fermer_ticket=lambda g, tid, motif: _action_ticket_fermer(g, g.me, {"ticket": tid, "motif": motif}))
         #  27/10/2026 : les chefs d'équipe validés, badgés et proposés en premier dans l'éditeur d'une équipe.
         site_equipage.brancher_badges_chef(questionnaire.badges_chefs)
         await questionnaire.init_db()
