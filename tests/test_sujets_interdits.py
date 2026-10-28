@@ -108,4 +108,5 @@ def test_tous_les_chemins_passent_par_le_nouveau_filtre():
     code = (RACINE / "bot.py").read_text(encoding="utf-8")
     assert code.count("_sujet_interdit(c, ct, ") == 2
     assert "_sujet_interdit(c, texte)" in code
-    assert "Texte interdit dans une image" in code   # le texte DANS l'image ou le GIF (OCR)
+    assert '_retirer_si_texte_interdit(msg, text, "une image")' in code   # le texte DANS l'image (OCR)
+    assert "_spawn_bg_scan(_ocr_gif_lien(msg))" in code   # et dans un GIF Tenor / Giphy en lien

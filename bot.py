@@ -5854,27 +5854,8 @@ async def _ocr_scam_check(msg, immune: bool = False, lire=None):
                 return
             #  27/10/2026 : le texte écrit DANS l'image ou le GIF — une insulte grave, du validisme ou un sujet interdit
             #  retirent l'image (le journal le dit) ; aucune sanction sur une lecture d'image.
-            if not immune and text and len(text.strip()) >= 3:
-                try:
-                    _cfg_img = await cfg(msg.guild.id)
-                    _lu = ""
-                    if _cfg_img.get('anti_insults', 1):
-                        _niv, _mot = insult_filter.scan(text, lg=insult_filter.langue(text, "en"))
-                        if _niv >= 3:
-                            _lu = "insulte · " + str(_mot)
-                        elif insult_filter.ableist_hit(text):
-                            _lu = "validisme · " + str(insult_filter.ableist_hit(text))
-                    if not _lu and _cfg_img.get('anti_offtopic', 1):
-                        _lu = _sujet_interdit(_cfg_img, text)
-                    if _lu:
-                        try:
-                            await msg.delete()
-                        except discord.HTTPException:
-                            pass
-                        await send_log(msg.guild, 'anti_badwords', msg.author, msg, "Texte interdit dans une image", f"||{_lu[:60]}||")
-                        return
-                except Exception as ex:
-                    _logerr("ocr.texte", ex, guild_id=msg.guild.id)
+            if not immune and await _retirer_si_texte_interdit(msg, text, "une image"):
+                return
             # Routine (caché sauf DIAG_VERBOSE=1) : prouve que le scan a TOURNÉ et ce qu'il a lu.
             try:
                 diag.trace("security", "ocr_scan",
@@ -5883,6 +5864,83 @@ async def _ocr_scam_check(msg, immune: bool = False, lire=None):
                 pass
     except Exception as ex:
         _logerr("ocr.scan", ex, guild_id=getattr(getattr(msg, 'guild', None), 'id', 0))
+
+
+async def _texte_image_interdit(c: dict, text: str) -> str:
+    """Le texte lu dans une image ou un GIF : « insulte · … », « validisme · … », « religion · … »… ou ""."""
+    if not text or len(text.strip()) < 3:
+        return ""
+    if c.get('anti_insults', 1):
+        _niv, _mot = insult_filter.scan(text, lg=insult_filter.langue(text, "en"))
+        if _niv >= 3:
+            return "insulte · " + str(_mot)
+        _abl = insult_filter.ableist_hit(text)
+        if _abl:
+            return "validisme · " + str(_abl)
+    if c.get('anti_offtopic', 1):
+        return _sujet_interdit(c, text)
+    return ""
+
+
+async def _retirer_si_texte_interdit(msg, text: str, ou: str) -> bool:
+    """Retire le message quand le texte de son image (ou de son GIF) est interdit ; le journal le dit. FAIL-SAFE."""
+    try:
+        lu = await _texte_image_interdit(await cfg(msg.guild.id), text)
+        if not lu:
+            return False
+        try:
+            await msg.delete()
+        except discord.HTTPException:
+            pass
+        await send_log(msg.guild, 'anti_badwords', msg.author, msg, f"Texte interdit dans {ou}", f"||{lu[:60]}||")
+        return True
+    except Exception as ex:
+        _logerr("ocr.texte", ex, guild_id=getattr(msg.guild, 'id', 0))
+        return False
+
+
+_HOTES_APERCU = ("discordapp.net", "discordapp.com", "discord.com")
+_GIF_LIEN_RE = re.compile(r"https?://(?:[a-z0-9-]+\.)*(?:tenor\.com|giphy\.com|klipy\.com)/", re.I)
+
+
+async def _ocr_gif_lien(msg) -> None:
+    """28/10/2026 (exigence 11 : « GIF insultants bloqués : lien, titre, TEXTE DE L'IMAGE ») : le texte écrit dans un GIF
+    Tenor / Giphy posté en lien. Discord pose l'aperçu après coup : on relit le message 3 s plus tard, on prend la
+    première image de l'aperçu PAR LE RELAIS DE DISCORD (jamais l'hôte du GIF), 4 Mo au plus, et l'OCR la lit. En fond,
+    au plus 2 lectures à la fois (le sémaphore de l'OCR). FAIL-SAFE."""
+    from urllib.parse import urlsplit
+    try:
+        if not ocr_scan.available() or not _GIF_LIEN_RE.search(msg.content or ""):
+            return
+        await asyncio.sleep(3)
+        try:
+            msg = await msg.channel.fetch_message(msg.id)
+        except discord.HTTPException:
+            return   # retiré entre-temps (la modération), ou illisible
+        url = ""
+        for e in msg.embeds or []:
+            for x in (getattr(e, 'thumbnail', None), getattr(e, 'image', None)):
+                u = str(getattr(x, 'proxy_url', None) or "")
+                hote = (urlsplit(u).hostname or "").lower() if u.startswith("https://") else ""
+                if hote and any(hote == h or hote.endswith("." + h) for h in _HOTES_APERCU):
+                    url = u
+                    break
+            if url:
+                break
+        if not url:
+            return
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as s:
+            async with s.get(url) as r:
+                if r.status != 200 or int(r.headers.get("Content-Length") or 0) > 4_000_000:
+                    return
+                data = await r.content.read(4_000_001)
+        if len(data) > 4_000_000:
+            return
+        async with _OCR_SEM:
+            text = await asyncio.get_event_loop().run_in_executor(None, ocr_scan.image_text, data)
+        await _retirer_si_texte_interdit(msg, text, "un GIF")
+    except Exception as ex:
+        _logerr("ocr.gif", ex, guild_id=getattr(getattr(msg, 'guild', None), 'id', 0))
 
 
 async def _retirer_image_arnaque(msg, titre: str, detail: str, immune: bool) -> None:
@@ -26177,6 +26235,9 @@ async def on_message(msg):
         _lire = _lecteur_partage(_ocr + _nsfw)
         if _ocr:
             _spawn_bg_scan(_ocr_scam_check(msg, immune=user_immune, lire=_lire))
+        #  28/10/2026 : le texte écrit dans un GIF Tenor / Giphy posté en lien (l'image de son aperçu).
+        if c.get('anti_scam_ocr', 1) and (not user_immune) and (not is_ticket) and _GIF_LIEN_RE.search(ct or ""):
+            _spawn_bg_scan(_ocr_gif_lien(msg))
 
         # DÉTECTION IMAGE NSFW PAR IA (owner 2026-06-27 — protection mineurs) : en arrière-plan,
         # repère une photo sexuellement explicite (que l'OCR ne voit pas). Garde RAM côté module
