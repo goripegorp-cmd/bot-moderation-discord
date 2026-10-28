@@ -57,14 +57,15 @@ export function organigramme(rangs, o = {}) {
     return h("section", { classe: "org-haut " + r.verrou, vars: { "--teinte": teinte(r) }, "aria-label": sansEmoji(r.nom) },
       r.verrou === "second" ? h("span", { classe: "org-ruban" }, L("bras_droit", "Bras droit du capitaine")) : null,
       titre(r, i, "haut"),
-      l.length ? h("div", { classe: "org-gens haut" }, l.map((p) => carte(p, true))) : h("p", { classe: "org-vacant" }, L("vacant", "À nommer")),
+      //  « À nommer » seulement quand le rang est vraiment vide (sinon la note « sans affiche » suffit).
+      l.length ? h("div", { classe: "org-gens haut" }, l.map((p) => carte(p, true))) : n(r) ? null : h("p", { classe: "org-vacant" }, L("vacant", "À nommer")),
       sansAffiche(r, l.length));
   });
   const paliers = autres.map((r) => {
     const l = gens(r);
     const i = rangs.indexOf(r);
     const dernier = r.verrou === "defaut";
-    const corps = !l.length ? h("p", { classe: "org-vacant" }, n(r) && o.filtre ? "Personne pour cette recherche." : L("vacant", "À nommer"))
+    const corps = !l.length ? (!n(r) ? h("p", { classe: "org-vacant" }, L("vacant", "À nommer")) : o.filtre ? h("p", { classe: "org-vacant" }, "Personne pour cette recherche.") : null)
       : dernier ? groupe({ titre: L("liste", "Voir la liste"), compte: l.length, cle: (o.cle || "org") + "-dernier", ouvert: o.filtre ? true : undefined,
         classe: "org-liste" }, () => paginer((o.cle || "org") + "-dernier", l, (p) => carte(p), { classe: "org-gens", pas: 24 }))
         : h("div", { classe: "org-gens" }, l.map((p) => carte(p)));

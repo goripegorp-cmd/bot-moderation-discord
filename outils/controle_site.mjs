@@ -17,7 +17,7 @@
 //                                 --entree http://localhost:8790/tableau/demo   (pose la session d'abord)
 
 import { spawn } from "node:child_process";
-import { mkdirSync, writeFileSync, existsSync, rmSync, mkdtempSync } from "node:fs";
+import { mkdirSync, writeFileSync, existsSync, rmSync, mkdtempSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -28,11 +28,17 @@ const ORIGINE = new URL(URL_SITE).origin;
 const SORTIE = opt("sortie", join(tmpdir(), "capitainerie-captures"));
 const TAILLES = String(opt("tailles", "375x812,768x1024,1366x768,1920x1080")).split(",").map((t) => t.split("x").map(Number));
 const PORT = 9339 + Math.floor(Math.random() * 400);
+//  Brave d'abord : c'est le navigateur du propriétaire (profil temporaire : son Brave n'est pas touché).
 const NAVIGATEURS = [opt("navigateur", ""), process.env.CHROME || "",
+  "C:/Program Files/BraveSoftware/Brave-Browser/Application/brave.exe", (process.env.LOCALAPPDATA || "") + "/BraveSoftware/Brave-Browser/Application/brave.exe",
   "C:/Program Files/Google/Chrome/Application/chrome.exe", "C:/Program Files (x86)/Google/Chrome/Application/chrome.exe",
   "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe", "C:/Program Files/Microsoft/Edge/Application/msedge.exe",
-  "C:/Program Files (x86)/Microsoft/EdgeCore/155.0.4283.62/msedge.exe", "/usr/bin/google-chrome", "/usr/bin/chromium"].filter(Boolean);
+  ...edgeCore(), "/usr/bin/google-chrome", "/usr/bin/chromium"].filter(Boolean);
 
+// Edge « EdgeCore » change de dossier à chaque mise à jour : on prend les versions installées.
+function edgeCore() {
+  try { return readdirSync("C:/Program Files (x86)/Microsoft/EdgeCore").sort().reverse().map((v) => `C:/Program Files (x86)/Microsoft/EdgeCore/${v}/msedge.exe`); } catch { return []; }
+}
 // Ouvrir le brouillon « Sortie en mer » (le vrai site local et la maquette en ont un) dans le composeur.
 const OUVRIR_BROUILLON = "[...document.querySelectorAll('article.evt-carte')].find(a => a.textContent.includes('Sortie en mer')).querySelector('.feuillet-pied button').click()";
 // La présence en direct : la carte de l'affiche tenue par l'autre personne, bien en vue ; puis son éditeur (lecture

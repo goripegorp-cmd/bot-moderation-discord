@@ -11,6 +11,7 @@
 //              recrutement » de bout en bout : le vrai chemin du bot sur le site local seulement), recrutement_decidees
 //              (les décidées par morceaux, « Voir plus » : sur la base --lourd).
 //              navigation (27/10/2026 : les rubriques regroupées, les anciennes adresses, les vues sur place, les noms).
+//              hierarchie (28/10/2026 : renommer un rang, nommer un membre, relu par l'API, la fiche et la vitrine).
 //   « textes » (Textes & noms) lit aussi ce que le FAUX Discord du site local a reçu (`/tableau/demo/discord`) : il ne se
 //   joue que sur le site local, jamais sur la maquette.
 //
@@ -28,7 +29,9 @@ const SITE = BASE + "/tableau/espace/";
 const SORTIE = opt("sortie", join(tmpdir(), "capitainerie-parcours"));
 const PARCOURS = String(opt("parcours", "recrutement")).split(",");
 const PORT = 9739 + Math.floor(Math.random() * 200);
+//  Brave d'abord : c'est le navigateur du propriétaire (profil temporaire : son Brave n'est pas touché).
 const NAVIGATEURS = [opt("navigateur", ""), process.env.CHROME || "",
+  "C:/Program Files/BraveSoftware/Brave-Browser/Application/brave.exe", (process.env.LOCALAPPDATA || "") + "/BraveSoftware/Brave-Browser/Application/brave.exe",
   "C:/Program Files/Google/Chrome/Application/chrome.exe", "C:/Program Files (x86)/Google/Chrome/Application/chrome.exe",
   "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe", "C:/Program Files/Microsoft/Edge/Application/msedge.exe",
   "C:/Program Files (x86)/Microsoft/EdgeCore/155.0.4283.62/msedge.exe", "/usr/bin/google-chrome", "/usr/bin/chromium"].filter(Boolean);
@@ -877,6 +880,75 @@ async function parcoursMetiers(o) {
 }
 const compte_ = (n) => String(n);
 
+// ═══ LA HIÉRARCHIE (28/10/2026) ═════════════════════════════════════════════
+// Renommer un rang (Modifier → Enregistrer), nommer un membre (Nommer → cocher → Enregistrer) : le serveur relu par
+// l'API, la fiche du membre (« Rang : … ») et la vitrine publique (sans session) montrent le changement ; puis tout
+// revient comme avant.
+const hier = (o) => api(o, "equipage/hierarchie");
+const vitrine = (o) => evaluer(o, `fetch("${BASE}/equipage/donnees", { credentials: "omit", cache: "no-cache" }).then((r) => r.json())`);
+const ouvrirPalier = (o, nom, bouton) => evaluer(o, `(async () => { for (let i = 0; i < 30 && !document.querySelector('.org-palier'); i++) await new Promise(r => setTimeout(r, 200));
+  const p = [...document.querySelectorAll('.org-palier')].find((x) => x.querySelector('h3') && x.querySelector('h3').textContent.trim() === ${JSON.stringify(nom)});
+  const b = p && [...p.querySelectorAll('button')].find((x) => x.textContent.includes(${JSON.stringify(bouton)})); if (!b) return false; b.click(); return true; })()`);
+async function parcoursHierarchie(o) {
+  const d0 = await hier(o);
+  if (!d0 || !Array.isArray(d0.rangs)) { await etape(o, "Hiérarchie : lisible", async () => ({ ok: false, detail: JSON.stringify(d0).slice(0, 200) })); return; }
+  const vigie = d0.rangs.find((r) => !r.verrou && r.nom === "Vigie");
+  if (!vigie) { await etape(o, "Hiérarchie : rang « Vigie » présent", async () => ({ ok: false, detail: d0.rangs.map((r) => r.nom).join(", ") })); return; }
+  const NOUVEAU = "Vigie de proue";
+
+  const renommer = async (de, vers) => {
+    await aller(o, "#equipage/membres/hierarchie");
+    if (!await ouvrirPalier(o, de, "Modifier")) return { ok: false, detail: "« Modifier » introuvable sur " + de };
+    await attendre(() => evaluer(o, "!!document.querySelector('dialog[open] input')"), 5000);
+    if (!await ecrire(o, "Quartier-maître", vers)) return { ok: false, detail: "champ du nom absent" };
+    if (!await cliquer(o, "dialog[open] button", "Enregistrer")) return { ok: false, detail: "« Enregistrer » absent" };
+    const x = await attendre(async () => { const d = await hier(o); return (d.rangs || []).some((r) => r.id === vigie.id && r.nom === vers) ? d : null; });
+    return x ? { ok: true } : { ok: false, detail: "le serveur n'a pas le nouveau nom" };
+  };
+  await etape(o, "Hiérarchie : renommer un rang (Modifier → Enregistrer)", async () => {
+    const r = await renommer("Vigie", NOUVEAU);
+    if (!r.ok) return r;
+    await aller(o, "#equipage/membres/hierarchie");
+    const page = await evaluer(o, `document.querySelector('#contenu').innerText.includes(${JSON.stringify(NOUVEAU)})`);
+    const v = await vitrine(o);
+    const pub = JSON.stringify(v.hierarchie || {}).includes(NOUVEAU);
+    return { ok: page && pub, detail: "page " + page + " · vitrine " + pub };
+  });
+
+  //  Le premier membre du clan qui est au rang d'arrivée (ni Capitaine ni Second).
+  const tete = new Set([...((d0.tete || {}).capitaines || []), ...((d0.tete || {}).seconds || [])].map(String));
+  const defaut = d0.rangs.find((r) => r.verrou === "defaut");
+  const cible = Object.entries(d0.membres || {}).find(([id, m]) => !tete.has(id) && defaut && m.rang === defaut.id);
+  await etape(o, "Hiérarchie : nommer un membre (Nommer → cocher → Enregistrer)", async () => {
+    if (!cible) return { ok: false, detail: "aucun membre au rang d'arrivée" };
+    const id = cible[0];
+    await aller(o, "#equipage/membres/hierarchie");
+    if (!await ouvrirPalier(o, NOUVEAU, "Nommer")) return { ok: false, detail: "« Nommer » introuvable" };
+    const coche = await attendre(() => evaluer(o, `(() => { const c = document.querySelector('dialog[open] input[type=checkbox][value="${id}"]'); if (!c) return false; c.click(); return true; })()`), 6000);
+    if (!coche) return { ok: false, detail: "case du membre " + id + " absente" };
+    if (!await cliquer(o, "dialog[open] button", "Enregistrer")) return { ok: false, detail: "« Enregistrer » absent" };
+    const x = await attendre(async () => { const d = await hier(o); return ((d.membres || {})[id] || {}).rang === vigie.id ? d : null; });
+    if (!x) return { ok: false, detail: "le serveur n'a pas le rang du membre " + id };
+    await aller(o, "#equipage/membres&membre=" + id);
+    const fiche = await attendre(() => evaluer(o, `(() => { const l = document.querySelector('dialog[open] .fiche-rang-h'); return !!l && l.innerText.includes(${JSON.stringify(NOUVEAU)}); })()`), 8000);
+    return { ok: !!fiche, detail: fiche ? "membre " + id : "la fiche ne montre pas « Rang : " + NOUVEAU + " »" };
+  });
+
+  await etape(o, "Hiérarchie : le renvoyer au rang d'arrivée (décocher)", async () => {
+    if (!cible) return { ok: false, detail: "aucun membre" };
+    const id = cible[0];
+    await aller(o, "#equipage/membres/hierarchie");
+    if (!await ouvrirPalier(o, NOUVEAU, "Nommer")) return { ok: false, detail: "« Nommer » introuvable" };
+    const ok = await attendre(() => evaluer(o, `(() => { const c = document.querySelector('dialog[open] input[type=checkbox][value="${id}"]'); if (!c || !c.checked) return false; c.click(); return true; })()`), 6000);
+    if (!ok) return { ok: false, detail: "case cochée absente" };
+    if (!await cliquer(o, "dialog[open] button", "Enregistrer")) return { ok: false, detail: "« Enregistrer » absent" };
+    const x = await attendre(async () => { const d = await hier(o); return ((d.membres || {})[id] || {}).rang === defaut.id ? d : null; });
+    return { ok: !!x, detail: x ? "" : "toujours au rang " + vigie.id };
+  });
+
+  await etape(o, "Hiérarchie : rendre son nom au rang", async () => renommer(NOUVEAU, "Vigie"));
+}
+
 // ═══ L'ACCUEIL « CE QUI T'ATTEND » ══════════════════════════════════════════
 // Chaque ligne « à faire » ouvre exactement le bon endroit (ou porte le bon lien) ; chaque raccourci aussi.
 const donneesSite = (o) => evaluer(o, `fetch(${JSON.stringify(SITE + "donnees")}, { credentials: "same-origin" }).then((r) => r.json())`);
@@ -1572,6 +1644,7 @@ async function principal() {
     if (PARCOURS.includes("recherche")) await parcoursRecherche(o);
     if (PARCOURS.includes("textes")) await parcoursTextes(o);
     if (PARCOURS.includes("navigation")) await parcoursNavigation(o);
+    if (PARCOURS.includes("hierarchie")) await parcoursHierarchie(o);
   } finally {
     try { await envoyer("Browser.close"); } catch (e) { /* déjà fermé */ }
     await pause(400);
