@@ -73,10 +73,11 @@ def _lancer(g, **kw):
 
 
 def _ecrire(env, g, uid, n):
+    K._juge.oublier()    # 29/10/2026 : un seul « bonjour » compte par jour, plus de copié-collé — des phrases variées
     for _k in range(n):
         env.horloge[0] += 5
         assert K.sur_message(Obj(id=int(env.horloge[0] * 10) + uid, guild=g, author=Obj(id=uid, bot=False),
-                                 content="bonjour tout le monde !", webhook_id=None, type=discord.MessageType.default,
+                                 content=f"je raconte ma partie de ce soir, épisode {env.horloge[0]} !", webhook_id=None, type=discord.MessageType.default,
                                  attachments=[], stickers=[]))
 
 
@@ -318,11 +319,12 @@ def test_R4_la_purge_en_masse_decompte_les_messages(env):
     g = serveur()
     _lancer(g)
     ids_ = []
+    K._juge.oublier()
     for _k in range(3):
         env.horloge[0] += 5
         mid = int(env.horloge[0] * 10)
         ids_.append(mid)
-        assert K.sur_message(Obj(id=mid, guild=g, author=Obj(id=7, bot=False), content="bonjour tout le monde !", webhook_id=None,
+        assert K.sur_message(Obj(id=mid, guild=g, author=Obj(id=7, bot=False), content=f"on lance le raid, étape {mid} !", webhook_id=None,
                                  type=discord.MessageType.default, attachments=[], stickers=[]))
     erreurs = []
     ns = {"cadeaux": K, "_logerr": lambda *a, **k: erreurs.append(a)}
@@ -628,7 +630,7 @@ def test_R10_avant_setup_les_boutons_le_disent_les_ecouteurs_se_taisent(env, mon
         return []
     g.invites = invites
     m = _arrivant(g, 40)
-    message = Obj(id=1, guild=g, author=Obj(id=40, bot=False), content="bonjour", webhook_id=None,
+    message = Obj(id=1, guild=g, author=Obj(id=40, bot=False), content="salut, je découvre le serveur", webhook_id=None,
                   type=discord.MessageType.default, attachments=[], stickers=[])
 
     async def ecouter():
