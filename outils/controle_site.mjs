@@ -294,6 +294,8 @@ const SCENES = [
   { nom: "recrutement-parcours", ancre: "#capitainerie/recrutement/reglages", geste: OUVRIR_GROUPES_PARCOURS },
   { nom: "recrutement-messages", ancre: "#capitainerie/recrutement/reglages", geste: OUVRIR_GROUPE_ZONE("Ses messages, dans l'ordre") },
   { nom: "recrutement-liste-noire", ancre: "#capitainerie/recrutement/reglages", geste: OUVRIR_GROUPE_ZONE("La liste noire") },
+  //  29/10/2026 : les questionnaires abandonnés — le rappel, la fermeture, qui a été relancé.
+  { nom: "recrutement-relances", ancre: "#capitainerie/recrutement/reglages", interdits: ["undefined", "NaN"], geste: OUVRIR_GROUPE_ZONE("Les questionnaires abandonnés") },
   { nom: "recrutement-nettoyage-purge", ancre: "#capitainerie/recrutement/reglages", geste: OUVRIR_GROUPE_ZONE("Le nettoyage"),
     geste2: OUVRIR_GROUPE_ZONE("La purge exceptionnelle") },
   { nom: "capitainerie-affiches", ancre: "#capitainerie/affiches" },

@@ -125,6 +125,8 @@ REGISTRE = {"tete": frozenset(x.strip() for x in """
     POST equipage/hierarchie/attribuer
     GET reponses
     POST reponses/reglages
+    GET recrutement/relances
+    POST recrutement/relances
     POST equipage/hierarchie/rang
     POST equipage/hierarchie/rang/deplacer
     POST equipage/hierarchie/rang/role

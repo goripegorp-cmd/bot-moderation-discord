@@ -795,6 +795,10 @@ _SCHEMA = (
     " depuis INTEGER NOT NULL DEFAULT 0, motif TEXT NOT NULL DEFAULT '', par INTEGER NOT NULL DEFAULT 0,"
     " ticket_id INTEGER NOT NULL DEFAULT 0, leve_le INTEGER NOT NULL DEFAULT 0, leve_par INTEGER NOT NULL DEFAULT 0)",
     "CREATE INDEX IF NOT EXISTS idx_recrutement_liste_noire ON recrutement_liste_noire(guild_id, membre_id)",
+    #  29/10/2026 : les réglages des questionnaires abandonnés (le rappel, la fermeture), réglés sur le site.
+    "CREATE TABLE IF NOT EXISTS recrutement_relances_reglages (guild_id INTEGER PRIMARY KEY, relance_actif INTEGER NOT NULL"
+    " DEFAULT 1, relance_jours INTEGER NOT NULL DEFAULT 2, fermeture_jours INTEGER NOT NULL DEFAULT 7,"
+    " version INTEGER NOT NULL DEFAULT 0, maj_le INTEGER NOT NULL DEFAULT 0, maj_par INTEGER NOT NULL DEFAULT 0)",
     #  Une réponse éliminatoire dans la fiche : AUCUN ticket n'est créé — la décision « Éliminé d'office » est gardée ici.
     "CREATE TABLE IF NOT EXISTS recrutement_eliminations (id INTEGER PRIMARY KEY AUTOINCREMENT,"
     " guild_id INTEGER NOT NULL, membre_id INTEGER NOT NULL, nom TEXT NOT NULL DEFAULT '', panneau TEXT NOT NULL DEFAULT '',"
@@ -4908,16 +4912,29 @@ async def demarrer(bot) -> None:
 #  noire (il peut en rouvrir un). Il reprend entre-temps → le compte repart de zéro. Tout est noté (historique, journal).
 RELANCE_APRES_S = 2 * 86400
 FERMETURE_APRES_S = 7 * 86400
+RELANCE_JOURS, FERMETURE_JOURS = (1, 14), (1, 30)   # 29/10/2026 : les bornes réglables sur le site
 VEILLE_S = 1800
 _veille = None
 
 
-def decision_relance(activite: float, relance: float, t: float) -> str:
+def decision_relance(activite: float, relance: float, t: float, apres: float = RELANCE_APRES_S,
+                     fermeture: float = FERMETURE_APRES_S) -> str:
     """FONCTION PURE : « relancer », « fermer » ou "" — `activite` : sa dernière activité (l'envoi, une réponse, un
-    brouillon) ; `relance` : le dernier rappel (0 : aucun)."""
+    brouillon) ; `relance` : le dernier rappel (0 : aucun) ; `apres`, `fermeture` : les délais (s) réglés."""
     if relance and relance >= activite:
-        return "fermer" if t - relance >= FERMETURE_APRES_S else ""
-    return "relancer" if t - activite >= RELANCE_APRES_S else ""
+        return "fermer" if t - relance >= fermeture else ""
+    return "relancer" if t - activite >= apres else ""
+
+
+async def reglages_relance(guild_id: int) -> dict:
+    """{actif, relance_jours, fermeture_jours, version} — ceux du site, sinon 2 et 7 jours, actif."""
+    r = await _un("SELECT relance_actif, relance_jours, fermeture_jours, version FROM recrutement_relances_reglages WHERE"
+                  " guild_id=?", (int(guild_id),))
+    if r is None:
+        return {"actif": True, "relance_jours": RELANCE_APRES_S // 86400, "fermeture_jours": FERMETURE_APRES_S // 86400,
+                "version": 0}
+    return {"actif": bool(r[0]), "relance_jours": max(RELANCE_JOURS[0], min(RELANCE_JOURS[1], int(r[1]))),
+            "fermeture_jours": max(FERMETURE_JOURS[0], min(FERMETURE_JOURS[1], int(r[2]))), "version": int(r[3])}
 
 
 async def _activite(e_id: int, envoye_le: int) -> int:
@@ -4934,6 +4951,10 @@ async def veiller_relances(g, maintenant: float | None = None) -> dict:
     """Un passage : les rappels à envoyer, les tickets à fermer. → {"relances", "fermetures"}. FAIL-SAFE par ticket."""
     t = float(maintenant or _maintenant())
     bilan = {"relances": 0, "fermetures": 0}
+    reg = await reglages_relance(g.id)
+    if not reg["actif"]:
+        return bilan   # coupé sur le site : ni rappel, ni fermeture
+    apres, fermeture = reg["relance_jours"] * 86400, reg["fermeture_jours"] * 86400
     rows = await _lire("SELECT e.id, e.ticket_id, e.candidat_id, e.envoye_le, s.salon_id FROM recrutement_envois e"
                        " JOIN recrutement_suivi s ON s.guild_id=e.guild_id AND s.ticket_id=e.ticket_id"
                        " WHERE e.guild_id=? AND e.ticket_id>0 AND e.statut IN (?, ?) AND e.envoye_le>0"
@@ -4943,9 +4964,9 @@ async def veiller_relances(g, maintenant: float | None = None) -> dict:
             activite = await _activite(eid, envoye_le)
             r = await _un("SELECT MAX(quand) FROM recrutement_historique WHERE guild_id=? AND ticket_id=? AND quoi='relance'",
                           (g.id, int(tid)))
-            geste = decision_relance(activite, int((r and r[0]) or 0), t)
+            geste = decision_relance(activite, int((r and r[0]) or 0), t, apres, fermeture)
             if geste == "relancer":
-                await _relancer(g, int(tid), int(uid), int(salon_id or 0), t)
+                await _relancer(g, int(tid), int(uid), int(salon_id or 0), t, reg)
                 bilan["relances"] += 1
             elif geste == "fermer" and await _fermer_abandon(g, int(tid), int(uid)):
                 bilan["fermetures"] += 1
@@ -4955,10 +4976,11 @@ async def veiller_relances(g, maintenant: float | None = None) -> dict:
     return bilan
 
 
-async def _relancer(g, tid: int, uid: int, salon_id: int, t: float) -> None:
+async def _relancer(g, tid: int, uid: int, salon_id: int, t: float, reg: dict | None = None) -> None:
+    reg = reg or await reglages_relance(g.id)
     lien = f"https://discord.com/channels/{g.id}/{salon_id}" if salon_id else ""
     await textes_du_site.texte(g.id, "recrutement.relance.mp")   # le cache des textes est chargé
-    date = time.strftime("%d/%m", time.gmtime(t + FERMETURE_APRES_S))
+    date = time.strftime("%d/%m", time.gmtime(t + reg["fermeture_jours"] * 86400))
     texte = _t(g.id, "recrutement.relance.mp", date=date)
     boutons = [discord.ui.Button(label=_t(g.id, "recrutement.relance.bouton")[:80], url=lien)] if lien else []
     mp_ok = await _mp(g, uid, texte, boutons)
@@ -4973,7 +4995,7 @@ async def _relancer(g, tid: int, uid: int, salon_id: int, t: float) -> None:
                 _log(f"[RECRUTEMENT][E21:DETAIL] ticket={tid} {type(ex).__name__} {getattr(ex, 'status', '')}")
     await _noter(g.id, tid, "relance", 0, "message privé" if mp_ok else "dans le ticket")
     await _au_journal(g, "recrutement.relance", f"Recrutement : <@{uid}> relancé (questionnaire sans nouvelles depuis "
-                      f"{RELANCE_APRES_S // 86400} jours) — fermeture le {date} s'il ne reprend pas", membre_id=uid)
+                      f"{reg['relance_jours']} jour(s)) — fermeture le {date} s'il ne reprend pas", membre_id=uid)
 
 
 async def _fermer_abandon(g, tid: int, uid: int) -> bool:
@@ -5000,8 +5022,62 @@ async def _fermer_abandon(g, tid: int, uid: int) -> bool:
     ok, _message = await _fermer_ticket(g, int(tid), "Questionnaire abandonné (aucune nouvelle après le rappel)")
     await _noter(g.id, tid, "ferme", 0, "questionnaire abandonné")
     await _au_journal(g, "recrutement.abandon", f"Recrutement : ticket de <@{uid}> fermé — questionnaire abandonné "
-                      "(aucune nouvelle une semaine après le rappel) ; il peut en rouvrir un", membre_id=uid)
+                      "(aucune nouvelle après le rappel) ; il peut en rouvrir un", membre_id=uid)
     return bool(ok)
+
+
+async def relances_site(g, maintenant: float | None = None) -> dict:
+    """Pour le site : les réglages, et chaque candidat relancé depuis 60 jours — quand, et où il en est (« fermeture
+    prévue le … », « a repris », « décidé », « fermé : abandon »)."""
+    t = float(maintenant or _maintenant())
+    reg = await reglages_relance(g.id)
+    rows = await _lire("SELECT h.ticket_id, MAX(h.quand), s.candidat_id, s.etape, s.fermeture_motif, s.envoi_id"
+                       " FROM recrutement_historique h JOIN recrutement_suivi s ON s.guild_id=h.guild_id AND"
+                       " s.ticket_id=h.ticket_id WHERE h.guild_id=? AND h.quoi='relance' AND h.quand>=?"
+                       " GROUP BY h.ticket_id ORDER BY MAX(h.quand) DESC LIMIT 200", (g.id, int(t - 60 * 86400)))
+    liste = []
+    for tid, quand, uid, etape, motif, eid in rows:
+        e = await _envoi(int(eid)) if eid else None
+        activite = await _activite(int(eid), int((e or {}).get("envoye_le") or 0)) if eid else 0
+        if etape == "ferme" and "abandon" in (motif or ""):
+            etat, cle = "Fermé : questionnaire abandonné", "abandon"
+        elif etape in ("accepte", "refuse", "refus_etape1", "ferme"):
+            etat, cle = "Décidé ou fermé par l'équipe", "decide"
+        elif activite > int(quand):
+            etat, cle = "A repris après le rappel", "repris"
+        else:
+            etat, cle = "Fermeture prévue le " + time.strftime("%d/%m", time.gmtime(int(quand) + reg["fermeture_jours"] * 86400)), "attente"
+        liste.append({"ticket": int(tid), "membre": _ident(g, int(uid)), "relance": int(quand), "etat": etat, "cle": cle})
+    return {"reglages": reg, "liste": liste, "bornes": {"relance": list(RELANCE_JOURS), "fermeture": list(FERMETURE_JOURS)}}
+
+
+async def regler_relances(g, auteur, corps) -> tuple:
+    """`{actif?, relance_jours?, fermeture_jours?, version}` : les réglages des questionnaires abandonnés (version
+    vérifiée : 409 si quelqu'un les a changés entre-temps)."""
+    if not isinstance(corps, dict):
+        return _erreur("Corps attendu : un objet JSON.")
+    reg = await reglages_relance(g.id)
+    try:
+        version = _entier(corps, "version", mini=0, maxi=10 ** 9)
+        actif = _booleen(corps, "actif", reg["actif"])
+        rj = _entier(corps, "relance_jours", mini=RELANCE_JOURS[0], maxi=RELANCE_JOURS[1], requis=False) or reg["relance_jours"]
+        fj = _entier(corps, "fermeture_jours", mini=FERMETURE_JOURS[0], maxi=FERMETURE_JOURS[1], requis=False) or reg["fermeture_jours"]
+    except _Invalide as ex:
+        return _erreur(str(ex))
+    if version != reg["version"]:
+        return _erreur("Ces réglages ont changé entre-temps : relis-les.", 409, conflit=True, actuels=reg)
+    t = _maintenant()
+    async with _get_db() as db:
+        await db.execute("INSERT INTO recrutement_relances_reglages (guild_id, relance_actif, relance_jours, fermeture_jours,"
+                         " version, maj_le, maj_par) VALUES (?,?,?,?,1,?,?) ON CONFLICT(guild_id) DO UPDATE SET"
+                         " relance_actif=excluded.relance_actif, relance_jours=excluded.relance_jours,"
+                         " fermeture_jours=excluded.fermeture_jours, version=recrutement_relances_reglages.version+1,"
+                         " maj_le=excluded.maj_le, maj_par=excluded.maj_par",
+                         (g.id, int(bool(actif)), int(rj), int(fj), t, int(auteur.id)))
+        await db.commit()
+    texte = (f"Questionnaires abandonnés : rappel après {rj} jour(s), fermeture {fj} jour(s) après le rappel"
+             if actif else "Questionnaires abandonnés : rappels et fermetures coupés")
+    return 200, {"ok": True, "message": texte + ".", "reglages": await reglages_relance(g.id), "_journal": {"texte": texte}}
 
 
 async def _veiller_toujours() -> None:
@@ -6350,6 +6426,14 @@ async def _r_decidees(g, auteur, requete, corps):
     return await decidees(g, requete)
 
 
+async def _r_relances(g, auteur, requete, corps):
+    return 200, await relances_site(g)
+
+
+async def _r_relances_regler(g, auteur, requete, corps):
+    return await regler_relances(g, auteur, corps)
+
+
 async def _r_liste_noire(g, auteur, requete, corps):
     return 200, await liste_noire_site(g)
 
@@ -6493,6 +6577,8 @@ ROUTES_SITE = {
     "recrutement/etape_suivante": _route("POST", _r_etape_suivante, corps_max=32 * 1024, verrou=_v_suivante),
     "recrutement/decidees": _route("GET", _r_decidees, corps_max=0),
     "recrutement/liste_noire": _route("GET", _r_liste_noire, corps_max=0),
+    "recrutement/relances": [_route("GET", _r_relances, corps_max=0),
+                             _route("POST", _r_relances_regler, corps_max=1024, verrou=lambda c: "relances:reglages")],
     "recrutement/liste_noire/lever": _route("POST", _r_liste_noire_lever, corps_max=2048,
                                             verrou=lambda c: "liste_noire:tout" if (c or {}).get("tout") is True
                                             else _objet("liste_noire", (c or {}).get("membre"))),

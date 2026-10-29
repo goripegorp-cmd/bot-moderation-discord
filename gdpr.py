@@ -147,6 +147,7 @@ ANONYMIZE = {
     "site_textes": {"ids": ["maj_par"], "redact": []},
     # 26/10/2026 — recrutement configurable : qui a réglé un parcours, une question ou un rôle de chef
     "recrutement_parcours": {"ids": ["maj_par"], "redact": []},
+    "recrutement_relances_reglages": {"ids": ["maj_par"], "redact": []},
     "recrutement_chef_questions": {"ids": ["cree_par", "maj_par"], "redact": []},
     "recrutement_chef_gabarits": {"ids": ["maj_par"], "redact": []},
     "recrutement_chef_roles": {"ids": ["maj_par"], "redact": []},

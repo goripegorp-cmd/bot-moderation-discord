@@ -1476,3 +1476,34 @@ def test_R16b_il_reprend_le_compte_repart():
     assert Q.decision_relance(activite=500, relance=200, t=500 + 86400) == "", "il a repris après le rappel : ni fermeture, ni rappel"
     assert Q.decision_relance(activite=500, relance=200, t=500 + Q.RELANCE_APRES_S) == "relancer", "nouveau silence : nouveau rappel"
     assert Q.decision_relance(activite=100, relance=200, t=200 + Q.FERMETURE_APRES_S) == "fermer"
+
+
+def test_R17_les_reglages_des_relances_et_la_liste_du_site(tmp_path):
+    b = banc(tmp_path)
+
+    async def fermer_ticket(g, tid, motif):
+        return True, "fermé"
+
+    async def sc():
+        await b.preparer()
+        b.monter(fermer_ticket=fermer_ticket)
+        await parcours_regle(b, mode="automatique")
+        tid, fil = await b.ouvrir_ticket()
+        t0 = int((await Q._envoi((await Q._suivi(b.g.id, tid))["envoi_id"]))["envoye_le"])
+        st, rep = await Q.regler_relances(b.g, b.fondateur, {"version": 0, "actif": False, "relance_jours": 3, "fermeture_jours": 5})
+        coupe = await Q.veiller_relances(b.g, maintenant=t0 + 30 * 86400)
+        conflit = await Q.regler_relances(b.g, b.fondateur, {"version": 0, "actif": True})
+        st2, _ = await Q.regler_relances(b.g, b.fondateur, {"version": 1, "actif": True})
+        tot = await Q.veiller_relances(b.g, maintenant=t0 + 2 * 86400 + 60)
+        rappel = await Q.veiller_relances(b.g, maintenant=t0 + 3 * 86400 + 60)
+        site = await Q.relances_site(b.g)
+        mauvais = await Q.regler_relances(b.g, b.fondateur, {"version": 2, "relance_jours": 99})
+        return st, rep, coupe, conflit, st2, tot, rappel, site, mauvais
+    st, rep, coupe, conflit, st2, tot, rappel, site, mauvais = run(sc())
+    assert st == 200 and rep["reglages"] == {"actif": False, "relance_jours": 3, "fermeture_jours": 5, "version": 1}
+    assert coupe == {"relances": 0, "fermetures": 0}, "coupé : rien ne part"
+    assert conflit[0] == 409 and st2 == 200, "une version dépassée est refusée"
+    assert tot["relances"] == 0 and rappel["relances"] == 1, "le délai réglé (3 jours) est suivi"
+    x = site["liste"][0]
+    assert x["cle"] == "attente" and x["etat"].startswith("Fermeture prévue le") and site["reglages"]["fermeture_jours"] == 5
+    assert mauvais[0] == 400, "hors des bornes : refusé"

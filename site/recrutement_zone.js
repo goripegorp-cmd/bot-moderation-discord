@@ -622,6 +622,7 @@ function reglagesZone(scene) {
   const groupesZ = h("div", { classe: "groupes-zone" });
   remplacer(scene, zoneP, groupesZ);
   remplacer(groupesZ, ...groupes([
+    { cle: "zr-relances", titre: "Les questionnaires abandonnés", icone: "minuteur", contenu: () => blocRelances() },
     { cle: "zr-liste-noire", titre: "La liste noire", icone: "cadenas", contenu: () => blocListeNoire() },
     { cle: "zr-nettoyage", titre: "Le nettoyage", icone: "nettoyage", contenu: () => blocNettoyage() },
     { cle: "zr-purge", titre: "La purge exceptionnelle", icone: "attention", contenu: () => blocPurge() },
@@ -787,6 +788,53 @@ async function modifierMessage(m, recharger) {
   ajouter(pc.pied, [bouton("Fermer", { classe: "discret", onclick: () => pc.fermer() })]);
 }
 
+// ─── Les questionnaires abandonnés (29/10/2026) ─────────────────────────
+//  Un rappel en privé après N jours sans nouvelles (aucune réponse, aucun brouillon), puis la fermeture du ticket M jours
+//  après le rappel s'il ne reprend pas — sans décision, sans liste noire. Réglable ici ; la liste dit qui a été relancé.
+const ETATS_RELANCE = { attente: ["En attente", "#a8641c"], repris: ["A repris", "#3f6b3a"], abandon: ["Fermé", "#4a5560"], decide: ["Décidé", "#1f4e5a"] };
+function blocRelances() {
+  const zone = h("div", { classe: "pile serree" }, squelettes(2));
+  const maj = async () => {
+    const r = await lire("recrutement/relances");
+    if (!zone.isConnected) return;
+    if (!r.ok || !r.donnees) { remplacer(zone, vide("Indisponible", r.erreur || "", "hors_ligne")); return; }
+    const D = r.donnees, R = D.reglages || {}, B = D.bornes || { relance: [1, 14], fermeture: [1, 30] };
+    const v = { actif: R.actif !== false, relance_jours: R.relance_jours || 2, fermeture_jours: R.fermeture_jours || 7 };
+    const initial = JSON.stringify(v);
+    const enregistrer = bouton("Enregistrer", { classe: "p principal", icone: "valider", reseau: true });
+    const etat_ = () => { enregistrer.disabled = !enLigne() || JSON.stringify(v) === initial || !peutAgir(); };
+    const nombreJ = (cle, [mini, maxi], aria) => {
+      const e = h("input", { type: "number", classe: "saisie zr-nombre", min: mini, max: maxi, value: v[cle], inputmode: "numeric", "aria-label": aria, disabled: !peutAgir() || null });
+      e.addEventListener("input", () => { v[cle] = Math.max(mini, Math.min(maxi, Math.floor(Number(e.value)) || mini)); etat_(); });
+      return e;
+    };
+    enregistrer.addEventListener("click", async () => {
+      const rep = await poster("recrutement/relances", { ...v, version: R.version || 0 });
+      toast(rep.ok ? rep.donnees.message : rep.erreur, rep.ok ? "succes" : "erreur");
+      maj();
+    });
+    etat_();
+    const liste = D.liste || [];
+    remplacer(zone,
+      h("p", { classe: "aide" }, "Un candidat qui ne répond plus à son questionnaire reçoit UN rappel en privé (le lien de son ticket et la date limite). Toujours rien ensuite : son ticket se ferme, sans liste noire — il peut en rouvrir un."),
+      interrupteur("Rappels et fermetures automatiques", v.actif, (x) => { v.actif = x; etat_(); }, { disabled: !peutAgir() }),
+      h("div", { classe: "champs" },
+        champ("Rappel après (jours sans nouvelles)", nombreJ("relance_jours", B.relance, "Jours sans nouvelles avant le rappel")),
+        champ("Fermeture après le rappel (jours)", nombreJ("fermeture_jours", B.fermeture, "Jours après le rappel avant la fermeture"))),
+      peutAgir() ? h("div", { classe: "rangee" }, enregistrer) : null,
+      liste.length ? lignes("zr-relances", liste, (x) => {
+        const m = x.membre || {};
+        retenirPersonnes({ [String(m.id)]: m });
+        const [lib, teinte] = ETATS_RELANCE[x.cle] || [x.etat, null];
+        return ligne({ visuel: avatar(m, "p"), titre: nomDe(m), sous: ["rappel " + depuis(x.relance), x.etat].join(" · "),
+          badges: [pastille(lib, teinte)], ...quandLigne(x.relance),
+          actions: [{ icone: "candidatures", libelle: "Le dossier", onclick: () => ouvrirDossier(x.ticket) }] });
+      }) : vide("Personne n'a été relancé", "Les 60 derniers jours.", "succes"));
+    majBoutonsReseau(zone);
+  };
+  maj();
+  return zone;
+}
 // ─── La liste noire ─────────────────────────────────────────────────────
 function blocListeNoire() {
   const zoneL = h("div", { classe: "pile serree" }, squelettes(2));
