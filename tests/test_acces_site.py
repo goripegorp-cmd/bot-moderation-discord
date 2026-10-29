@@ -72,6 +72,11 @@ ADRESSES = {
     ("GET", "/equipage/donnees"): "vitrine",
     ("GET", "/equipage/banniere.png"): "vitrine",
     ("GET", "/equipage/image/{jeton}"): "vitrine",
+    #  29/10/2026 : le wiki public de RELL Seas — même règle que la vitrine (sans session, lecture, pareil pour tous).
+    ("GET", "/wiki"): "vitrine",
+    ("GET", "/wiki/"): "vitrine",
+    ("GET", "/wiki/donnees"): "vitrine",
+    ("GET", "/wiki/banniere.png"): "vitrine",
     ("GET", "/tableau/{jeton}"): "entree",
     ("GET", "/tableau/espace"): "renvoi",
     ("GET", "/tableau/equipage"): "renvoi",
@@ -245,7 +250,7 @@ DEMO = {("GET", "/tableau/demo"), ("GET", "/tableau/demo/discord"), ("GET", "/ta
 #  Les refus de la porte (`tableau._verifier`) : un « tout » ne doit JAMAIS les lire.
 REFUS_PORTE = {"Session expirée.", "Réservé au fondateur et à la direction.", "Accès retiré.", "Accès suspendu."}
 #  L'image du site : publique (le navigateur lit le manifeste et ses icônes sans cookie).
-IMAGE_PUBLIQUE = ("polices/", "icones/", "textures/", "ornements/", "logos/")
+IMAGE_PUBLIQUE = ("polices/", "icones/", "textures/", "ornements/", "logos/", "wiki/")   # wiki/ : les fonds officiels
 FICHIERS_PUBLICS = ("app-192.png", "app-512.png", "manifest.webmanifest")
 ENTETES_PARTOUT = {"X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer",
                    "Strict-Transport-Security": "max-age=31536000"}
@@ -345,7 +350,7 @@ def _charge_par(page: str) -> set:
 def _lecteurs_attendus(rel: str) -> set:
     """Qui DOIT lire ce fichier de `site/`, d'après ce que chaque page charge (indépendamment de tableau.py)."""
     if (rel.startswith(IMAGE_PUBLIQUE) or rel in FICHIERS_PUBLICS or rel in _charge_par("vitrine.html")
-            or rel in _charge_par("candidature.html")):   # les deux pages SANS session de la direction
+            or rel in _charge_par("candidature.html") or rel in _charge_par("wiki.html")):   # les pages SANS session
         return {"anonyme", "equipage", "candidat", "tout"}
     if rel in _charge_par("equipage.html"):
         return {"equipage", "tout"}
@@ -409,6 +414,8 @@ def _cases(local):
         ("vitrine", "GET", "/equipage", None), ("vitrine", "GET", "/equipage/", None),
         ("vitrine", "GET", "/equipage/donnees", None), ("vitrine", "GET", "/equipage/banniere.png", None),
         ("vitrine", "GET", "/equipage/image/" + "A" * 22, None),
+        ("vitrine", "GET", "/wiki", None), ("vitrine", "GET", "/wiki/", None), ("vitrine", "GET", "/wiki/donnees", None),
+        ("vitrine", "GET", "/wiki/banniere.png", None),
         ("entree", "GET", "/tableau/" + jeton_faux, None),
         ("renvoi", "GET", "/tableau/espace", None), ("renvoi", "GET", "/tableau/equipage", None),
         ("tete", "GET", "/tableau/espace/", None), ("tete", "GET", "/tableau/espace/donnees", None),
@@ -577,7 +584,8 @@ def test_A4_la_websocket_du_direct_la_tete_seule(local, portees):
 #  A5 — la vitrine publique
 # ═══════════════════════════════════════════════════════════════════════════════
 
-VITRINE = ("/equipage", "/equipage/", "/equipage/donnees", "/equipage/banniere.png", "/equipage/image/" + "A" * 22)
+VITRINE = ("/equipage", "/equipage/", "/equipage/donnees", "/equipage/banniere.png", "/equipage/image/" + "A" * 22,
+           "/wiki", "/wiki/", "/wiki/donnees", "/wiki/banniere.png")
 
 
 def test_A5_la_vitrine_get_seulement_sans_cookie_noindex(local, portees):
