@@ -50,10 +50,14 @@ def _plan(*salons):
     return {(s.name, r.id): (n, why) for s, r, n, why in D.plan(Guilde(list(salons)), [STAFF, ADMIN], [DIR])}
 
 
-def test_DROITS_public_le_staff_supprime_les_messages_forum_compris():
+def test_DROITS_public_le_staff_supprime_les_messages_hors_forums():
     p = _plan(Salon("chat", T), Salon("clover-rpg", FORUM))
     assert p[("chat", 1)][0].manage_messages is True and p[("chat", 2)][0].manage_messages is True
-    assert p[("clover-rpg", 1)][0].manage_threads is True
+    #  29/10/2026 : dans un forum (posts verrouillés guide, infos, annonces), « les seuls qui peuvent, fondateurs et
+    #  direction » — le staff n'écrit pas dans un post verrouillé, ne supprime pas, n'ouvre pas de post.
+    st, di = p[("clover-rpg", 1)][0], p[("clover-rpg", 2)][0]
+    assert (st.manage_threads, st.manage_messages, st.send_messages) == (None, None, False)   # n'en avait pas : refus inutile
+    assert (di.manage_threads, di.manage_messages) == (True, True)
     assert not any(k[1] == 3 for k in p)                 # un administrateur a déjà tout
 
 
@@ -95,3 +99,36 @@ def test_DROITS_une_fois_applique_plus_rien_a_faire():
     for s, r, n, _ in D.plan(g, [STAFF], [DIR]):
         s.ow[r.id] = n
     assert D.plan(g, [STAFF], [DIR]) == []
+
+
+def test_DROITS_forum_du_clan_le_staff_ne_gere_plus_les_posts():
+    cat = Salon("GoRp SEA", CAT, ow={0: discord.PermissionOverwrite(view_channel=False)})
+    donne = discord.PermissionOverwrite(view_channel=True, send_messages=True, send_messages_in_threads=True,
+                                        manage_threads=True, manage_messages=True)
+    forum = Salon("clan-gorp", FORUM, cat=cat, ow={0: discord.PermissionOverwrite(view_channel=False), 1: donne})
+    p = _plan(cat, forum)
+    n = p[("clan-gorp", 1)][0]
+    assert (n.manage_threads, n.manage_messages, n.send_messages, n.view_channel) == (False, False, False, None)
+    assert n.send_messages_in_threads is True                       # il écrit toujours dans les posts ouverts
+    d = p[("clan-gorp", 2)][0]
+    assert d.manage_threads is True and d.manage_messages is True   # la Direction écrit dans les posts verrouillés
+
+
+def test_DROITS_salon_automatique_personne_n_ecrit():
+    panneau = Salon("ouvrir-un-ticket", T)
+    panneau.id = 77
+    g = Guilde([panneau])
+    p = {(s.name, r.id): n for s, r, n, _ in D.plan(g, [STAFF], [DIR], automatiques={77})}
+    assert p[("ouvrir-un-ticket", 1)].send_messages is False and p[("ouvrir-un-ticket", 2)].send_messages is False
+    #  @everyone aussi, mais les fils (les tickets) restent ouverts
+    poses = []
+
+    async def poser(r, overwrite, reason):
+        poses.append((r, overwrite))
+    panneau.set_permissions = poser
+    g.get_channel = lambda i: panneau if i == 77 else None
+    import asyncio
+    asyncio.run(D.appliquer(g, [], [], automatiques={77}))
+    (r, ow), = [x for x in poses if x[0] is TOUS]
+    assert ow.send_messages is False and ow.add_reactions is False and ow.send_messages_in_threads is None
+

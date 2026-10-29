@@ -107,8 +107,11 @@ EQUIPE_CLAN = discord.PermissionOverwrite(**config_salons.EQUIPE_TEXTE, send_mes
 #  La zone du clan GoRP (22/10/2026, nuit) : le fondateur a choisi « Un seul forum » — comme
 #  Communautaire, un forum du clan et ses posts ; le 🔊 Join reste ; les anciens salons partent.
 CLAN_FORUM = "🦜▷・clan-gorp"
-SUJET_CLAN = ("🇫🇷 Le clan GoRP : guide, infos, annonces, chat, économie, trade, taverne. On écrit dans les posts.\n"
-              "🇬🇧 The GoRP clan: guide, info, announcements, chat, economy, trade, tavern. Write in the posts.")
+SUJET_CLAN = ("🇫🇷 Le clan GoRP : guide, infos, annonces, chat, taverne. On écrit dans les posts.\n"
+              "🇬🇧 The GoRP clan: guide, info, announcements, chat, tavern. Write in the posts.")
+#  29/10/2026, le fondateur : l'économie et le trade du clan « servent strictement à rien » (pas de vrai menu de
+#  trade, contrairement au trade de Rell Seas) — retirés ; les deux posts déjà créés sont supprimés.
+CLAN_POSTS_RETIRES = ("economie", "trade")
 CLAN_POSTS = (
     ("guide", "🧭 Guide du clan · Clan guide", True, ""),
     ("infos", "📢 Infos · Info", True,
@@ -117,16 +120,15 @@ CLAN_POSTS = (
      "🇫🇷 Les annonces du clan : lis-les, clique « ✅ Vu ».\n🇬🇧 Clan announcements: read them, click “✅ Seen”."),
     ("chat", "💬 Chat", False,
      "🇫🇷 Le chat du clan : on parle de tout, entre nous.\n🇬🇧 The clan chat: talk about anything, among us."),
-    ("economie", "💰 Économie · Economy", False,
-     "🇫🇷 L'économie du clan : objectifs, dons, dépenses.\n🇬🇧 The clan's economy: goals, donations, spending."),
-    ("trade", "🤝 Trade du clan · Clan trade", False,
-     "🇫🇷 Les échanges entre membres du clan : propose, demande.\n🇬🇧 Trades between clan members: offer, ask."),
     ("taverne", "🍺 Taverne · Tavern", False,
      "🇫🇷 On se pose, on raconte ses aventures en mer.\n🇬🇧 Sit down and tell your adventures at sea."),
 )
-#  Le staff du clan écrit aussi dans les posts verrouillés (infos, annonces) : « Gérer les fils ».
-EQUIPE_FORUM_CLAN = discord.PermissionOverwrite(**config_salons.EQUIPE_TEXTE, send_messages_in_threads=True,
-                                                manage_threads=True)
+#  29/10/2026, le fondateur : dans les posts verrouillés (guide, infos, annonces), « les seuls qui peuvent [écrire,
+#  supprimer], fondateurs et direction ». Le staff écrit dans les posts ouverts, sans « Gérer les fils » ni « Gérer les
+#  messages », sans ouvrir de post ; droits_staff donne ces droits à la Direction.
+EQUIPE_FORUM_CLAN = discord.PermissionOverwrite(**dict(config_salons.EQUIPE_TEXTE, send_messages=False),
+                                                send_messages_in_threads=True, manage_threads=False,
+                                                manage_messages=False, create_public_threads=False)
 GUIDE_CLAN_VERSION = 1
 INFOS_MAX = 100       # messages d'info-gorp recopiés au plus
 GUIDE_TEXTE_APRES_S = 5.0   # un texte du guide changé sur le site : le guide réécrit après une rafale de changements
@@ -149,10 +151,6 @@ GUIDE_POSTS = (
                  "read them and click “✅ Seen”.", "Lire · Read", "Le post 📣 Annonces"),
     ("chat", "### 💬 Chat\nLe chat du clan, entre nous{salons}.\n-# The clan chat, among us.", "Ouvrir · Open",
      "Le post 💬 Chat"),
-    ("economie", "### 💰 Économie · Economy\nLes objectifs, les dons et les dépenses du clan.\n-# Goals, donations and "
-                 "spending.", "Ouvrir · Open", "Le post 💰 Économie"),
-    ("trade", "### 🤝 Trade du clan · Clan trade\nLes échanges entre membres : propose, demande.\n-# Trades between "
-              "members: offer, ask.", "Échanger · Trade", "Le post 🤝 Trade du clan"),
     ("taverne", "### 🍺 Taverne · Tavern\nOn se pose, on raconte ses aventures en mer.\n-# Sit down and tell your "
                 "adventures at sea.", "Entrer · Enter", "Le post 🍺 Taverne"),
 )
@@ -745,11 +743,42 @@ async def ordonner(g) -> bool:
     return await _ranger(commu, voulu)
 
 
+async def retirer_posts_clan(g) -> list:
+    """29/10/2026 : les posts 💰 Économie et 🤝 Trade du clan sont supprimés (seulement s'ils sont bien dans le forum
+    du clan) et quittent la configuration. Rien à faire ensuite : rend ce qui a été supprimé."""
+    c = await _cfg(g.id)
+    posts = {k: dict(v) for k, v in (c.get("clan_posts") or {}).items() if isinstance(v, dict)}
+    if not any(k in posts for k in CLAN_POSTS_RETIRES):
+        return []
+    forum_id = int(c.get("clan_forum_v2", 0) or 0)
+    faits = []
+    for cle in CLAN_POSTS_RETIRES:
+        if cle not in posts:
+            continue
+        vieux = await _resoudre(g, posts[cle].get("id", 0))
+        if vieux is not None:
+            if (getattr(getattr(vieux, "parent", None), "id", 0) or getattr(vieux, "parent_id", 0)) != forum_id:
+                continue                      # pas dans le forum du clan : on ne supprime pas à l'aveugle
+            try:
+                await vieux.delete(reason="Économie et trade du clan retirés (choix du fondateur)")
+                faits.append(vieux.name)
+            except discord.HTTPException as ex:
+                _log(f"[ZONES:DETAIL] retrait {cle} {type(ex).__name__} {ex}")
+                continue
+        posts.pop(cle, None)
+    await _db_set(g.id, "clan_posts", posts)
+    return faits
+
+
 async def entretenir(g) -> None:
     """Toutes les 30 minutes : les posts (des deux forums et du forum du clan) restent ouverts ; un post
     qui doit rester verrouillé l'est. Jamais l'inverse : un post que le staff a verrouillé le reste. Un post
     supprimé sort de la configuration (24/10/2026, revue : les guides gardaient un bouton vers un post disparu).
     Puis les deux guides suivent les posts et les rôles."""
+    try:
+        await retirer_posts_clan(g)
+    except discord.HTTPException as ex:
+        _log(f"[ZONES:DETAIL] retrait des posts du clan {type(ex).__name__} {ex}")
     cfz, c = await conf(g), await _cfg(g.id)
     verrous = {cle for j in JEUX for cle, _t, v, _x in j.posts if v}
     verrous_clan = {cle for cle, _t, v, _x in CLAN_POSTS if v}

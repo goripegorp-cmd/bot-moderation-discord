@@ -8,6 +8,13 @@ Le fondateur, mot pour mot ou presque :
   · « le mute avec le clic droit, exclure temporairement » : sur le serveur, pour chaque rôle du staff ;
   · le clan GoRP : « les staffs ont la permission de modérer à l'intérieur, mais ne peuvent pas voir tant qu'ils
     n'ont pas le rôle » — le droit de modérer est posé, la vue vient seulement du rôle du clan ;
+  · 29/10/2026, les FORUMS (clan GoRP, Rell Seas, Clover RPG…) : leurs posts verrouillés (guide, infos, annonces),
+    « les staffs peuvent écrire dedans… je ne veux pas qu'ils puissent supprimer des messages dedans. Les seuls qui
+    peuvent, fondateurs et direction ». Discord règle ces droits pour tout le forum, pas post par post : le staff
+    écrit dans les posts ouverts, sans « Gérer les fils » (écrire dans un post verrouillé), sans « Gérer les
+    messages », sans ouvrir de post ; la Direction a tout ça. Le staff garde « exclure temporairement » ;
+  · 29/10/2026, les salons AUTOMATIQUES (le panneau des tickets) : « personne n'a à répondre à l'intérieur… juste
+    cliquer sur les boutons » — personne n'y écrit, @everyone compris ; les fils des tickets restent ouverts ;
   · vocaux : le staff « peut bouger ou mute » dans les vocaux publics (et ceux créés à la demande) et dans la
     Taverne, « mais pas plus » (pas dans Live, Vidéo, 3 frères, GoRPC) ; la Direction déplace partout.
 
@@ -40,9 +47,25 @@ def _clan(salon) -> bool:
     return cat is not None and config_salons.est_clan(cat.name)
 
 
-def voulu(salon, tous, direction: bool) -> tuple:
+#  Ce qu'@everyone garde dans un salon automatique : rien à écrire, rien à ouvrir (les fils des tickets, eux, restent).
+AUTOMATIQUE = dict(send_messages=False, add_reactions=False, create_public_threads=False, create_private_threads=False)
+
+
+def voulu(salon, tous, direction: bool, automatiques=frozenset()) -> tuple:
     """(droits voulus pour un rôle du staff ou de la Direction, raison) — {} : on ne touche pas ce salon."""
     vocal = salon.type in VOCAUX
+    if getattr(salon, "id", None) in automatiques:
+        return dict(AUTOMATIQUE, manage_messages=False), "automatique : personne n'écrit, on clique"
+    if salon.type == discord.ChannelType.forum:
+        if direction:
+            return (dict(send_messages=True, send_messages_in_threads=True, manage_threads=True, manage_messages=True),
+                    "forum : la Direction écrit partout, posts verrouillés compris, et modère")
+        d = dict(send_messages=False, create_public_threads=False, manage_threads=False, manage_messages=False)
+        if _clan(salon):
+            d["view_channel"] = None
+        elif salon.permissions_for(tous).view_channel:
+            d.update(view_channel=True, read_message_history=True)
+        return d, "forum : le staff écrit dans les posts ouverts, ni posts verrouillés, ni suppression"
     if _clan(salon):
         if direction:
             return {}, ""
@@ -75,7 +98,7 @@ def voulu(salon, tous, direction: bool) -> tuple:
                  manage_messages=False), "lecture seule : le fondateur seul écrit")
 
 
-def plan(g, staff: list, direction: list, salons=None) -> list:
+def plan(g, staff: list, direction: list, salons=None, automatiques=frozenset()) -> list:
     """[(salon, rôle, overwrite neuf, raison)] : seulement là où le rôle n'a pas déjà ce qui est voulu."""
     a_moi = {r.id for r in getattr(g.me, "roles", []) or []}
     actions = []
@@ -83,7 +106,7 @@ def plan(g, staff: list, direction: list, salons=None) -> list:
         for r, dirn in [(r, False) for r in staff] + [(r, True) for r in direction]:
             if r is None or r.managed or r.is_default() or r.id in a_moi or r.permissions.administrator:
                 continue
-            droits, raison = voulu(salon, g.default_role, dirn)
+            droits, raison = voulu(salon, g.default_role, dirn, automatiques)
             if not droits:
                 continue
             o = salon.overwrites_for(r)
@@ -113,8 +136,22 @@ async def nouveau_salon(salon, staff: list, direction: list) -> int:
     return n
 
 
-async def appliquer(g, staff: list, direction: list) -> dict:
-    b = {"salons_corriges": 0, "echecs": 0, "exclure_temp_ajoute": 0, "exclure_temp_echec": 0}
+async def appliquer(g, staff: list, direction: list, automatiques=frozenset()) -> dict:
+    b = {"salons_corriges": 0, "echecs": 0, "exclure_temp_ajoute": 0, "exclure_temp_echec": 0, "automatiques": 0}
+    for sid in automatiques:
+        salon = g.get_channel(sid)
+        if salon is None:
+            continue
+        o = salon.overwrites_for(g.default_role)
+        neuf = discord.PermissionOverwrite(**dict(o))
+        for k, v in AUTOMATIQUE.items():
+            setattr(neuf, k, v)
+        if neuf != o:
+            try:
+                await salon.set_permissions(g.default_role, overwrite=neuf, reason="Salon automatique : on clique, on n'écrit pas")
+                b["automatiques"] += 1
+            except Exception:
+                b["echecs"] += 1
     me = g.me
     for r in list(staff) + list(direction):
         if r is None or r.managed or r.permissions.administrator or r.permissions.moderate_members:
@@ -128,7 +165,7 @@ async def appliquer(g, staff: list, direction: list) -> dict:
             b["exclure_temp_ajoute"] += 1
         except Exception:
             b["exclure_temp_echec"] += 1
-    for salon, r, neuf, raison in plan(g, staff, direction):
+    for salon, r, neuf, raison in plan(g, staff, direction, automatiques=frozenset(automatiques)):
         try:
             await salon.set_permissions(r, overwrite=neuf, reason=raison)
             b["salons_corriges"] += 1

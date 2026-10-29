@@ -761,8 +761,7 @@ def test_T19_le_guide_du_clan_a_la_sauce_de_la_direction(registre_textes, monkey
                         ("guide.ticket.bouton", "Ouvrir un ticket"),
                         ("guide.securite", "-# Jamais ton mot de passe.")):
         assert ecrire(cle, valeur)[0] == 200, cle
-    posts = {k: {"id": 100 + n} for n, k in enumerate(("guide", "infos", "annonces", "chat", "economie", "trade",
-                                                         "taverne"))}
+    posts = {k: {"id": 100 + n} for n, k in enumerate(("guide", "infos", "annonces", "chat", "taverne"))}
     monkeypatch.setattr(ZN, "_vocal_clan", lambda g_, c, contexte="clan": Obj(id=5) if contexte == "clan" else None)
     monkeypatch.setattr(ZN, "_ticket", lambda g_: Obj(id=6, jump_url="https://discord.com/channels/1/6"))
     monkeypatch.setattr(ZN, "_boutons_langue", None)
@@ -771,8 +770,7 @@ def test_T19_le_guide_du_clan_a_la_sauce_de_la_direction(registre_textes, monkey
     assert "**Ahoy !** Le clan se retrouve ici." in t and "### 📢 Le tableau\nÀ lire en premier." in t
     assert "Le chat du clan, entre nous. Le vocal : <#5>." in t and "-# Jamais ton mot de passe." in t
     assert "Bienvenue dans l'équipage" not in t and "Personne du staff" not in t
-    assert libelles_boutons(vue) == ["Lire le tableau", "Lire · Read", "Ouvrir · Open", "Ouvrir · Open",
-                                     "Échanger · Trade", "Entrer · Enter", "Ouvrir un ticket"]
+    assert libelles_boutons(vue) == ["Lire le tableau", "Lire · Read", "Ouvrir · Open", "Entrer · Enter", "Ouvrir un ticket"]
     #  Un texte changé change la signature (le guide posté est réécrit) ; le même texte, la même signature.
     assert ZN.vue_guide_clan(G1, {}, posts, None)[1] == signature
     assert ecrire("guide.taverne.bouton", "Trinquer")[0] == 200

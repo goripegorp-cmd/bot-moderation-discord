@@ -15836,7 +15836,10 @@ async def _droits_staff(g) -> None:
     me = g.me
     if not (me and me.guild_permissions.manage_roles):
         return
-    b = await droits_staff.appliquer(g, *_equipes_droits(g, await cfg(g.id)))
+    #  29/10/2026 : le salon du panneau des tickets est « automatique » — on clique, personne n'y écrit.
+    panneau = await _salon_panneau_tickets(g)
+    b = await droits_staff.appliquer(g, *_equipes_droits(g, await cfg(g.id)),
+                                     automatiques=frozenset({panneau.id}) if panneau is not None else frozenset())
     health_server_module.ETAT_PUBLIC["droits_staff"] = dict(b)
     print(f"[droits_staff] {b}")
 

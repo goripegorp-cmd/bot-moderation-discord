@@ -226,8 +226,7 @@ def test_EV2_l_onglet_destinations_modeles_droits(env):
     assert statut == 200
     dests = r["destinations"]
     assert dests[0] == {"id": str(env.infos.id), "nom": "Infos · Info", "defaut": True}, "📢 Infos par défaut"
-    assert [d["nom"] for d in dests] == ["Infos · Info", "Annonces · Announcements", "Chat", "Économie · Economy",
-                                          "Trade du clan · Clan trade", "Taverne · Tavern"], "le guide n'en est pas"
+    assert [d["nom"] for d in dests] == ["Infos · Info", "Annonces · Announcements", "Chat", "Taverne · Tavern"], "le guide n'en est pas"
     assert not any(EMOJI.search(d["nom"]) for d in dests), "aucun émoji sur le site"
     assert {m["type"] for m in r["modeles"]} == set(E.TYPES) and r["modeles"][0]["cle"] == "dispo"
     assert r["droits"] == {"discord_event": False, "role_clan": True, "role_clan_nom": "GoRPC", "fiches": True}

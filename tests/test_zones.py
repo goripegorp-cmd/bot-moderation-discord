@@ -450,8 +450,8 @@ def _v1_du_clan(g, conf):
 
 
 def test_Z12_la_zone_du_clan_un_seul_forum(env):
-    """« Un seul forum (Recommandé) » : 🦜▷・clan-gorp, guide, infos, annonces, chat, économie, trade du
-    clan, taverne ; le 🔊 Join reste."""
+    """« Un seul forum (Recommandé) » : 🦜▷・clan-gorp, guide, infos, annonces, chat, taverne (l'économie et le trade
+    du clan retirés le 29/10/2026) ; le 🔊 Join reste."""
     g = Monde()
     _join, hub_clan = _clan_et_vocaux(g, env.conf)
     role = run(g.create_role(name="GoRPC"))
@@ -468,11 +468,12 @@ def test_Z12_la_zone_du_clan_un_seul_forum(env):
     assert ows[g.default_role].view_channel is False
     assert (ows[role].send_messages, ows[role].send_messages_in_threads) == (False, True), \
         "le clan écrit dans les posts, il n'en crée pas"
-    assert ows[staff].manage_threads, "le staff écrit aussi dans les posts verrouillés"
+    #  29/10/2026 : « les seuls qui peuvent [écrire dans infos, annonces… et supprimer], fondateurs et direction »
+    assert ows[staff].manage_threads is False and ows[staff].manage_messages is False
+    assert (ows[staff].send_messages, ows[staff].send_messages_in_threads) == (False, True)
     posts = c["clan_posts"]
     assert {k: g.fils[p["id"]].locked for k, p in posts.items()} == {
-        "guide": True, "infos": True, "annonces": True, "chat": False, "economie": False, "trade": False,
-        "taverne": False}
+        "guide": True, "infos": True, "annonces": True, "chat": False, "taverne": False}
     assert c["clan_annonces"] == posts["annonces"]["id"], "les annonces du clan visent leur post"
     assert c["clan_anciens"] == {"annonces": v1_annonces.id, "forum": v1_forum.id} and c["clan_v2"] == 1
     assert not hub_clan.supprime and hub_clan.category_id == clan.id, "le Join ne bouge pas"
@@ -480,7 +481,7 @@ def test_Z12_la_zone_du_clan_un_seul_forum(env):
     assert run(ZN.installer_clan(g, role, [staff])) == [] and (len(g.salons), len(g.fils)) == n, "relancer : rien"
     assert c["clan_anciens"]["annonces"] == v1_annonces.id, "l'ancien salon des annonces reste noté"
     assert c["clan_forum_v2"] in ZN.ids_salons(c)
-    eco, ann = g.fils[posts["economie"]["id"]], g.fils[posts["annonces"]["id"]]
+    eco, ann = g.fils[posts["chat"]["id"]], g.fils[posts["annonces"]["id"]]
     eco.archived, ann.locked = True, False
     run(ZN.entretenir(g))
     assert not eco.archived and ann.locked, "réveillé ; le post des annonces se reverrouille"
@@ -578,12 +579,12 @@ def test_Z19_le_guide_du_clan_en_tete_du_forum(env):
     vue = [k for mid, k in fil.cartes if mid == guide["ouverture"]][-1]["view"]
     t = textes(vue)
     for morceau in ("Bienvenue dans l'équipage", "Welcome aboard", "### 📢 Infos · Info", "### 📣 Annonces",
-                    "### 💬 Chat", f"🔊 <#{hub_clan.id}>", "### 💰 Économie", "### 🤝 Trade du clan",
+                    "### 💬 Chat", f"🔊 <#{hub_clan.id}>",
                     "### 🍺 Taverne", "### 🎫 Une question"):
         assert morceau in t, morceau
     liens = [b.url for b in vue.walk_children() if isinstance(b, discord.ui.Button) and b.url]
     assert liens == [f"https://discord.com/channels/1/{posts[k]['id']}"
-                     for k in ("infos", "annonces", "chat", "economie", "trade", "taverne")] + [ticket.jump_url]
+                     for k in ("infos", "annonces", "chat", "taverne")] + [ticket.jump_url]
     assert compter(vue) <= 40 and c["clan_guide_v"].startswith(f"{ZN.GUIDE_CLAN_VERSION}|")
     assert not run(ZN.assurer_guide_clan(g)), "rien n'a changé : pas de réécriture"
     del g.fils[posts["taverne"]["id"]]
@@ -768,3 +769,25 @@ def test_Z17_les_equipages_partent_une_fois_et_ne_reviennent_pas(env):
     boucle = next(ast.unparse(n) for n in ARBRE.body if getattr(n, "name", "") == "entraide_task")
     assert boucle.index("db_set(g.id, 'equipages_retires_v1'") < boucle.index("_retirer_equipages(g)"), "une fois"
     assert "equipages.entretenir" not in boucle and '"crews"' not in _source("_faq_destinations")
+
+
+def test_Z12b_economie_et_trade_du_clan_supprimes(env):
+    """29/10/2026, le fondateur : l'économie et le trade du clan « servent strictement à rien » — les posts déjà créés
+    sont supprimés à l'entretien, une fois ; un fil qui n'est pas dans le forum du clan n'est jamais supprimé."""
+    g = Monde()
+    _clan_et_vocaux(g, env.conf)
+    role = run(g.create_role(name="GoRPC"))
+    _v1_du_clan(g, env.conf)
+    run(ZN.installer_clan(g, role))
+    c = env.conf
+    forum = g.get_channel(c["clan_forum_v2"])
+    eco, trade = g.nouveau_fil(forum, "💰 Économie · Economy"), g.nouveau_fil(forum, "🤝 Trade du clan · Clan trade")
+    ailleurs = g.nouveau_fil(None, "autre")
+    c["clan_posts"] = dict(c["clan_posts"], economie={"id": eco.id}, trade={"id": trade.id})
+    assert sorted(run(ZN.retirer_posts_clan(g))) == ["💰 Économie · Economy", "🤝 Trade du clan · Clan trade"]
+    assert eco.id not in g.fils and trade.id not in g.fils
+    assert "economie" not in c["clan_posts"] and "trade" not in c["clan_posts"] and "chat" in c["clan_posts"]
+    assert run(ZN.retirer_posts_clan(g)) == [], "une fois suffit"
+    c["clan_posts"] = dict(c["clan_posts"], trade={"id": ailleurs.id})
+    assert run(ZN.retirer_posts_clan(g)) == [] and ailleurs.id in g.fils, "hors du forum du clan : jamais supprimé"
+    assert not any(k in ("economie", "trade") for k, *_ in ZN.CLAN_POSTS)
