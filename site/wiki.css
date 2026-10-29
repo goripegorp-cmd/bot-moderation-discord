@@ -1,69 +1,164 @@
-/* wiki.css — le wiki public de RELL Seas (29/10/2026). Parchemin, laiton, bois : les couleurs du site. */
-body.page-wiki { margin: 0; background: var(--bois, #4a2e1a) url(textures/bois.webp); color: var(--encre, #2b1d12);
-  font-family: "Alegreya", Georgia, serif; font-size: 17px; -webkit-user-select: none; user-select: none;
-  -webkit-touch-callout: none; }
-.w-entete { position: sticky; top: 0; z-index: 5; background: rgba(43, 29, 18, .92); border-bottom: 2px solid var(--laiton, #a8823f);
-  box-shadow: 0 2px 12px rgba(0, 0, 0, .35); }
-.w-planche { max-width: 1180px; margin: 0 auto; padding: 10px 16px; display: flex; align-items: center; gap: 12px; }
+/* wiki.css — le Grimoire de RELL Seas (29/10/2026). Parchemin, laiton, bois, cordes et clous : le thème du site. */
+body.page-wiki { margin: 0; background: #20140b url(textures/bois.webp); color: var(--encre, #2b1d12);
+  font-family: "Alegreya", Georgia, serif; font-size: 17px; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+body.w-bloque { overflow: hidden; }
+.w-entete { position: sticky; top: 0; z-index: 10; background: rgba(32, 20, 11, .9); backdrop-filter: blur(6px);
+  border-bottom: 2px solid var(--laiton, #a8823f); box-shadow: 0 2px 14px rgba(0, 0, 0, .45); }
+.w-planche { max-width: 1240px; margin: 0 auto; padding: 8px 16px; display: flex; align-items: center; gap: 12px; }
 .w-marque { display: flex; flex-direction: column; flex: 1; min-width: 0; }
-.w-titre { font-family: "Rye", "Pirata One", Georgia, serif; color: var(--laiton-pale, #dcc08a); font-size: clamp(20px, 3.4vw, 30px);
-  letter-spacing: .5px; }
-.w-sous { color: var(--corde, #b99a6b); font-size: 14px; }
-.w-langue { min-width: 48px; height: 40px; border: 1px solid var(--laiton, #a8823f); background: transparent; color: var(--laiton-pale, #dcc08a);
+.w-titre { font-family: "Rye", "Pirata One", Georgia, serif; color: var(--laiton-pale, #dcc08a); font-size: clamp(19px, 3vw, 26px); }
+.w-sous { color: var(--corde, #b99a6b); font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.w-langue { min-width: 48px; height: 40px; border: 1px solid var(--laiton, #a8823f); background: rgba(74, 46, 26, .6); color: var(--laiton-pale, #dcc08a);
   font-family: "Alegreya SC", Georgia, serif; font-size: 16px; border-radius: 4px; cursor: pointer; }
-.w-langue:hover, .w-langue:focus-visible { background: rgba(168, 130, 63, .2); outline: none; }
-.w-feuille { max-width: 1180px; margin: 18px auto; padding: 18px 16px 28px; background: var(--papier, #f4ead2) url(textures/parchemin.webp);
-  border-radius: 6px; box-shadow: 0 6px 30px rgba(0, 0, 0, .45); box-sizing: border-box; }
-@media (max-width: 1212px) { .w-feuille { margin: 12px 8px; } }
-.w-attente { text-align: center; color: var(--corde-fonce, #8a6f45); padding: 40px 0; }
-.w-intro { margin: 0 0 14px; line-height: 1.45; }
-.w-intro strong { font-family: "Alegreya SC", Georgia, serif; }
-.w-recherche { width: 100%; box-sizing: border-box; height: 44px; padding: 0 14px; border: 1px solid var(--trait-fort, rgba(43,29,18,.52));
-  border-radius: 4px; background: rgba(255, 255, 255, .55); font: inherit; color: inherit; -webkit-user-select: text; user-select: text; }
-.w-puces { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 16px; }
-.w-puce { border: 1px solid var(--corde-fonce, #8a6f45); background: transparent; color: inherit; font: inherit; font-size: 15px;
-  padding: 6px 12px; border-radius: 999px; cursor: pointer; min-height: 36px; }
-.w-puce[aria-pressed="true"] { background: var(--bois, #4a2e1a); color: var(--laiton-pale, #dcc08a); border-color: var(--bois, #4a2e1a); }
-.w-section { margin: 18px 0 8px; font-family: "Rye", "Pirata One", Georgia, serif; font-size: 22px; color: var(--sienne, #7a4b2a);
-  border-bottom: 1px solid var(--trait, rgba(43,29,18,.26)); padding-bottom: 4px; }
-.w-grille { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
-.w-carte { display: flex; gap: 10px; align-items: flex-start; text-align: left; border: 1px solid var(--trait, rgba(43,29,18,.26));
-  background: rgba(255, 255, 255, .42); border-radius: 6px; padding: 10px; cursor: pointer; font: inherit; color: inherit; width: 100%; }
-.w-carte:hover, .w-carte:focus-visible { border-color: var(--laiton-fonce, #7a5a22); background: rgba(255, 255, 255, .7); outline: none; }
-.w-image { position: relative; flex: none; width: 56px; height: 56px; border-radius: 6px; background: var(--papier-sombre, #e9dab8) center / contain no-repeat;
+.w-langue:hover, .w-langue:focus-visible { background: rgba(168, 130, 63, .3); outline: none; }
+.w-attente { text-align: center; color: var(--corde, #b99a6b); padding: 60px 0; }
+
+/* ── La bannière vivante ── */
+.w-heros { position: relative; min-height: min(78vh, 680px); display: grid; align-items: center; overflow: hidden;
+  border-bottom: 3px solid var(--laiton, #a8823f); }
+.w-heros-fonds { position: absolute; inset: 0; }
+.w-heros-fond { position: absolute; inset: -2%; background: center / cover no-repeat; opacity: 0; transform: scale(1.04);
+  transition: opacity 1.6s ease, transform 9s linear; }
+.w-heros-fond.actif { opacity: 1; transform: scale(1.12); }
+.w-heros::after { content: ""; position: absolute; inset: 0; background:
+  linear-gradient(90deg, rgba(20, 12, 6, .92) 0%, rgba(20, 12, 6, .72) 42%, rgba(20, 12, 6, .15) 100%),
+  linear-gradient(0deg, rgba(20, 12, 6, .85) 0%, transparent 35%); }
+.w-heros-contenu { position: relative; z-index: 1; max-width: 1240px; width: 100%; margin: 0 auto; padding: 40px 16px 34px; box-sizing: border-box; }
+.w-affiche { max-width: 620px; color: var(--clair, #f6ecd6); }
+.w-ruban { display: inline-block; padding: 5px 16px; background: var(--cire, #8e2a24); color: #f6ecd6; font-family: "Alegreya SC", Georgia, serif;
+  font-size: 14px; letter-spacing: .5px; clip-path: polygon(0 0, 100% 0, 96% 50%, 100% 100%, 0 100%, 4% 50%); box-shadow: 0 2px 6px rgba(0,0,0,.4); }
+.w-affiche-haut { display: block; margin-top: 18px; font-family: "Alegreya SC", Georgia, serif; color: var(--laiton-pale, #dcc08a); font-size: 20px; letter-spacing: 2px; }
+.w-affiche-titre { margin: 0; font-family: "Rye", "Pirata One", Georgia, serif; font-weight: normal; font-size: clamp(54px, 9vw, 104px); line-height: 1;
+  color: #f6ecd6; text-shadow: 0 3px 0 #4a2e1a, 0 8px 22px rgba(0, 0, 0, .6); }
+.w-accroche { font-size: clamp(17px, 1.6vw, 20px); line-height: 1.5; color: #efe2c4; margin: 16px 0 22px; }
+.w-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.w-bouton { display: inline-flex; align-items: center; justify-content: center; min-height: 46px; padding: 0 20px; border-radius: 4px; text-decoration: none;
+  font-family: "Alegreya SC", Georgia, serif; font-size: 17px; box-shadow: 0 3px 0 rgba(0, 0, 0, .35); transition: transform .15s ease, filter .15s ease; }
+.w-bouton:hover, .w-bouton:focus-visible { transform: translateY(-2px); filter: brightness(1.08); outline: none; }
+.w-bouton.laiton { background: linear-gradient(#d4ae63, #a8823f); color: #2b1d12; border: 1px solid #7a5a22; }
+.w-bouton.bois { background: #4a2e1a url(textures/bois.webp); color: var(--laiton-pale, #dcc08a); border: 1px solid var(--laiton, #a8823f); }
+.w-pancartes { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 34px; }
+.w-pancarte { position: relative; min-width: 120px; padding: 14px 16px 10px; text-align: center; background: #6b4527 url(textures/bois.webp);
+  border: 2px solid #3a2414; border-radius: 6px; color: var(--laiton-pale, #dcc08a); box-shadow: 0 6px 14px rgba(0, 0, 0, .5);
+  transform: rotate(-1.5deg); }
+.w-pancarte:nth-child(even) { transform: rotate(1.5deg); }
+.w-pancarte strong { display: block; font-family: "Rye", Georgia, serif; font-size: 30px; font-weight: normal; color: #f6ecd6; }
+.w-pancarte span:last-child { font-family: "Alegreya SC", Georgia, serif; font-size: 14px; }
+.w-clou { position: absolute; top: 6px; left: 50%; width: 10px; height: 10px; margin-left: -5px; background: url(ornements/clou.svg) center / contain no-repeat; }
+
+/* ── La feuille de parchemin ── */
+.w-page { display: block; }
+.w-feuille { position: relative; max-width: 1240px; margin: -26px auto 24px; padding: 8px 18px 28px; box-sizing: border-box; z-index: 2;
+  background: var(--papier, #f4ead2) url(textures/parchemin.webp); border-radius: 6px; box-shadow: 0 8px 34px rgba(0, 0, 0, .55); }
+@media (max-width: 1272px) { .w-feuille { margin: -20px 8px 18px; } }
+.w-bloc { padding-top: 14px; }
+.w-section { margin: 14px 0 6px; font-family: "Rye", "Pirata One", Georgia, serif; font-weight: normal; font-size: clamp(22px, 2.4vw, 28px); color: var(--sienne, #7a4b2a);
+  display: flex; align-items: center; gap: 10px; }
+.w-section::after { content: ""; flex: 1; height: 8px; background: url(ornements/corde.svg) left center / auto 8px repeat-x; opacity: .7; }
+.w-phrase { margin: 0 0 12px; color: rgba(43, 29, 18, .75); }
+
+/* ── Les pancartes du port (catégories) ── */
+.w-enseignes { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 18px 12px; padding-top: 8px; }
+.w-enseigne { position: relative; border: 0; background: none; padding: 16px 0 0; cursor: pointer; font: inherit; color: inherit; text-align: center; }
+.w-corde { position: absolute; top: 0; left: 22%; right: 22%; height: 20px; border: 2px solid #8a6f45; border-bottom: 0; border-radius: 50% 50% 0 0 / 100% 100% 0 0; }
+.w-corde::before, .w-corde::after { content: ""; position: absolute; bottom: -4px; width: 8px; height: 8px; background: url(ornements/clou.svg) center / contain no-repeat; }
+.w-corde::before { left: -5px; } .w-corde::after { right: -5px; }
+.w-planchette { position: relative; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 14px 8px 12px; border-radius: 6px;
+  background: linear-gradient(rgba(58, 36, 20, .78), rgba(58, 36, 20, .9)), var(--fond, none) center / cover, #6b4527 url(textures/bois.webp);
+  border: 2px solid #3a2414; box-shadow: 0 6px 14px rgba(0, 0, 0, .35); color: var(--laiton-pale, #dcc08a); transition: transform .2s var(--ease, ease); transform-origin: top center; }
+.w-enseigne:hover .w-planchette, .w-enseigne:focus-visible .w-planchette { transform: rotate(-2deg) translateY(2px); }
+.w-enseigne:focus-visible { outline: none; }
+.w-enseigne:focus-visible .w-planchette { box-shadow: 0 0 0 3px var(--laiton-clair, #c9a35a); }
+.w-enseigne-image { width: 54px; height: 54px; border-radius: 50%; background: #efe2c4 center / 78% no-repeat; border: 2px solid var(--laiton, #a8823f);
+  display: grid; place-items: center; font-size: 26px; color: #4a2e1a; }
+.w-enseigne-nom { font-family: "Alegreya SC", Georgia, serif; font-size: 16px; line-height: 1.15; color: #f6ecd6; }
+.w-enseigne-nb { font-family: "Rye", Georgia, serif; font-size: 15px; color: var(--laiton-clair, #c9a35a); }
+
+/* ── Les fiches ── */
+.w-defile { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(260px, 300px); gap: 12px; overflow-x: auto; padding: 4px 2px 12px;
+  scroll-snap-type: x mandatory; }
+.w-defile > * { scroll-snap-align: start; }
+.w-grille { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; margin-bottom: 8px; }
+.w-carte { position: relative; display: flex; gap: 10px; align-items: flex-start; text-align: left; border: 1px solid var(--trait, rgba(43,29,18,.26));
+  background: rgba(255, 255, 255, .45); border-radius: 6px; padding: 10px; cursor: pointer; font: inherit; color: inherit; width: 100%;
+  transition: transform .15s ease, box-shadow .15s ease, background .15s ease; }
+.w-carte:hover, .w-carte:focus-visible { transform: translateY(-2px); background: rgba(255, 255, 255, .75); box-shadow: 0 6px 14px rgba(43, 29, 18, .18); outline: none; }
+.w-carte.grande { flex-direction: column; align-items: center; text-align: center; background: #fbf4e2 url(textures/papier_affiche.webp) center / cover;
+  border: 2px solid #c9a35a; box-shadow: 0 4px 10px rgba(43, 29, 18, .2); }
+.w-carte.grande .w-image { width: 92px; height: 92px; }
+.w-carte.grande .w-badges { justify-content: center; }
+.w-image { position: relative; flex: none; width: 58px; height: 58px; border-radius: 6px; background: var(--papier-sombre, #e9dab8) center / contain no-repeat;
   border: 1px solid var(--trait-doux, rgba(43,29,18,.14)); overflow: hidden; pointer-events: none; }
 .w-image::after { content: "GoRP"; position: absolute; right: 2px; bottom: 1px; font-size: 9px; letter-spacing: .5px; color: rgba(43, 29, 18, .42);
   font-family: "Alegreya SC", Georgia, serif; }
 .w-image.vide { display: grid; place-items: center; font-size: 26px; color: var(--corde-fonce, #8a6f45); }
 .w-image.vide::after { content: ""; }
-.w-carte-texte { min-width: 0; }
+.w-carte-texte { min-width: 0; display: flex; flex-direction: column; }
 .w-nom { font-family: "Alegreya SC", Georgia, serif; font-size: 17px; line-height: 1.2; }
 .w-nom-en { color: var(--corde-fonce, #8a6f45); font-size: 14px; }
 .w-resume { font-size: 14.5px; line-height: 1.35; margin-top: 4px; color: rgba(43, 29, 18, .85); }
 .w-badges { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
-.w-badge { font-size: 12.5px; padding: 1px 7px; border-radius: 999px; background: rgba(63, 107, 58, .14); color: var(--vert-fonce, #2f5530);
-  border: 1px solid rgba(63, 107, 58, .35); }
+.w-badge { font-size: 12.5px; padding: 1px 7px; border-radius: 999px; background: rgba(63, 107, 58, .14); color: var(--vert-fonce, #2f5530); border: 1px solid rgba(63, 107, 58, .35); }
 .w-badge.m3 { background: rgba(142, 42, 36, .1); color: var(--cire-fonce, #6a1c17); border-color: rgba(142, 42, 36, .3); }
-.w-fond { position: fixed; inset: 0; background: rgba(20, 12, 6, .62); z-index: 20; display: grid; place-items: center; padding: 16px; }
-.w-fiche { background: var(--papier, #f4ead2) url(textures/parchemin.webp); border-radius: 8px; max-width: 560px; width: 100%;
-  max-height: calc(100vh - 32px); overflow: auto; padding: 18px; box-shadow: 0 10px 40px rgba(0, 0, 0, .5); box-sizing: border-box; }
-.w-fiche-tete { display: flex; gap: 14px; align-items: center; }
-.w-fiche .w-image { width: 96px; height: 96px; }
-.w-fiche h2 { margin: 0; font-family: "Rye", "Pirata One", Georgia, serif; font-size: 24px; font-weight: normal; }
-.w-fiche p { line-height: 1.5; }
-.w-preuve { display: flex; align-items: center; justify-content: space-between; gap: 8px; border-top: 1px solid var(--trait, rgba(43,29,18,.26));
-  padding: 8px 0; font-size: 15px; }
-.w-lien { display: inline-flex; align-items: center; min-height: 40px; padding: 0 14px; border-radius: 4px; background: var(--bois, #4a2e1a);
-  color: var(--laiton-pale, #dcc08a); text-decoration: none; font-family: "Alegreya SC", Georgia, serif; white-space: nowrap; }
-.w-lien:hover, .w-lien:focus-visible { background: var(--bois-clair, #6b4527); outline: none; }
-.w-fermer { float: right; border: 0; background: transparent; font-size: 26px; cursor: pointer; color: inherit; width: 40px; height: 40px; }
+.w-recherche { width: 100%; box-sizing: border-box; height: 46px; padding: 0 14px; border: 1px solid var(--trait-fort, rgba(43,29,18,.52)); border-radius: 4px;
+  background: rgba(255, 255, 255, .6); font: inherit; color: inherit; -webkit-user-select: text; user-select: text; }
+.w-puces { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 8px; }
+.w-puce { border: 1px solid var(--corde-fonce, #8a6f45); background: transparent; color: inherit; font: inherit; font-size: 15px; padding: 6px 12px; border-radius: 999px;
+  cursor: pointer; min-height: 36px; }
+.w-puce[aria-pressed="true"] { background: var(--bois, #4a2e1a); color: var(--laiton-pale, #dcc08a); border-color: var(--bois, #4a2e1a); }
+.w-rubrique { position: relative; display: flex; align-items: center; justify-content: space-between; margin: 16px 0 8px; padding: 12px 14px; border-radius: 6px; overflow: hidden;
+  font-family: "Rye", Georgia, serif; font-weight: normal; font-size: 20px; color: #f6ecd6;
+  background: linear-gradient(90deg, rgba(43, 29, 18, .92), rgba(43, 29, 18, .45)), var(--fond, none) center / cover, #4a2e1a; }
+.w-rubrique-nb { font-family: "Alegreya SC", Georgia, serif; font-size: 15px; color: var(--laiton-pale, #dcc08a); }
+
+/* ── Les vidéos ── */
+.w-videos { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.w-video { display: flex; flex-direction: column; gap: 6px; text-decoration: none; color: inherit; }
+.w-video-image { position: relative; aspect-ratio: 16 / 9; border-radius: 6px; background: #2b1d12 center / cover; border: 2px solid #3a2414;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, .3); overflow: hidden; transition: transform .15s ease; }
+.w-video:hover .w-video-image, .w-video:focus-visible .w-video-image { transform: scale(1.02); }
+.w-video:focus-visible { outline: none; } .w-video:focus-visible .w-video-image { box-shadow: 0 0 0 3px var(--laiton-clair, #c9a35a); }
+.w-lecture { position: absolute; left: 50%; top: 50%; width: 46px; height: 46px; margin: -23px 0 0 -23px; border-radius: 50%; display: grid; place-items: center;
+  background: rgba(142, 42, 36, .88); color: #f6ecd6; font-size: 18px; box-shadow: 0 2px 8px rgba(0, 0, 0, .5); }
+.w-duree { position: absolute; right: 6px; bottom: 6px; padding: 1px 6px; border-radius: 3px; background: rgba(0, 0, 0, .7); color: #fff; font-size: 12.5px; }
+.w-video-titre { font-size: 15px; line-height: 1.3; }
+
+/* ── La fiche ouverte ── */
+.w-fond { position: fixed; inset: 0; background: rgba(20, 12, 6, .7); z-index: 30; display: grid; place-items: center; padding: 16px; }
+.w-fiche { position: relative; background: var(--papier, #f4ead2) url(textures/parchemin.webp); border-radius: 8px; max-width: 600px; width: 100%;
+  max-height: calc(100vh - 32px); overflow: auto; box-shadow: 0 12px 44px rgba(0, 0, 0, .6); box-sizing: border-box; border: 2px solid #c9a35a; }
+.w-fiche-bandeau { height: 150px; background: #4a2e1a center / cover; border-bottom: 3px solid var(--laiton, #a8823f);
+  -webkit-mask-image: linear-gradient(#000 60%, rgba(0,0,0,.55)); mask-image: linear-gradient(#000 60%, rgba(0,0,0,.55)); }
+.w-fiche-corps { padding: 0 18px 16px; margin-top: -48px; position: relative; }
+.w-fiche-tete { display: flex; gap: 14px; align-items: flex-end; }
+.w-fiche .w-image { width: 100px; height: 100px; border: 3px solid var(--laiton, #a8823f); box-shadow: 0 4px 12px rgba(0,0,0,.35); background-color: #efe2c4; }
+.w-fiche h2 { margin: 0; font-family: "Rye", "Pirata One", Georgia, serif; font-size: 26px; font-weight: normal; }
+.w-fiche-texte { line-height: 1.55; font-size: 17px; }
+.w-preuve { display: flex; align-items: center; justify-content: space-between; gap: 10px; border-top: 1px solid var(--trait, rgba(43,29,18,.26)); padding: 10px 0; font-size: 15px; }
+.w-preuve > span { display: flex; align-items: center; gap: 8px; }
+.w-sceau { flex: none; width: 26px; height: 26px; background: url(ornements/sceau-vert.svg) center / contain no-repeat; }
+.w-sceau.grand { width: 56px; height: 56px; background-image: url(ornements/sceau-rouge.svg); }
+.w-lien { display: inline-flex; align-items: center; min-height: 40px; padding: 0 14px; border-radius: 4px; background: var(--cire, #8e2a24); color: #f6ecd6;
+  text-decoration: none; font-family: "Alegreya SC", Georgia, serif; white-space: nowrap; }
+.w-lien:hover, .w-lien:focus-visible { background: var(--cire-claire, #a8392f); outline: none; }
+.w-fermer { position: absolute; top: 8px; right: 8px; z-index: 2; border: 1px solid #c9a35a; background: rgba(32, 20, 11, .75); font-size: 24px; cursor: pointer;
+  color: #f6ecd6; width: 40px; height: 40px; border-radius: 50%; }
+
+/* ── Le pied ── */
+.w-pied { max-width: 1240px; margin: 0 auto 30px; padding: 0 16px; color: var(--laiton-pale, #dcc08a); font-size: 14.5px; line-height: 1.5; }
+.w-credits { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; justify-content: space-between; border-top: 1px solid rgba(168,130,63,.5); padding-top: 14px; }
+.w-signature { display: flex; gap: 12px; align-items: center; }
+.w-pied .w-note { color: var(--corde, #b99a6b); }
 .w-note { font-size: 13.5px; color: var(--corde-fonce, #8a6f45); }
-.w-pied { max-width: 1180px; margin: 0 auto 30px; padding: 0 16px; color: var(--laiton-pale, #dcc08a); font-size: 14.5px; line-height: 1.5; }
-.w-pied a { color: var(--laiton-clair, #c9a35a); }
-.w-credits { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; border-top: 1px solid rgba(168,130,63,.5);
-  padding-top: 12px; }
-.w-rejoindre { display: inline-flex; align-items: center; min-height: 44px; padding: 0 18px; border-radius: 4px; background: var(--laiton, #a8823f);
-  color: var(--bois, #4a2e1a); text-decoration: none; font-family: "Alegreya SC", Georgia, serif; font-size: 17px; }
-.w-rejoindre:hover, .w-rejoindre:focus-visible { background: var(--laiton-clair, #c9a35a); outline: none; }
-.w-videos { margin: 6px 0 0; padding-left: 18px; }
+@media (max-width: 560px) {
+  .w-heros { min-height: auto; }
+  .w-pancartes { gap: 10px; } .w-pancarte { min-width: calc(50% - 5px); box-sizing: border-box; }
+  .w-enseignes { grid-template-columns: repeat(3, 1fr); gap: 14px 8px; }
+  .w-planchette { padding: 10px 4px 8px; }
+  .w-enseigne-image { width: 40px; height: 40px; font-size: 20px; }
+  .w-enseigne-nom { font-size: 13.5px; }
+  .w-defile { grid-auto-columns: 78%; }
+  .w-preuve { flex-direction: column; align-items: flex-start; }
+}
+@media (prefers-reduced-motion: reduce) { .w-heros-fond, .w-carte, .w-planchette, .w-bouton { transition: none; } }
 @media print { body.page-wiki { display: none !important; } }

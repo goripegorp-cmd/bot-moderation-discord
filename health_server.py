@@ -374,6 +374,7 @@ def construire_app():
     app.router.add_get('/wiki', _wiki, name="wiki:page")
     app.router.add_get('/wiki/', _wiki, name="wiki:vers_wiki")
     app.router.add_get('/wiki/donnees', _wiki, name="wiki:donnees")
+    app.router.add_get('/wiki/banniere.png', _wiki, name="wiki:banniere")
     return app
 
 

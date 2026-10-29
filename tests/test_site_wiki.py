@@ -53,7 +53,7 @@ def test_WIKI_credits_fondateur_direction_et_discord():
 
 def test_WIKI_adresses_publiques_en_lecture():
     routes = {(r.method, r.resource.canonical) for r in health_server.construire_app().router.routes()}
-    assert {("GET", "/wiki"), ("GET", "/wiki/donnees")} <= routes
+    assert {("GET", "/wiki"), ("GET", "/wiki/donnees"), ("GET", "/wiki/banniere.png")} <= routes
     assert not any(m == "POST" and p.startswith("/wiki") for m, p in routes)
 
 
@@ -63,3 +63,18 @@ def test_WIKI_page_et_freins():
     assert "noindex" in html and "{{OG_TITRE}}" in html and "wiki.js" in html
     assert '"contextmenu"' in js and "f12" in js and "backgroundImage" in js
     assert "RELL Games" in js and "© ${c}" in js       # le jeu à RELL Games, le wiki au clan
+
+
+def test_WIKI_vivant_fonds_officiels_et_banniere():
+    d = W.contenu()
+    assert len(d["heros"]) >= 3 and all(h["fond"].startswith("s/wiki/fonds/") for h in d["heros"])
+    assert all((RACINE / "site" / "wiki" / "fonds" / (h["fond"].rsplit("/", 1)[-1] + "_p.webp")).exists() for h in d["heros"])
+    assert any(t["fond"] for t in d["types"]) and any(v["fond"] for v in d["videos"])
+    png = W.dessiner_banniere(dict(d, credits={"clan": "GoRP SEA", "discord": "https://discord.gg/HM9JpXrZqJ"}))
+    assert png[:8] == b"\x89PNG\r\n\x1a\n" and len(png) > 50_000
+
+
+def test_WIKI_fichiers_publics_seulement_les_siens():
+    import tableau
+    assert tableau.lecteurs_statique("wiki.js") is None and tableau.lecteurs_statique("wiki/fonds/x.webp") is None
+    assert tableau.lecteurs_statique("app.js") is not None        # le code de la Capitainerie reste à la tête
