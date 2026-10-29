@@ -114,6 +114,7 @@ import recrutements  # suivi des candidatures Rell Seas, bilan du mois
 import questionnaire  # le recrutement du clan en deux étapes : banque de questions, cartes du ticket, site
 import registre  # le journal du serveur, lu sur le site (19/10/2026)
 import questions  # les questions posées dans les salons publics (onglet du site)
+import qualite  # un message « construit », ou du remplissage (cadeaux, activité — 29/10/2026)
 import reponses_auto  # le bot répond lui-même aux demandes d'aide et aux questions fréquentes (27/10/2026)
 import publications  # une publication des réseaux = un seul message (réservation atomique)
 import casier  # amnistie de 3 mois, effacer une personne ou une zone du casier, défaire pendant 30 jours
@@ -5279,7 +5280,18 @@ def check_scam(ct):
                     return True, p.pattern
     except Exception:
         pass
+    #  29/10/2026 (audit) : « mrbeast giveaway 5000$ crypto withdraw now https://… » passait. Il faut les TROIS : un lien
+    #  externe (les officiels sont déjà retirés), le registre argent facile (_IMG_SCAM_MONEY_RE) et un appât.
+    try:
+        if re.search(r"https?://|www\.", ct, re.I) and _IMG_SCAM_MONEY_RE.search(ct) and _APPAT_SCAM_RE.search(ct):
+            return True, "lien + argent + appât"
+    except Exception:
+        pass
     return False, None
+
+
+_APPAT_SCAM_RE = re.compile(r"\b(giveaway|mr\.?\s?beast|claim\w*|airdrop|crypto|bitcoin|btc|usdt|eth|wallet|"
+                            r"withdraw\w*|r[ée]clame\w*|cadeau\s+gratuit)\b", re.I)
 
 def check_caps(ct, pct):
     ltrs = [c for c in ct if c.isalpha()]
@@ -25990,8 +26002,10 @@ async def on_message(msg):
     # actif, même si son message est ensuite supprimé par une protection.
     # `marquer_actif` coupe sur son cache du jour avant d'ouvrir la base : le coût
     # réel est une lecture de `set` pour tous les messages sauf le premier.
+    #  29/10/2026 (le fondateur : « que des gifs, que des bonjours… c'est pas construit ») : un message SANS AUCUN MOT
+    #  (un GIF ou un lien seul, des émojis, un sticker, une image sans texte) ne fait pas, à lui seul, une journée active.
     try:
-        if not msg.author.bot:
+        if not msg.author.bot and qualite.mots(msg.content or ""):
             await activite_module.marquer_actif(
                 msg.guild.id, msg.author.id, activite_module.SOURCE_MESSAGE)
     except Exception as _ex_act:

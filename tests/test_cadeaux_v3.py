@@ -37,9 +37,10 @@ def env(tmp_path, monkeypatch):
         journal.append((type_, texte))
     K.setup(get_db=get_db, cfg=cfg, db_set=db_set, autorise=autorise, journal=noter, log=lambda *a: None)
     for d in (K._actifs, K._tampon, K._dernier_msg, K._rafales, K._comptes, K._vocal, K._maj_prevues, K._verrous,
-              K._en_cours, K._annonces_faites):
+              K._en_cours, K._annonces_faites, K._ecartes):
         d.clear()
     K._charges.clear()
+    K._juge.oublier()   # 29/10/2026 : la mémoire du filtre de qualité (qualite.py), comme les autres compteurs
     monkeypatch.setattr(K, "MAJ_CARTE_S", 0)
     horloge = [5000.0]
     monkeypatch.setattr(K, "_mono", lambda: horloge[0])
@@ -64,7 +65,8 @@ def _ecrire(env, g, uid, n):
     for _k in range(n):
         env.horloge[0] += 5
         assert K.sur_message(Obj(id=int(env.horloge[0] * 10) + uid, guild=g, author=Obj(id=uid, bot=False),
-                                 content="bonjour tout le monde !", webhook_id=None, type=discord.MessageType.default,
+                                 content=f"je raconte ma partie de ce soir, épisode {env.horloge[0]} !", webhook_id=None,
+                                 type=discord.MessageType.default,
                                  attachments=[], stickers=[]))
 
 

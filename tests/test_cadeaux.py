@@ -42,9 +42,10 @@ def env(tmp_path, monkeypatch):
         journal.append((type_, texte))
     K.setup(get_db=get_db, cfg=cfg, db_set=db_set, autorise=autorise, journal=noter, log=lambda *a: None)
     for d in (K._actifs, K._tampon, K._dernier_msg, K._rafales, K._comptes, K._vocal, K._maj_prevues, K._verrous,
-              K._en_cours, K._annonces_faites):
+              K._en_cours, K._annonces_faites, K._ecartes):
         d.clear()
     K._charges.clear()
+    K._juge.oublier()   # 29/10/2026 : la mémoire du filtre de qualité (qualite.py), comme les autres compteurs
     monkeypatch.setattr(K, "MAJ_CARTE_S", 0)
     monkeypatch.setattr(K, "_mono", time.monotonic)
     monkeypatch.setattr(K, "_mur", time.time)
@@ -58,8 +59,10 @@ def serveur():
     return g
 
 
-def _msg(g, mid, auteur, texte="bonjour tout le monde !", bot=False, salon=0):
-    """Une phrase complète par défaut : des messages courts à la suite feraient une rafale (27/10)."""
+def _msg(g, mid, auteur, texte=None, bot=False, salon=0):
+    """Une phrase complète par défaut, différente à chaque message : des messages courts à la suite feraient une rafale
+    (27/10), et le même texte répété est un copié-collé qui ne compte pas (29/10, qualite.py)."""
+    texte = texte if texte is not None else f"je raconte ma partie de ce soir, épisode {mid} !"
     return Obj(id=mid, guild=g, author=Obj(id=auteur, bot=bot), content=texte, webhook_id=None,
                type=discord.MessageType.default, attachments=[], stickers=[], channel=Obj(id=salon))
 

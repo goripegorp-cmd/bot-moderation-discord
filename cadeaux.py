@@ -35,6 +35,7 @@ from datetime import datetime
 import discord
 from discord.ui import Button
 
+import qualite
 import visuels
 from ui_v2 import LayoutView, Palette
 
@@ -97,10 +98,15 @@ TEXTES = {
     "pas_inscrit": {"fr": "🎟️ Pas encore inscrit : clique « Participer ».",
                     "en": "🎟️ Not entered yet: click “Enter”."},
     "tirage": {"fr": "⏳ Tirage", "en": "⏳ Draw"},
-    "regles": {"fr": "Comptés depuis le lancement : un message de 2 caractères ou plus, un toutes les 3 s au "
-                     "plus, une rafale de messages courts pour un ; le vocal hors AFK, casque non coupé.",
-               "en": "Counted since the launch: a message of 2+ characters, one every 3 s at most, a burst of "
-                     "short messages as one; voice outside AFK, not deafened."},
+    "regles": {"fr": "Comptés depuis le lancement : un vrai message (une phrase, pas un GIF ni des émojis seuls), un toutes "
+                     "les 3 s au plus, une rafale de messages courts pour un, un seul « bonjour » par jour, pas de "
+                     "copié-collé, 60 par heure au plus ; une vraie réponse à quelqu'un compte double ; le vocal hors "
+                     "AFK, casque non coupé.",
+               "en": "Counted since the launch: a real message (a sentence, not a GIF or emojis alone), one every 3 s at "
+                     "most, a burst of short messages as one, one “hello” a day, no copy-paste, 60 an hour at most; a "
+                     "real reply to someone counts double; voice outside AFK, not deafened."},
+    "ecartes": {"fr": "🚫 {n} message(s) non compté(s) : GIF ou émojis seuls, bonjours répétés, copiés-collés.",
+                "en": "🚫 {n} message(s) not counted: GIFs or emojis alone, repeated hellos, copy-paste."},
     "manque": {"fr": "⛔ **Pas encore** : il te faut d'abord ceci. Reclique « Participer » quand c'est bon.",
                "en": "⛔ **Not yet**: you need this first. Click “Enter” again once it's done."},
     "pas_inscrit_cond": {"fr": "🎟️ Pas encore inscrit : remplis les conditions, puis clique « Participer ».",
@@ -134,7 +140,10 @@ _actifs: dict = {}                                # guild_id → {cadeau_id: dé
 _tampon: dict = defaultdict(lambda: [0, 0.0])     # (cadeau_id, membre_id) → [messages, secondes]
 _dernier_msg: dict = {}                           # (guild_id, membre_id) → _mono()
 _rafales: OrderedDict = OrderedDict()             # (salon_id, membre_id) → [_mono() du dernier court, a compté]
-_comptes: dict = {}                               # message_id → (guild_id, membre_id, (cadeau_id…), monotonic)
+_comptes: dict = {}                               # message_id → (guild_id, membre_id, (cadeau_id…), monotonic, poids)
+#  29/10/2026 : un message « construit » seulement (qualite.py) — et ce qui n'a pas compté, pour « Mes stats » et la liste.
+_juge = qualite.Juge()
+_ecartes: dict = defaultdict(int)                 # (cadeau_id, membre_id) → messages non comptés (mémoire)
 _vocal: dict = {}                                 # (guild_id, membre_id) → _mur() du début du segment
 _charges: set = set()                             # les serveurs dont les cadeaux actifs sont en mémoire
 _maj_prevues: dict = {}
@@ -380,11 +389,20 @@ def sur_message(message) -> bool:
         if rafale[1]:
             return False    # la rafale a déjà compté : « le jeux » / « me » / « tente »… = un message
         rafale[1] = True
-    _dernier_msg[cle] = t
     cids = tuple(actifs)
+    #  29/10/2026 : un GIF ou des émojis seuls, une salutation répétée, un copié-collé, plus de 60 dans l'heure : ne
+    #  comptent pas (qualite.py) ; une vraie réponse à quelqu'un compte double.
+    cible = getattr(getattr(getattr(message, "reference", None), "resolved", None), "author", None)
+    reponse = cible is not None and getattr(cible, "id", 0) != auteur.id and not getattr(cible, "bot", False)
+    raison, poids = _juge.juger(cle, texte, t, reponse=reponse)
+    if raison:
+        for cid in cids:
+            _ecartes[(cid, auteur.id)] += 1
+        return False
+    _dernier_msg[cle] = t
     for cid in cids:
-        _tampon[(cid, auteur.id)][0] += 1
-    _comptes[message.id] = (g.id, auteur.id, cids, t)
+        _tampon[(cid, auteur.id)][0] += poids
+    _comptes[message.id] = (g.id, auteur.id, cids, t, poids)
     if len(_comptes) > 5000:
         _elaguer(t)
     return True
@@ -395,9 +413,9 @@ def sur_suppression(message_id: int) -> bool:
     x = _comptes.pop(int(message_id), None)
     if x is None or _mono() - x[3] > EFFACE_S:
         return False
-    _gid, uid, cids, _t = x
+    _gid, uid, cids, _t = x[:4]
     for cid in cids:
-        _tampon[(cid, uid)][0] -= 1
+        _tampon[(cid, uid)][0] -= (x[4] if len(x) > 4 else 1)
     return True
 
 
@@ -1033,9 +1051,11 @@ def lignes_progres(c: dict, messages: int, secondes: float, langue: str = "fr", 
 
 
 def vue_stats(c: dict, membre, messages: int, secondes: float, inscrit: bool, langue: str = "fr",
-              entete: str = "", invitations: int = 0) -> LayoutView:
+              entete: str = "", invitations: int = 0, ecartes: int = 0) -> LayoutView:
     lignes = ([entete] if entete else []) + [f"### 🎁 {c['lot']} — {tr('tes_stats', langue)}"]
     lignes += lignes_progres(c, messages, secondes, langue, invitations=invitations, membre=membre)
+    if ecartes:
+        lignes.append(tr("ecartes", langue, n=ecartes))
     mult = chance(c, membre)
     if mult > 1:
         lignes.append(tr("chance", langue, mult=_nombre(mult)))
@@ -1219,7 +1239,8 @@ async def quitter(i, cid: int) -> None:
         return await _repondre(i, _vue_message(tr("fini", langue)))
     messages, secondes = await stats(cid, i.user.id)
     await _repondre(i, vue_stats(c, i.user, messages, secondes, False, langue, entete=tr("quitte", langue),
-                                 invitations=await invitations_de(c, i.user.id)))
+                                 invitations=await invitations_de(c, i.user.id),
+                                 ecartes=_ecartes.get((int(cid), i.user.id), 0)))
     planifier_maj(i.guild, cid)
 
 
@@ -1237,7 +1258,8 @@ async def montrer_stats(i, cid: int) -> None:
     retire = await _vu_retire(cid, i.user.id)
     await _repondre(i, vue_stats(c, i.user, messages, secondes, await est_inscrit(cid, i.user.id), langue,
                                  entete=tr("retiree", langue) if retire else "",
-                                 invitations=await invitations_de(c, i.user.id)))
+                                 invitations=await invitations_de(c, i.user.id),
+                                 ecartes=_ecartes.get((int(cid), i.user.id), 0)))
     if retire:
         _effacer_plus_tard(i)
 
@@ -1311,8 +1333,11 @@ async def vue_participants(g, c: dict, page: int = 0, recherche: str = "") -> La
             m_, s_ = tous.get(u, (0, 0.0))
             membre = g.get_member(u)
             mult = chance(c, membre) if membre is not None else 1.0
+            ec = _ecartes.get((cid, u), 0)
             desc = " · ".join(x for x in (progres(c, m_, s_, invs.get(u, 0), membre),
-                                          f"🍀 ×{_nombre(mult)}" if mult > 1 else "") if x)
+                                          f"🍀 ×{_nombre(mult)}" if mult > 1 else "",
+                                          #  29/10/2026 : plus de non comptés que de comptés — à regarder
+                                          f"🚫 {ec} non comptés" if ec and ec >= max(1, m_) else "") if x)
             options.append(discord.SelectOption(
                 label=f"{rangs[u]}. {_nom(g, u)}"[:100], value=str(u), description=(desc or "Inscrit")[:100],
                 emoji=("✅" if remplit(c, m_, s_, invs.get(u, 0), membre) else "⏳") if conditions else "🎟️"))
