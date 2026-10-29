@@ -453,38 +453,38 @@
   "boss.yahu": {
    "type": "boss",
    "nom": "Yahu",
-   "fr": "Boss des grands fonds, de la famille des Léviathans.",
-   "en": "Deep-sea boss from the Leviathan family."
+   "fr": "Boss des grands fonds, montré dans Movie 3.",
+   "en": "Deep-sea boss, shown in Movie 3."
   },
   "boss.kraken": {
    "type": "boss",
    "nom": "Kraken",
-   "fr": "Boss marin géant, proche d'un calmar, montré dans Movie 3.",
-   "en": "Giant sea boss, squid-like, shown in Movie 3."
+   "fr": "Boss marin géant, montré dans Movie 3 et présenté par CaribBros dans « Official Kraken ».",
+   "en": "Giant sea boss, shown in Movie 3 and presented by CaribBros in “Official Kraken”."
   },
   "boss.big_boss_man": {
    "type": "boss",
    "nom": "Big Boss Man",
-   "fr": "Un des premiers boss, chef d'équipage, montré dans Movie 2.",
-   "en": "One of the first bosses, a crew leader, shown in Movie 2."
+   "fr": "Un des boss montrés dans The Movie 2.",
+   "en": "One of the bosses shown in The Movie 2."
   },
   "boss.katame": {
    "type": "boss",
    "nom": "Katame",
-   "fr": "Boss qui manie une épée dans sa gueule, montré dans Movie 2.",
-   "en": "A boss wielding a sword in its jaws, shown in Movie 2."
+   "fr": "Un des boss montrés dans The Movie 2.",
+   "en": "One of the bosses shown in The Movie 2."
   },
   "lieu.hades_asylum": {
    "type": "lieu",
    "nom": "Hades' Asylum",
-   "fr": "Prison géante de haute sécurité tenue par les Marines, pour les pires pirates.",
-   "en": "Giant high-security prison run by the Marines for the worst pirates."
+   "fr": "Lieu montré dans Movie 3 ; « Into The Seas » y fait descendre chercher le butin des monstres marins colossaux.",
+   "en": "Place shown in Movie 3; “Into The Seas” sends you down there for the loot of colossal sea monsters."
   },
   "equipement.handcuffs": {
    "type": "equipement",
    "nom": "Handcuffs",
-   "fr": "Menottes pour arrêter PNJ et joueurs ; réservées à la faction Marine.",
-   "en": "Handcuffs to arrest NPCs and players; Marine faction only."
+   "fr": "Des menottes, montrées dans Not Movie 3.",
+   "en": "Handcuffs, shown in Not Movie 3."
   },
   "equipement.utility_tool": {
    "type": "equipement",
@@ -495,8 +495,8 @@
   "systeme.reputation": {
    "type": "systeme",
    "nom": "Reputation",
-   "fr": "Ta réputation, bonne ou mauvaise, change la façon dont le monde réagit à toi.",
-   "en": "Your reputation, good or bad, changes how the world reacts to you."
+   "fr": "Le système de réputation, présenté dans Movie 3.",
+   "en": "The reputation system, presented in Movie 3."
   },
   "systeme.talents": {
    "type": "systeme",
@@ -537,8 +537,8 @@
   "systeme.wildlife": {
    "type": "systeme",
    "nom": "Wildlife",
-   "fr": "La faune du jeu, amicale, neutre ou hostile, sur terre et en mer.",
-   "en": "The game's wildlife, friendly, neutral or hostile, on land and at sea."
+   "fr": "La faune du jeu, sur terre et en mer, présentée dans Not Movie 3.",
+   "en": "The game's wildlife, on land and at sea, presented in Not Movie 3."
   }
  },
  "types": {

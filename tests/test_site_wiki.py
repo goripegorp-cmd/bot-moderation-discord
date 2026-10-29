@@ -78,3 +78,18 @@ def test_WIKI_fichiers_publics_seulement_les_siens():
     import tableau
     assert tableau.lecteurs_statique("wiki.js") is None and tableau.lecteurs_statique("wiki/fonds/x.webp") is None
     assert tableau.lecteurs_statique("app.js") is not None        # le code de la Capitainerie reste à la tête
+
+
+def test_WIKI_rubriques_sourcees_et_chiffres_officiels():
+    d = W.contenu()
+    assert {"jeu", "lore", "createurs", "liens"} <= set(d["pages"])
+    for x in d["pages"]["lore"] + d["pages"]["jeu"]["points"] + d["pages"]["jeu"]["histoire"]:
+        assert x["url"].startswith("https://youtu.be/"), x                  # chaque affirmation a sa vidéo officielle
+    for x in d["pages"]["liens"]:
+        assert re.match(r"https://(www\.youtube\.com/@(RELLGames|CaribBros)|discord\.gg/(RELLSEAS|rellgames)|www\.roblox\.com/)", x["url"]), x
+    assert len(d["actus"]) >= 40 and d["actus"][0]["date"] >= d["actus"][-1]["date"]
+    assert d["chiffres"]["favoris"] and d["chiffres"]["discord"]
+    assert all(t["nom"] != "RELL Seas" for b in d["movie3"] for t in b["termes"])
+    js = (RACINE / "site" / "wiki.js").read_text(encoding="utf-8")
+    for onglet in ("accueil", "jeu", "monde", "lore", "fiches", "actus", "liens"):
+        assert f'["{onglet}"' in js, onglet

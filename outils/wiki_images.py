@@ -50,6 +50,10 @@ def recadrer_16_9(im: Image.Image) -> Image.Image:
 def main() -> None:
     DOSSIER.mkdir(parents=True, exist_ok=True)
     vids = json.loads(VIDEOS.read_text(encoding="utf-8"))["videos"]
+    officiel = RACINE / "donnees_jeu" / "rell_officiel.json"     # + les vidéos de CaribBros (outils/officiel_rellseas.py)
+    if officiel.exists():
+        vus = {v["id"] for v in vids}
+        vids += [v for v in json.loads(officiel.read_text(encoding="utf-8"))["videos"] if v["id"] not in vus]
     faits = 0
     for v in vids:
         grand, petit = DOSSIER / f"{v['id']}.webp", DOSSIER / f"{v['id']}_p.webp"

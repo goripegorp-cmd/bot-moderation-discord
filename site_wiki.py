@@ -99,11 +99,42 @@ def contenu() -> dict:
             continue
         entrees.append({"cle": cle, "type": x["type"], "nom": x["nom"], "nom_en": x["nom"], "fr": x["fr"], "en": x["en"],
                         "image": "", "m3": False, "groupe": "", "preuves": p})
+    off, pages = _lire("rell_officiel.json"), _lire("wiki_pages.json")
+    for x in pages.get("lore", []):
+        x["fond"] = fond(x.pop("fond", "")) if isinstance(x.get("fond"), str) else ""
+
+    def extrait(desc: str) -> str:
+        """La première ligne parlante d'une description officielle (ni lien, ni crédit, ni « Game Link »)."""
+        for l in (desc or "").splitlines():
+            l = l.strip()
+            if len(l) > 24 and not re.search(r"(?i)https?://|discord\.gg|game link|group|credits|produced|lyrics|"
+                                                  r"^\d+:\d+", l):
+                return l[:220]
+        return ""
+    actus = [{"date": v["date"], "titre": v["titre"], "chaine": v["chaine"], "vues": v.get("vues") or 0,
+              "duree": _minute(int(v.get("duree") or 0)) if v.get("duree") else "", "url": f"https://youtu.be/{v['id']}",
+              "fond": fond(v["id"]), "extrait": extrait(v.get("description", ""))}
+             for v in reversed(off.get("videos", []))]
+    #  Movie 3 minute par minute : les termes du jeu DITS dans la vidéo (sous-titres), par quart d'heure
+    m3 = "q09y0z5Vyxw"
+    dits = sorted((t, nom) for nom, lst in termes.items() if nom.lower() not in ambigus and nom != "RELL Seas"
+                  for v, t in lst if v == m3)
+    blocs: dict = {}
+    for t, nom in dits:
+        b = blocs.setdefault(t // 900, [])
+        if nom not in [x["nom"] for x in b]:
+            b.append({"nom": nom, "minute": _minute(t), "url": f"https://youtu.be/{m3}?t={t}"})
+    movie3 = [{"de": _minute(k * 900), "a": _minute(k * 900 + 899), "termes": v} for k, v in sorted(blocs.items())]
+    rb, dc = off.get("roblox", {}), off.get("discord", {})
+    chiffres = {"favoris": (rb.get("jeu") or {}).get("favoris"), "groupe": (rb.get("groupe_jeu") or {}).get("membres"),
+                "studio": (rb.get("groupe_studio") or {}).get("membres"), "discord": dc.get("membres"),
+                "discord_en_ligne": dc.get("en_ligne"), "discord_studio": None, "releve": off.get("releve", "")}
     utilises = {e["type"] for e in entrees}
     for t in types:
         t["fond"] = fond(FOND_TYPE.get(t["cle"], ""))
         t["icone"] = next((e["image"] for e in entrees if e["type"] == t["cle"] and e["image"]), "")
-    return {"types": [t for t in types if t["cle"] in utilises], "entrees": entrees,
+    return {"types": [t for t in types if t["cle"] in utilises], "entrees": entrees, "pages": pages, "actus": actus,
+            "movie3": movie3, "chiffres": chiffres,
             "heros": [{"fond": fond(v), "titre": titres.get(v, ""), "url": f"https://youtu.be/{v}"} for v in HEROS if fond(v)],
             "videos": [{"titre": v["titre"], "url": f"https://youtu.be/{v['id']}", "fond": fond(v["id"]),
                         "duree": _minute(int(v.get("duree") or 0)) if v.get("duree") else ""}
@@ -129,11 +160,64 @@ def credits(g) -> dict:
             "direction": direction[:12], "discord": INVITATION}
 
 
+#  Les chiffres officiels EN DIRECT (Roblox, Discord), relus au plus une fois par heure, en tâche de fond ; le relevé du
+#  fichier sert en attendant (ou si une source ne répond pas). Seulement des compteurs publics, aucune donnée de joueur.
+DIRECT_S = 3600.0
+_direct: dict = {"t": -1e9, "valeurs": {}, "tache": None}
+
+
+async def _relire_direct() -> None:
+    import aiohttp
+    v = {}
+    sources = {"favoris": ("https://games.roblox.com/v1/games/2738929784/favorites/count", ("favoritesCount",)),
+               "groupe": ("https://groups.roblox.com/v1/groups/11020595", ("memberCount",)),
+               "studio": ("https://groups.roblox.com/v1/groups/4939446", ("memberCount",)),
+               "discord": ("https://discord.com/api/v10/invites/RELLSEAS?with_counts=true", ("approximate_member_count",)),
+               "discord_en_ligne": ("https://discord.com/api/v10/invites/RELLSEAS?with_counts=true",
+                                    ("approximate_presence_count",)),
+               "discord_studio": ("https://discord.com/api/v10/invites/rellgames?with_counts=true",
+                                  ("approximate_member_count",))}
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10),
+                                         headers={"User-Agent": "GoRP-bot-wiki/1.0"}) as s:
+            lus: dict = {}
+            for cle, (url, chemin) in sources.items():
+                try:
+                    if url not in lus:
+                        async with s.get(url) as r:
+                            lus[url] = await r.json() if r.status == 200 else {}
+                    x = lus[url].get(chemin[0])
+                    if isinstance(x, int) and x > 0:
+                        v[cle] = x
+                except Exception:
+                    continue
+    except Exception:
+        pass
+    if v:
+        v["releve"] = time.strftime("%Y-%m-%d %H:%M")
+        _direct["valeurs"] = v
+        _cache.clear()                                   # la prochaine visite montre les nouveaux chiffres
+    _direct["t"] = time.monotonic()
+
+
+def _lancer_direct() -> None:
+    import asyncio
+    t = _direct.get("tache")
+    if time.monotonic() - _direct["t"] >= DIRECT_S and (t is None or t.done()):
+        _direct["t"] = time.monotonic()
+        _direct["tache"] = asyncio.get_running_loop().create_task(_relire_direct())
+
+
 async def _entree(g) -> dict:
+    try:
+        _lancer_direct()
+    except Exception:
+        pass
     e = _cache.get(g.id)
     if e is not None and time.monotonic() - e["t"] < FRAIS:
         return e
     d = dict(contenu(), credits=credits(g))
+    d["chiffres"] = dict(d["chiffres"], **_direct["valeurs"])
     corps = json.dumps(d, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     e = _cache[g.id] = {"t": time.monotonic(), "corps": corps, "etag": '"' + hashlib.sha256(corps).hexdigest()[:24] + '"',
                         "n": len(d["entrees"]), "pages": {}}

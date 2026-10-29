@@ -1,0 +1,230 @@
+{
+ "jeu": {
+  "intro": {
+   "fr": "RELL Seas est un jeu Roblox d'aventure en mer développé par RELL Games, dont RELLbad et RELLsin sont les propriétaires. Combats au fruit et à l'arme, navires à construire, talents à monter, Haki, boss des profondeurs : le studio le dévoile depuis 2023 à travers ses Movies, ses Dev Logs, ses teasers et ses animations officielles.",
+   "en": "RELL Seas is a Roblox sea-adventure game developed by RELL Games, owned by RELLbad and RELLsin. Fruit and weapon combat, ships to build, talents to level, Haki, deep-sea bosses: the studio has been revealing it since 2023 through its Movies, Dev Logs, teasers and official animations."
+  },
+  "statut": {
+   "fr": "Le jeu n'est pas encore ouvert au public. Le studio le rappelle lui-même : « Le jeu n'est public nulle part. Vous saurez quand nous sortirons. » Méfie-toi de tout lien qui prétend le contraire.",
+   "en": "The game is not open to the public yet. The studio says it itself: “The game isn't public anywhere. You'll know when we are releasing.” Beware of any link claiming otherwise.",
+   "source": "https://youtu.be/ZCzdKbmQerg",
+   "source_titre": "RELL Seas: Progress"
+  },
+  "points": [
+   {
+    "fr": "Plan de sortie du jeu présenté dans Not Movie 3 (0:00 à 11:54).",
+    "en": "Game release plan presented in Not Movie 3 (0:00 to 11:54).",
+    "url": "https://youtu.be/QuClr80Pmc0?t=0"
+   },
+   {
+    "fr": "Accès anticipé de la communauté expliqué dans la QNA officielle (6:12).",
+    "en": "Community early access explained in the official QNA (6:12).",
+    "url": "https://youtu.be/y1iwDJZvVOg?t=372"
+   },
+   {
+    "fr": "État de Movie 3 et retards, dans la QNA officielle (2:35).",
+    "en": "Movie 3 status and delays, in the official QNA (2:35).",
+    "url": "https://youtu.be/y1iwDJZvVOg?t=155"
+   },
+   {
+    "fr": "Gameplay et anti-triche, dans la QNA officielle (8:26).",
+    "en": "Gameplay and anti-cheat, in the official QNA (8:26).",
+    "url": "https://youtu.be/y1iwDJZvVOg?t=506"
+   },
+   {
+    "fr": "Des histoires courtes animées en 2D, à débloquer en jeu.",
+    "en": "Short 2D-animated stories, unlocked in game.",
+    "url": "https://youtu.be/F4EW55qip-0"
+   }
+  ],
+  "histoire": [
+   {
+    "date": "2021-08-08",
+    "fr": "Les débuts sous le nom de « RELL Piece » : premiers aperçus des mers.",
+    "en": "The beginnings as “RELL Piece”: first glimpses of the seas.",
+    "url": "https://youtu.be/fP_BwUOrA78"
+   },
+   {
+    "date": "2023-01-19",
+    "fr": "Teaser 1 : le nom RELL Seas est lancé.",
+    "en": "Teaser 1: the RELL Seas name launches.",
+    "url": "https://youtu.be/Mm8Ybn-AzcE"
+   },
+   {
+    "date": "2023-03-02",
+    "fr": "Teaser 3 : combat au fruit et à l'arme à feu.",
+    "en": "Teaser 3: fruit and gun combat.",
+    "url": "https://youtu.be/nbN6sXgREwA"
+   },
+   {
+    "date": "2023-10-30",
+    "fr": "RELL Seas: The Movie, la première grande présentation.",
+    "en": "RELL Seas: The Movie, the first big showcase.",
+    "url": "https://youtu.be/O9XhIEAZ2r0"
+   },
+   {
+    "date": "2023-12-18",
+    "fr": "Dev Log 1 et 2 : le jeu en construction.",
+    "en": "Dev Logs 1 and 2: the game in the making.",
+    "url": "https://youtu.be/H2HHxKdWaoQ"
+   },
+   {
+    "date": "2024-07-30",
+    "fr": "The Movie 2.",
+    "en": "The Movie 2.",
+    "url": "https://youtu.be/ji-L9CdSvN8"
+   },
+   {
+    "date": "2025-07-08",
+    "fr": "Not Movie 3 : plan de sortie, sous-marin, combat sous l'eau.",
+    "en": "Not Movie 3: release plan, submarine, underwater combat.",
+    "url": "https://youtu.be/QuClr80Pmc0"
+   },
+   {
+    "date": "2026-09-15",
+    "fr": "La QNA officielle.",
+    "en": "The official QNA.",
+    "url": "https://youtu.be/y1iwDJZvVOg"
+   },
+   {
+    "date": "2026-10-17",
+    "fr": "Musique et animations officielles : Into The Seas, Light Upon the Seas, Paid in Blood and Smoke, A Buster Call.",
+    "en": "Official music and animations: Into The Seas, Light Upon the Seas, Paid in Blood and Smoke, A Buster Call.",
+    "url": "https://youtu.be/9BkXvWPlGLc"
+   },
+   {
+    "date": "2026-10-25",
+    "fr": "RELL Seas: The Movie 3, plus de trois heures de jeu montré.",
+    "en": "RELL Seas: The Movie 3, over three hours of gameplay shown.",
+    "url": "https://youtu.be/q09y0z5Vyxw"
+   }
+  ]
+ },
+ "lore": [
+  {
+   "nom": "RELL C. Sparrow",
+   "fr": "Le capitaine que chante « Into The Seas » : l'aventure commence « par la main de Rell C. Sparrow ».",
+   "en": "The captain sung in “Into The Seas”: the adventure begins “by the hand of Rell C. Sparrow”.",
+   "url": "https://youtu.be/9BkXvWPlGLc",
+   "fond": "9BkXvWPlGLc"
+  },
+  {
+   "nom": "Admiral Zaru",
+   "fr": "Un amiral : « Mr. Sparrow affronte l'amiral Zaru » dans Light Upon the Seas.",
+   "en": "An admiral: “Mr. Sparrow faces off against Admiral Zaru” in Light Upon the Seas.",
+   "url": "https://youtu.be/JWpwr6hjdRo",
+   "fond": "JWpwr6hjdRo"
+  },
+  {
+   "nom": "Zak Fuze",
+   "fr": "« Zak Fuze a causé des ennuis. Sa prime est en train d'être réclamée. » (Paid in Blood and Smoke)",
+   "en": "“Zak Fuze caused some troubles. His bounty is being collected.” (Paid in Blood and Smoke)",
+   "url": "https://youtu.be/fkCXpll1jRI",
+   "fond": "fkCXpll1jRI"
+  },
+  {
+   "nom": "Sparrow King Longbeard",
+   "fr": "La cible d'un Buster Call, dans l'animation officielle A Buster Call.",
+   "en": "The target of a Buster Call, in the official animation A Buster Call.",
+   "url": "https://youtu.be/P2MhP3FeF2k",
+   "fond": "P2MhP3FeF2k"
+  },
+  {
+   "nom": "Davy Jones",
+   "fr": "Il repose sous les mers, selon les paroles de « Into The Seas ».",
+   "en": "He lies beneath the seas, according to the lyrics of “Into The Seas”.",
+   "url": "https://youtu.be/9BkXvWPlGLc",
+   "fond": "9BkXvWPlGLc"
+  },
+  {
+   "nom": "Hades' Asylum",
+   "fr": "Un royaume où l'on descend chercher le butin des monstres marins colossaux, selon « Into The Seas ».",
+   "en": "A realm you descend into for the loot of colossal sea monsters, according to “Into The Seas”.",
+   "url": "https://youtu.be/9BkXvWPlGLc",
+   "fond": "QuClr80Pmc0"
+  }
+ ],
+ "createurs": [
+  {
+   "nom": "RELLbad",
+   "fr": "Propriétaire de RELL Seas avec RELLsin ; réalisateur, scénariste et monteur de The Movie 2, dont il signe la musique.",
+   "en": "Owner of RELL Seas with RELLsin; director, writer and editor of The Movie 2, whose music he made."
+  },
+  {
+   "nom": "RELLsin",
+   "fr": "Propriétaire de RELL Seas avec RELLbad ; co-réalisateur de The Movie 2 et producteur exécutif des animations.",
+   "en": "Owner of RELL Seas with RELLbad; co-director of The Movie 2 and executive producer of the animations."
+  },
+  {
+   "nom": "Jae15jae",
+   "fr": "Animation des vidéos officielles (Into The Seas, Light Upon the Seas, Paid in Blood and Smoke).",
+   "en": "Animation of the official videos (Into The Seas, Light Upon the Seas, Paid in Blood and Smoke)."
+  },
+  {
+   "nom": "vidgamenate",
+   "fr": "Conception sonore ; écriture et réalisation du clip Into The Seas.",
+   "en": "Sound design; writer and director of the Into The Seas music video."
+  },
+  {
+   "nom": "ByHange",
+   "fr": "Illustrations de RELL Seas: The Movie.",
+   "en": "Artwork of RELL Seas: The Movie."
+  },
+  {
+   "nom": "Fede Vogliolo",
+   "fr": "Chant, production et paroles de « Into The Seas » (avec RELLbad).",
+   "en": "Vocals, production and lyrics of “Into The Seas” (with RELLbad)."
+  }
+ ],
+ "liens": [
+  {
+   "cle": "yt_rell",
+   "nom": "YouTube · RELLGames",
+   "fr": "La chaîne officielle du studio : Movies, Dev Logs, teasers, animations.",
+   "en": "The studio's official channel: Movies, Dev Logs, teasers, animations.",
+   "url": "https://www.youtube.com/@RELLGames"
+  },
+  {
+   "cle": "yt_carib",
+   "nom": "YouTube · CaribBros",
+   "fr": "La chaîne des frères RELL : aperçus, journaux de développement, musiques.",
+   "en": "The RELL brothers' channel: previews, dev logs, music.",
+   "url": "https://www.youtube.com/@CaribBros"
+  },
+  {
+   "cle": "dc_seas",
+   "nom": "Discord · RELL Seas",
+   "fr": "Le serveur officiel du jeu.",
+   "en": "The game's official server.",
+   "url": "https://discord.gg/RELLSEAS"
+  },
+  {
+   "cle": "dc_games",
+   "nom": "Discord · RELL Games",
+   "fr": "Le serveur officiel du studio.",
+   "en": "The studio's official server.",
+   "url": "https://discord.gg/rellgames"
+  },
+  {
+   "cle": "rb_jeu",
+   "nom": "Roblox · RELL Seas (jeu)",
+   "fr": "La page officielle du jeu (pas encore publique).",
+   "en": "The game's official page (not public yet).",
+   "url": "https://www.roblox.com/games/7089993809/RELL-Seas"
+  },
+  {
+   "cle": "rb_groupe",
+   "nom": "Roblox · groupe RELL Seas",
+   "fr": "Le groupe officiel du jeu, badge vérifié.",
+   "en": "The game's official group, verified badge.",
+   "url": "https://www.roblox.com/communities/11020595/RELL-Seas"
+  },
+  {
+   "cle": "rb_studio",
+   "nom": "Roblox · groupe RELL GAMES",
+   "fr": "Le groupe du studio (RELL Games, aussi derrière Shindo Life).",
+   "en": "The studio's group (RELL Games, also behind Shindo Life).",
+   "url": "https://www.roblox.com/communities/4939446"
+  }
+ ]
+}

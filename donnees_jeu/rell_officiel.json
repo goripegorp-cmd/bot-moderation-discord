@@ -1,0 +1,557 @@
+{
+ "releve": "2026-10-29",
+ "roblox": {
+  "jeu": {
+   "lieu": 7089993809,
+   "univers": 2738929784,
+   "adresse": "https://www.roblox.com/games/7089993809/RELL-Seas",
+   "favoris": 377721
+  },
+  "groupe_jeu": {
+   "id": 11020595,
+   "nom": "RELL Seas",
+   "membres": 423079,
+   "verifie": true,
+   "description": "Game Developed by RELL Games\n\nLink:\nhttps://www.roblox.com/games/7089993809/RELL-Seas\n\nOwners:\nRELLsin & RELLbad",
+   "proprietaire": "RELLvex",
+   "adresse": "https://www.roblox.com/communities/11020595"
+  },
+  "groupe_studio": {
+   "id": 4939446,
+   "nom": "RELL GAMES",
+   "membres": 3464161,
+   "verifie": false,
+   "description": "🌐 Check affiliates for our game's groups. \n\n🔑Promo Code: RELLGems! (Available to all, Perks below) \n\n🥉Bronze Rell: \n🔷1.5-2x EXP in games (SL2)\n🔷500 RC (SL2)\n🔷10 Spins (SL2)\n🔷BL Bag at Max Rank 50 (SL2)\n\n🥈Silver Rell: \n⭐Bronze Perks\n🔷x2 BL (SL2)\n🔷BL bag (SL2)\n🔷25 spins/day (SL2)\n🔷2.5k RC/day (SL2)\n🔷CC Access (Seas)\n🔷Silver Outfits/Skins \n\n🥇Gold Rell: \n⭐Bronze Perks\n⭐Silver Perks \n🔷x2 Elm (SL2)\n🔷50 spins/day (SL2)\n🔷5k RC/day (SL2)\n🔷Gold Outfits/Skins\n\n🔑Fight in our community tournaments to achieve Silver/Gold. Most Perks can be achieved in-game without rank through grinding/luck.",
+   "proprietaire": "RELLvex",
+   "adresse": "https://www.roblox.com/communities/4939446"
+  }
+ },
+ "discord": {
+  "invitation": "https://discord.gg/RELLSEAS",
+  "nom": "RELL Seas",
+  "membres": 222291,
+  "en_ligne": 47961
+ },
+ "videos": [
+  {
+   "id": "FatLfwzpxUk",
+   "chaine": "CaribBros",
+   "titre": "The Divine Seas (RELL Piece Development)",
+   "date": "2021-08-08",
+   "duree": 7,
+   "vues": 84162,
+   "jaime": 2941,
+   "description": "Optimized Sea runs smoothly on mobile and xbox \n\nShip model is from ro-piece, new models will be made (model was just used for testing)"
+  },
+  {
+   "id": "fP_BwUOrA78",
+   "chaine": "CaribBros",
+   "titre": "RELL Piece Open Seas Teaser (In-Development)",
+   "date": "2021-08-08",
+   "duree": 11,
+   "vues": 92754,
+   "jaime": 4319,
+   "description": "yare yare"
+  },
+  {
+   "id": "Mm8Ybn-AzcE",
+   "chaine": "RELLGames",
+   "titre": "RELL Seas Teaser 1",
+   "date": "2023-01-19",
+   "duree": 286,
+   "vues": 882181,
+   "jaime": 37284,
+   "description": "Follow us:\nTwitter: https://twitter.com/RELLGames\nMy Instagram: https://www.instagram.com/caribbros/\nMy Bros Insta: https://www.instagram.com/caribvros/\n\nReport Bugs, Restore, Update Log:\nhttps://trello.com/c/Ea99W4OH/98-exploiter-restore-bug-reports\n\nShindo Templates:\nhttps://twitter.com/i/events/1178663549331263488"
+  },
+  {
+   "id": "mDMlovdh4Cc",
+   "chaine": "RELLGames",
+   "titre": "RELL Seas Teaser 2",
+   "date": "2023-02-06",
+   "duree": 664,
+   "vues": 821868,
+   "jaime": 35324,
+   "description": "Follow us:\nTwitter: https://twitter.com/RELLGames\nMy Instagram: https://www.instagram.com/caribbros/\nMy Bros Insta: https://www.instagram.com/caribvros/\n\nReport Bugs, Restore, Update Log:\nhttps://trello.com/c/Ea99W4OH/98-exploiter-restore-bug-reports\n\nShindo Templates:\nhttps://twitter.com/i/events/1178663549331263488"
+  },
+  {
+   "id": "nbN6sXgREwA",
+   "chaine": "RELLGames",
+   "titre": "RELL Seas Teaser 3: Fruit & Gun Combat",
+   "date": "2023-03-02",
+   "duree": 1171,
+   "vues": 932545,
+   "jaime": 33547,
+   "description": "Follow us:\nTwitter: https://twitter.com/RELLGames\nMy Instagram: https://www.instagram.com/caribbros/\nMy Bros Insta: https://www.instagram.com/caribvros/\n\nReport Bugs, Restore, Update Log:\nhttps://trello.com/c/Ea99W4OH/98-exploiter-restore-bug-reports\n\nShindo Templates:\nhttps://twitter.com/i/events/1178663549331263488"
+  },
+  {
+   "id": "Nb1WZBv-ybU",
+   "chaine": "CaribBros",
+   "titre": "[RELL Seas] Lapahn Sneak",
+   "date": "2023-03-28",
+   "duree": 28,
+   "vues": 84294,
+   "jaime": 3541,
+   "description": "Every Island u discover will have various beasts on them and may have to defeat some to uncover various treasures/or continue your adventure"
+  },
+  {
+   "id": "UP9JT95iT5E",
+   "chaine": "CaribBros",
+   "titre": "[RELL Seas] Gear 3 Cutscene",
+   "date": "2023-05-25",
+   "duree": 17,
+   "vues": 572557,
+   "jaime": 10356,
+   "description": ""
+  },
+  {
+   "id": "2fzR8YxfPYM",
+   "chaine": "CaribBros",
+   "titre": "[RELL SEAS] Phoenix Ultimate + Dough M1S + Dough Ultimate",
+   "date": "2023-07-05",
+   "duree": 20,
+   "vues": 221079,
+   "jaime": 4478,
+   "description": "#rell  #rellseas  #rellgames  #caribbros  #roblox"
+  },
+  {
+   "id": "0SG9B3iJQtg",
+   "chaine": "RELLGames",
+   "titre": "RELL Seas Teaser 3.5 / RELL Bloodline Sneak",
+   "date": "2023-07-16",
+   "duree": 508,
+   "vues": 566981,
+   "jaime": 21646,
+   "description": "Follow us:\nTwitter: https://twitter.com/RELLGames\nMy Instagram: https://www.instagram.com/caribbros/\nMy Bros Insta: https://www.instagram.com/caribvros/\n\nReport Bugs, Restore, Update Log:\nhttps://trello.com/c/Ea99W4OH/98-exploiter-restore-bug-reports\n\nShindo Templates:\nhttps://twitter.com/i/events/1178663549331263488"
+  },
+  {
+   "id": "h_py6mPXKcI",
+   "chaine": "RELLGames",
+   "titre": "RELL Seas Teaser 4",
+   "date": "2023-08-04",
+   "duree": 157,
+   "vues": 690092,
+   "jaime": 24904,
+   "description": "Follow us:\nTwitter: https://twitter.com/RELLGames\nMy Instagram: https://www.instagram.com/caribbros/\nMy Bros Insta: https://www.instagram.com/caribvros/\n\nReport Bugs, Restore, Update Log:\nhttps://trello.com/c/Ea99W4OH/98-exploiter-restore-bug-reports\n\nShindo Templates:\nhttps://twitter.com/i/events/1178663549331263488"
+  },
+  {
+   "id": "4m98t5uvSjw",
+   "chaine": "RELLGames",
+   "titre": "RELL Seas OST: God Speed",
+   "date": "2023-10-02",
+   "duree": 192,
+   "vues": 197470,
+   "jaime": 5174,
+   "description": "Game Link:\nhttps://www.roblox.com/games/7089993809/RELL-Seas\n\nProduced by:\nRELL Games\n\nArt Work:\nByHange"
+  },
+  {
+   "id": "ouRkXXv9ykQ",
+   "chaine": "RELLGames",
+   "titre": "RELL Seas OST: Time to Shine",
+   "date": "2023-10-02",
+   "duree": 193,
+   "vues": 116342,
+   "jaime": 4757,
+   "description": "Game Link:\nhttps://www.roblox.com/games/7089993809/RELL-Seas\n\nProduced by:\nRELL Games\n\nArt Work:\nByHange"
+  },
+  {
+   "id": "lHF-jLqdh0g",
+   "chaine": "RELLGames",
+   "titre": "RELL Seas OST: Heroes Awakening",
+   "date": "2023-10-02",
+   "duree": 117,
+   "vues": 105845,
+   "jaime": 3534,
+   "description": "Game Link:\nhttps://www.roblox.com/games/7089993809/RELL-Seas\n\nProduced by:\nRELL Games\n\nArt Work:\nByHange"
+  },
+  {
+   "id": "uqIxcz8aIfw",
+   "chaine": "RELLGames",
+   "titre": "RELL Seas OST: Whispers Of The Ocean",
+   "date": "2023-10-02",
+   "duree": 190,
+   "vues": 115323,
+   "jaime": 5049,
+   "description": "Game Link:\nhttps://www.roblox.com/games/7089993809/RELL-Seas\n\nProduced by:\nRELL Games\n\nArt Work:\nByHange"
+  },
+  {
+   "id": "PKXDGS6ZrCM",
+   "chaine": "CaribBros",
+   "titre": "[RELL SEAS] Official Kraken",
+   "date": "2023-10-04",
+   "duree": 33,
+   "vues": 55229,
+   "jaime": 2157,
+   "description": "#rellseas #rellgames"
+  },
+  {
+   "id": "O9XhIEAZ2r0",
+   "chaine": "RELLGames",
+   "titre": "RELL Seas: The Movie",
+   "date": "2023-10-30",
+   "duree": 3949,
+   "vues": 1591959,
+   "jaime": 61905,
+   "description": "Game Link:\nhttps://www.roblox.com/games/7089993809/RELL-Seas\n\nProduced by:\nRELL Games\n\nArt Work:\nByHange"
+  },
+  {
+   "id": "Q0eU4LDPtSE",
+   "chaine": "RELLGames",
+   "titre": "RELL Seas: Dev Log 1",
+   "date": "2023-12-09",
+   "duree": 2095,
+   "vues": 475360,
+   "jaime": 20723,
+   "description": "Game Link:\nhttps://www.roblox.com/games/7089993809/RELL-Seas\n\nProduced by:\nRELL Games\n\nArt Work:\nByHange"
+  },
+  {
+   "id": "usNau89Wqqo",
+   "chaine": "CaribBros",
+   "titre": "[RELL SEAS] Dev Vlog 2 Sneak + Upgrades",
+   "date": "2023-12-12",
+   "duree": 45,
+   "vues": 77444,
+   "jaime": 2904,
+   "description": "#rellseas #rell #rellgames"
+  },
+  {
+   "id": "P0G5D4ktQjQ",
+   "chaine": "CaribBros",
+   "titre": "[RELL SEAS] Dev Vlog 2 Progress Teaser",
+   "date": "2023-12-17",
+   "duree": 10,
+   "vues": 70911,
+   "jaime": 2109,
+   "description": "#rell #rellgames #rellseas"
+  },
+  {
+   "id": "H2HHxKdWaoQ",
+   "chaine": "RELLGames",
+   "titre": "RELL Seas: Dev Log 2",
+   "date": "2023-12-18",
+   "duree": 1336,
+   "vues": 550031,
+   "jaime": 18833,
+   "description": "Game Link:\nhttps://www.roblox.com/games/7089993809/RELL-Seas\n\nProduced by:\nRELL Games\n\nArt Work:\nByHange"
+  },
+  {
+   "id": "NyWdiLWIb64",
+   "chaine": "CaribBros",
+   "titre": "[RELL SEAS] Dev Vlog 2 Upgrades",
+   "date": "2023-12-18",
+   "duree": 160,
+   "vues": 68512,
+   "jaime": 2777,
+   "description": "#rell  #rellseas #rellgames #roblox"
+  },
+  {
+   "id": "Y_fxVu4AD2U",
+   "chaine": "CaribBros",
+   "titre": "[RELL SEAS] Dev Vlog Allosaurus + Quake Upgrades",
+   "date": "2023-12-19",
+   "duree": 125,
+   "vues": 84345,
+   "jaime": 3121,
+   "description": "#rell  #rellseas #rellgames #roblox \nWe make things look good and keep that consistency while taking feedback to deliver the best we can"
+  },
+  {
+   "id": "eODdAbdST1w",
+   "chaine": "CaribBros",
+   "titre": "[Log 12/21] RELL Seas: Combat Additions & Improvements",
+   "date": "2023-12-21",
+   "duree": 114,
+   "vues": 102107,
+   "jaime": 3419,
+   "description": ""
+  },
+  {
+   "id": "mGZMgOjUcag",
+   "chaine": "RELLGames",
+   "titre": "RELL Seas: Not Final Teaser",
+   "date": "2024-04-01",
+   "duree": 399,
+   "vues": 1189137,
+   "jaime": 43019,
+   "description": "Game Link:\nhttps://www.roblox.com/games/7089993809/RELL-Seas\n\nProduced by:\nRELL Games\n\nArt Work:\nByHange"
+  },
+  {
+   "id": "Q8AJ_Zv0X5k",
+   "chaine": "CaribBros",
+   "titre": "RELL Seas Submarine + Mesh Boss Preview",
+   "date": "2024-07-11",
+   "duree": 43,
+   "vues": 70592,
+   "jaime": 2854,
+   "description": "Emotional damage by Shmolpo the animator\nSubmarine Battlemode will be in the Movie"
+  },
+  {
+   "id": "ji-L9CdSvN8",
+   "chaine": "RELLGames",
+   "titre": "RELL Seas: The Movie 2",
+   "date": "2024-07-30",
+   "duree": 2781,
+   "vues": 1735975,
+   "jaime": 64557,
+   "description": "Game Link:\nhttps://www.roblox.com/games/7089993809/RELL-Seas\n\nDirector:\nRELLbad & RELLsin\n\nWriter:\nRELLbad\n\nEditor:\nRELLbad\n\nCast:\nRELLsin and RELLbad\n\nAll Music in this video is owned, songs written, and worked on by RELLbad"
+  },
+  {
+   "id": "AHBwouA-WSY",
+   "chaine": "CaribBros",
+   "titre": "[Log 7/30] RELL Seas Post Improvements",
+   "date": "2024-07-31",
+   "duree": 75,
+   "vues": 105815,
+   "jaime": 3629,
+   "description": ""
+  },
+  {
+   "id": "ZCzdKbmQerg",
+   "chaine": "RELLGames",
+   "titre": "RELL Seas: Progress",
+   "date": "2024-10-01",
+   "duree": 228,
+   "vues": 1076256,
+   "jaime": 35697,
+   "description": "Changed the title of this video, don’t fall for scams. The game isn’t public anywhere. You’ll know when we are releasing. Join our discord. Discord.gg/rellgames"
+  },
+  {
+   "id": "rdFne7tJY68",
+   "chaine": "RELLGames",
+   "titre": "RELL Seas: Not Movie 3 Trailer",
+   "date": "2025-04-14",
+   "duree": 283,
+   "vues": 837688,
+   "jaime": 34117,
+   "description": "Game Link:\nhttps://www.roblox.com/games/7089993809/RELL-Seas\n\n0:00 - 0:10 Intro\n0:35 - 0:58 RELL Piece CC\n0:59 - 1:26 RELL Seas One\n1:28 - 1:51 RELL Seas Two\n1:52 - 2:21 RELL Seas Three\n2:22 - 4:43 RELL Seas Four"
+  },
+  {
+   "id": "QuClr80Pmc0",
+   "chaine": "RELLGames",
+   "titre": "RELL Seas: Not Movie 3",
+   "date": "2025-07-08",
+   "duree": 2540,
+   "vues": 875211,
+   "jaime": 33726,
+   "description": "Game Link:\nhttps://www.roblox.com/games/7089993809/RELL-Seas\n\n0:00 - 11:54 Game Release Plan\n11:56 - 12:11 Nigerian Scammer\n12:12 - 12:55 Ladder Combat returns\n12:56 - 13:33 Binding Minigame\n13:44 - 14:43 Submarine Spawn and Destruction\n14:44 - 18:20 Underwater Combat mechanics\n18:21 - 23:18 Submarine Official\n23:44 - 24:10 Messing\n24:11 - 30:55 Combat, Mode System, Controls, Fruit Passive\n30:56 - 41:54 Three Months of SUB SNEAKS LEAKED"
+  },
+  {
+   "id": "BGCI9Ml-4q4",
+   "chaine": "RELLGames",
+   "titre": "RELL Seas: Behind The Scenes",
+   "date": "2026-02-07",
+   "duree": 783,
+   "vues": 507327,
+   "jaime": 26708,
+   "description": "Game Link:\nhttps://www.roblox.com/games/7089993809/RELL-Seas\n\nDiscord: \nhttps://discord.gg/rellgames"
+  },
+  {
+   "id": "yz4JSysaVcg",
+   "chaine": "CaribBros",
+   "titre": "RELL Seas Chant / Demo Projects 2021 - 2023",
+   "date": "2026-07-13",
+   "duree": 1587,
+   "vues": 88762,
+   "jaime": 3748,
+   "description": ""
+  },
+  {
+   "id": "GhUvqGXSCec",
+   "chaine": "CaribBros",
+   "titre": "RELLSeas Opening 3: Depth to Trenches",
+   "date": "2026-08-23",
+   "duree": 166,
+   "vues": 26322,
+   "jaime": 1142,
+   "description": "Singer: Fede V"
+  },
+  {
+   "id": "sBfJeq6z4SM",
+   "chaine": "CaribBros",
+   "titre": "RELLSeas Opening 2: The Great Unknown",
+   "date": "2026-08-23",
+   "duree": 201,
+   "vues": 15616,
+   "jaime": 655,
+   "description": "Inspired by Gojira\nSinger: Oleksii\nSong Written by Wazmo"
+  },
+  {
+   "id": "5TLYohHX88I",
+   "chaine": "CaribBros",
+   "titre": "RELL Seas OST: Bound by Bones",
+   "date": "2026-08-23",
+   "duree": 137,
+   "vues": 14767,
+   "jaime": 743,
+   "description": ""
+  },
+  {
+   "id": "lPVuHxeH4nU",
+   "chaine": "CaribBros",
+   "titre": "RELLSeas Opening 2: The Great Unknown Instrumental",
+   "date": "2026-08-23",
+   "duree": 201,
+   "vues": 7560,
+   "jaime": 365,
+   "description": ""
+  },
+  {
+   "id": "GWlgYAPhPvY",
+   "chaine": "CaribBros",
+   "titre": "RELLSeas Opening 1: Seven Seas",
+   "date": "2026-08-23",
+   "duree": 96,
+   "vues": 15578,
+   "jaime": 708,
+   "description": ""
+  },
+  {
+   "id": "hfbAJoede00",
+   "chaine": "CaribBros",
+   "titre": "RELLSeas Opening 1: Seven Seas Instrumental",
+   "date": "2026-08-23",
+   "duree": 96,
+   "vues": 9694,
+   "jaime": 565,
+   "description": "OST by Juan S\nSong Written by RELLbad"
+  },
+  {
+   "id": "gzwLwg2DR2Y",
+   "chaine": "CaribBros",
+   "titre": "RELL Seas OST: Holiest of Wars",
+   "date": "2026-08-23",
+   "duree": 176,
+   "vues": 17370,
+   "jaime": 952,
+   "description": "OST by Karl Lindskog"
+  },
+  {
+   "id": "EWJIHe3yp8s",
+   "chaine": "CaribBros",
+   "titre": "RELL Seas OST: Southern Levant",
+   "date": "2026-08-23",
+   "duree": 132,
+   "vues": 26568,
+   "jaime": 1251,
+   "description": "OST by Mayra"
+  },
+  {
+   "id": "F4EW55qip-0",
+   "chaine": "CaribBros",
+   "titre": "We got RELL Seas The Anime",
+   "date": "2026-08-24",
+   "duree": 44,
+   "vues": 112011,
+   "jaime": 4930,
+   "description": "Sneak peak Animated Lore sneak, based on the RELL Seas game\n\nWe have some short stories that's been 2d Animated, you unlock these stories in-game!"
+  },
+  {
+   "id": "y1iwDJZvVOg",
+   "chaine": "CaribBros",
+   "titre": "RELL Seas: QNA",
+   "date": "2026-09-15",
+   "duree": 983,
+   "vues": 169015,
+   "jaime": 6642,
+   "description": "RELL Seas QNA Video"
+  },
+  {
+   "id": "9BkXvWPlGLc",
+   "chaine": "RELLGames",
+   "titre": "Into The Seas (Official Music Video) - RELL Seas",
+   "date": "2026-10-17",
+   "duree": 142,
+   "vues": 284585,
+   "jaime": 11342,
+   "description": "One crew, one unforgettable journey, and one song to tell the tale.\n\nPlay RELL Seas - https://www.roblox.com/games/7089993809/RELL-Seas\n\n\nPRODUCTION CREDITS\n\n“Into The Seas”\nLyrics Written by Fede Vogliolo and RELLbad\nProduced by Fede Vogliolo\nVocals Performed by Fede Vogliolo\n\nMusic Video:\nAnimation by: Jae15jae\nWritten & Directed by: vidgamenate\nExecutive Producer: RELLbad and RELLsin\n\n\nLYRICS:\nFollow me, brother\ninto the seas\nto live an adventure\nby the hand of Rell C. Sparrow,\na journey you'll never forget\n\nA fiery horizon\nlit by the sun\nand right underneath us\nthere lies Davy Jones\nIt's begun, now rise; we need all hands on deck!\n\nWe weather the storms\nWe chase every beast\nThrow me a Relli and hear how I sing\nOur hearts are untamed, and our will is strong\n\nSo down we go\nInto the realm\nof Hades Asylum\nto get the prize\nof every colossal sea monster unknown\n\nExplore every corner\nHunt, kill, and loot\nWe'll celebrate over a bottle of rum\nme matey! We're seadogs 'til our final day\n\nWe weather the storms\nWe chase every beast\nThrow me a Relli and hear how I sing\nOur hearts are untamed, and our will is strong\n\nBlimey, my boy!\nCaptain RELL C. Sparrow must be proud\nEach one of your deeds shall be sung\nIn every single corner of the world\n\nWe weather the storms\nWe chase every beast\nThrow me a Relli and hear how I sing\nOur hearts are untamed, and our will is strong...\nOur hearts are untamed, and our will is strong!"
+  },
+  {
+   "id": "JWpwr6hjdRo",
+   "chaine": "RELLGames",
+   "titre": "Light Upon the Seas (Official Animation) - RELL Seas",
+   "date": "2026-10-19",
+   "duree": 88,
+   "vues": 203874,
+   "jaime": 7942,
+   "description": "Mr. Sparrow faces off against Admiral Zaru\n\nGame Group Link: https://www.roblox.com/communities/11020595/RELL-Seas#!/about\n\n\nPRODUCTION CREDITS\n\n“Seven Seas”\nLyrics Written by RELLbad & YudaM\nSound Design by Vidgamenate\nProduced by Juan Schmulenson\nVocals Performed by Tasos Lazaris\nAnimation by: Jae15jae\nWritten & Directed by: RELLbad and Jae15jae\nExecutive Producer: RELLbad and RELLsin\n\nFull Song:\nhttps://www.youtube.com/watch?v=GWlgYAPhPvY"
+  },
+  {
+   "id": "fkCXpll1jRI",
+   "chaine": "RELLGames",
+   "titre": "Paid in Blood and Smoke (Official Animation) - RELL Seas",
+   "date": "2026-10-21",
+   "duree": 88,
+   "vues": 185328,
+   "jaime": 5940,
+   "description": "Zak Fuze caused some troubles. His bounty is being collected.\n\nGame Group Link: https://www.roblox.com/communities/11020595/RELL-Seas#!/about\n\n\nPRODUCTION CREDITS\n\nAnimation by: Jae15jae\nWritten & Directed by: RELLbad and Jae15jae\nSound Design by Vidgamenate\nExecutive Producer: RELLbad and RELLsin\n\nFull Song:\nhttps://www.youtube.com/watch?v=GWlgYAPhPvY"
+  },
+  {
+   "id": "DBREr_UW6lg",
+   "chaine": "CaribBros",
+   "titre": "RELL Seas OST: End of the Road",
+   "date": "2026-10-22",
+   "duree": 140,
+   "vues": 18283,
+   "jaime": 375,
+   "description": ""
+  },
+  {
+   "id": "JaNuRy4xZSk",
+   "chaine": "CaribBros",
+   "titre": "RELL Seas OST: Creed of Revolutionist",
+   "date": "2026-10-22",
+   "duree": 122,
+   "vues": 9246,
+   "jaime": 325,
+   "description": ""
+  },
+  {
+   "id": "hW4pkHCwA2c",
+   "chaine": "CaribBros",
+   "titre": "RELL Seas OST: Dragonborn",
+   "date": "2026-10-22",
+   "duree": 135,
+   "vues": 25388,
+   "jaime": 829,
+   "description": "Composer: Damu"
+  },
+  {
+   "id": "vYIUx5b2q8c",
+   "chaine": "CaribBros",
+   "titre": "RELL Seas OST: Coarse Rough Irritating",
+   "date": "2026-10-22",
+   "duree": 118,
+   "vues": 9218,
+   "jaime": 406,
+   "description": "Composer: Aria"
+  },
+  {
+   "id": "_t8z9A1VTn4",
+   "chaine": "CaribBros",
+   "titre": "RELL Seas OST: Riddle of the Ocean",
+   "date": "2026-10-22",
+   "duree": 133,
+   "vues": 17542,
+   "jaime": 694,
+   "description": ""
+  },
+  {
+   "id": "P2MhP3FeF2k",
+   "chaine": "RELLGames",
+   "titre": "A Buster Call (Official Animation) - RELL Seas",
+   "date": "2026-10-23",
+   "duree": 122,
+   "vues": 238014,
+   "jaime": 6345,
+   "description": "Lore:\nBuster call on the Sparrow King Longbeard.\n\nAfter being discovered that Captain Longbeard is without his 1st mate Hanon D. Cannon (collecting a debt from Zak Fuze). The Marines plot an ambush. Admiral Rocky D. Badman arrives on scene.\n\n\nGame Group Link: https://www.roblox.com/communities/11020595/RELL-Seas#!/about\n\n\nPRODUCTION CREDITS\n\nAnimation by: Jae15jae\nSound Design by Vidgamenate\nWritten & Directed by: RELLbad and Jae15jae\nVoice Acting Credits:\nParrot: Vidgamenate & RELLbad\nBadman: RELLbad\nLongbeard: Jazax_Ring\nExecutive Producer: RELLbad and RELLsin\n\nFull Song:\nhttps://www.youtube.com/watch?v=GWlgYAPhPvY"
+  },
+  {
+   "id": "q09y0z5Vyxw",
+   "chaine": "RELLGames",
+   "titre": "RELL Seas: The Movie 3",
+   "date": "2026-10-25",
+   "duree": 11524,
+   "vues": 855840,
+   "jaime": 34164,
+   "description": "Group Game Link: \nhttps://www.roblox.com/communities/11020595/RELL-Seas#!/about\n\nDiscord Links:\ndiscord.gg/RELLGames\ndiscord.gg/RELLSEAS"
+  }
+ ]
+}
