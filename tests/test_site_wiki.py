@@ -86,13 +86,15 @@ def test_WIKI_rubriques_sourcees_et_chiffres_officiels():
     for x in d["pages"]["lore"] + d["pages"]["jeu"]["points"] + d["pages"]["jeu"]["histoire"]:
         assert x["url"].startswith("https://youtu.be/"), x                  # chaque affirmation a sa vidéo officielle
     for x in d["pages"]["liens"]:
-        assert re.match(r"https://(www\.youtube\.com/@(RELLGames|CaribBros)|discord\.gg/(RELLSEAS|rellgames)|www\.roblox\.com/)", x["url"]), x
+        assert re.match(r"https://(www\.youtube\.com/@(RELLGames|CaribBros)|discord\.gg/(RELLSEAS|rellgames)|www\.roblox\.com/|"
+                        r"x\.com/(RELLGames|CaribBros|CaribVros)$|www\.tiktok\.com/@rellbrothers$|"
+                        r"(www\.)?instagram\.com/(CaribBros|CaribVros)$)", x["url"]), x      # seulement les comptes vérifiés
+    assert not any("tiktok.com/@rellgames" in x["url"] or "tiktok.com/@rellseas" in x["url"] for x in d["pages"]["liens"])
     assert len(d["actus"]) >= 40 and d["actus"][0]["date"] >= d["actus"][-1]["date"]
     assert d["chiffres"]["favoris"] and d["chiffres"]["discord"]
     assert all(t["nom"] != "RELL Seas" for b in d["movie3"] for t in b["termes"])
     js = (RACINE / "site" / "wiki.js").read_text(encoding="utf-8")
-    for onglet in ("accueil", "jeu", "monde", "lore", "fiches", "actus", "liens"):
-        assert f'["{onglet}"' in js, onglet
+    assert '["accueil", "jeu", "monde", "lore", "fiches", "actus", "liens"]' in js
 
 
 def test_WIKI_le_bot_ne_poste_aucune_annonce_et_liens_croises():
@@ -102,3 +104,12 @@ def test_WIKI_le_bot_ne_poste_aucune_annonce_et_liens_croises():
     assert "msg.author.id == g.me.id" in src                       # ne retire que le message du bot
     assert 'href: "/wiki"' in (RACINE / "site" / "vitrine.js").read_text(encoding="utf-8")       # la vitrine mène au wiki
     assert 'href: "/equipage"' in (RACINE / "site" / "wiki.js").read_text(encoding="utf-8")      # et le wiki à la vitrine
+
+
+def test_WIKI_aucune_emoji_des_icones_dessinees():
+    for f in ("wiki.js", "wiki_icones.js", "wiki.css", "wiki.html"):
+        txt = (RACINE / "site" / f).read_text(encoding="utf-8")
+        assert not re.search(r"[\U0001F300-\U0001FAFF\u2600-\u27BF\u2190-\u21FF]", txt), f
+    js = (RACINE / "site" / "wiki_icones.js").read_text(encoding="utf-8")
+    for nom in ("ancre", "gouvernail", "crane", "navire", "discord", "x", "tiktok", "youtube"):
+        assert f"  {nom}: [" in js, nom

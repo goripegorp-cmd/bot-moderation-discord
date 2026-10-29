@@ -218,7 +218,7 @@ ACCES_STATIQUES = {
                "noyau.js", "ui.js", "style.css", "composants.css", "pieces.css", "ateliers.css", "equipage.css",
                #  27/10/2026 : les bannières, et le petit module des publications modifiables (son éditeur, annonces.js,
                #  n'est chargé qu'à la demande, par la tête : il reste à elle, comme l'adresse qui écrit).
-               "banniere.js", "banniere.css", "equipage_publication.js",
+               "banniere.js", "banniere.css", "equipage_publication.js", "scene_marine.js",
                #  27/10/2026 : la hiérarchie de l'équipage (son dessin, lu par la vitrine et le site de l'équipage ; son
                #  éditeur, hierarchie_admin.js, reste à la tête).
                "hierarchie.js", "hierarchie.css",
@@ -227,7 +227,7 @@ ACCES_STATIQUES = {
                #  déjà) ; la vue de la direction (candidature_direct.*) reste à la tête.
                "candidature.js", "candidature.css",
                #  29/10/2026 : le WIKI PUBLIC de RELL Seas (site/wiki.html, `/wiki`) — ses deux fichiers, rien d'autre.
-               "wiki.js", "wiki.css", "wiki/*"),
+               "wiki.js", "wiki_icones.js", "wiki.css", "wiki/*"),
     #  Le site de l'équipage (site/equipage.html) : ce que sa page charge EN PLUS de la vitrine (`direct.js` n'est chargé
     #  qu'en mode édition, par la tête).
     "equipage": ("equipage.js", "direct.css"),

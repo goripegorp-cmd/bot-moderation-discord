@@ -103,6 +103,12 @@ BANDEAUX = {
     "an_goripe": ("GORIPE", "GoRipe", "Twitch · YouTube · TikTok", "\uE714", (168, 85, 247), (236, 72, 153)),
     "an_rellseas": ("RELL SEAS", "Rell Seas", "Le studio · The studio", "\uEB48", (6, 182, 212), (37, 99, 235)),
     "an_clan": ("CLAN GORP", "Annonce du clan", "Clan announcement", "\uEC24", (6, 182, 212), (20, 184, 166)),
+    #  29/10/2026 : les types de l'atelier d'annonces (le fondateur : « annonces événements, cadeaux, Discord, mise à
+    #  jour de jeu… de magnifiques annonces »).
+    "an_evenement": ("GORP SEA", "Événement", "Rendez-vous · Event", "\uE787", (168, 85, 247), (79, 70, 229)),
+    "an_cadeau": ("GORP SEA", "Cadeau", "À gagner · Giveaway", "\uF133", (236, 72, 153), (245, 158, 11)),
+    "an_discord": ("GORP SEA", "Le serveur", "Discord · Server news", "\uE8F2", (88, 101, 242), (56, 189, 248)),
+    "an_maj": ("MISE À JOUR", "Mise à jour du jeu", "Patch · Game update", "\uE895", (34, 197, 94), (6, 182, 212)),
     "rs_guide": ("RELL SEAS", "Guide", "Bienvenue à bord · Welcome aboard", "\uE8F1", (6, 182, 212), (37, 99, 235)),
     "rs_trade": ("RELL SEAS", "Trade", "Fruits et objets · Fruits & items", "\uE8AB", (245, 158, 11), (234, 88, 12)),
     #  22/10/2026 (nuit) : le forum du clan et le salon des cadeaux.

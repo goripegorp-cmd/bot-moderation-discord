@@ -3,22 +3,22 @@
 // dans le vide. Seul le VÉRIFIÉ est montré (le serveur trie) ; chaque affirmation renvoie à sa source officielle.
 // Les freins à la copie ralentissent la copie facile ; ils ne rendent rien invisible à qui le veut vraiment.
 
-const ICONES = { metier: "⚒", race: "🧬", faction: "⚑", mer: "🌊", trait: "✦", classe: "⚔", fruit: "🍈", haki: "🌀",
-  carte_haki: "🂠", poster: "📜", style: "🥋", arme: "🗡", equipement: "🧭", navire: "⛵", piece_navire: "💣", monture: "🐾",
-  monnaie: "🪙", boss: "☠", lieu: "🏝", systeme: "⚙" };
-const ONGLETS = [["accueil", "⚓"], ["jeu", "🎮"], ["monde", "🗺"], ["lore", "📖"], ["fiches", "📜"], ["actus", "🎬"], ["liens", "🔗"]];
+import { icone, PAR_TYPE, PAR_ONGLET } from "./wiki_icones.js";
+
+//  29/10/2026 : aucune émoji — des icônes dessinées pour le Grimoire (wiki_icones.js).
+const ONGLETS = ["accueil", "jeu", "monde", "lore", "fiches", "actus", "liens"].map((k) => [k, PAR_ONGLET[k]]);
 const T = {
   fr: { onglets: { accueil: "Accueil", jeu: "Le jeu", monde: "Le monde", lore: "Lore", fiches: "Fiches", actus: "Actus & vidéos", liens: "Liens officiels" },
     sous: "Le wiki vérifié du clan", titre1: "Le grimoire de", accroche: "Tout ce que RELL a vraiment montré de RELL Seas — fruits, races, Haki, navires, boss, lore — vérifié une fiche à la fois, source officielle à l'appui.",
     explorer: "Ouvrir le grimoire", rejoindre: "Rejoindre le clan", fiches: "fiches vérifiées", favoris: "favoris sur Roblox", groupe: "membres du groupe officiel", discord: "sur le Discord officiel",
     commencer: "Par où commencer", resumes: { jeu: "Le studio, l'état du jeu, son histoire depuis RELL Piece.", monde: "Mers, factions, races, lieux et boss.", lore: "Les personnages et les histoires racontés par RELL.", fiches: "Toutes les fiches vérifiées, par pancarte.", actus: "Les 52 vidéos officielles et Movie 3 minute par minute.", liens: "Les chaînes, Discord et groupes officiels." },
     derniere: "Dernière vidéo officielle", vues: "vues", technique: "Fiche technique", dev: "Développeur", proprio: "Propriétaires", plateforme: "Plateforme", statutJeu: "Statut", pasPublic: "Pas encore public",
-    favorisR: "Favoris (Roblox)", groupeR: "Groupe RELL Seas", studioR: "Groupe RELL GAMES", discordR: "Discord RELL Seas", enLigne: "en ligne", aSavoir: "À savoir", histoire: "L'histoire du projet", systemes: "Les systèmes du jeu",
+    favorisR: "Favoris (Roblox)", groupeR: "Groupe RELL Seas", studioR: "Groupe RELL GAMES", discordR: "Discord RELL Seas", enLigne: "en ligne", aSavoir: "À savoir", deuxDiscord: "Les deux Discord officiels", membres: "membres", histoire: "L'histoire du projet", systemes: "Les systèmes du jeu",
     createurs: "Les créateurs", mers: "Les mers", factions: "Les factions", races: "Les races", lieux: "Lieux", boss: "Les boss", ilesNote: "Le nombre exact de mers et d'îles n'a pas encore été annoncé officiellement : seules les mers nommées par RELL sont listées.",
     loreIntro: "Ce que RELL raconte lui-même : chaque ligne vient d'une vidéo officielle, citée.", source: "Source", regarder: "Regarder",
-    categories: "Les pancartes du port", tout: "Toutes", chercher: "Chercher une fiche (nom français ou anglais)…", sans: "Aucune fiche ne correspond.", choisir: "Choisis une pancarte, ou cherche une fiche.", retour: "← Toutes les pancartes",
+    categories: "Les pancartes du port", tout: "Toutes", chercher: "Chercher une fiche (nom français ou anglais)…", sans: "Aucune fiche ne correspond.", choisir: "Choisis une pancarte, ou cherche une fiche.", retour: "Toutes les pancartes",
     preuve: "Vu dans", m3: "Movie 3", verifie: "Vérifié", fermer: "Fermer", actusTitre: "Les vidéos officielles", m3Titre: "Movie 3, minute par minute",
-    m3Note: "Les termes du jeu prononcés dans RELL Seas: The Movie 3 (sous-titres de la vidéo) : un clic, et la vidéo s'ouvre à la bonne minute.", toutes: "Toutes", plus: "Voir toutes les vidéos", liensIntro: "Seulement les comptes tenus par RELL. Méfie-toi de tout autre lien qui promet le jeu.",
+    m3Note: "Les termes du jeu prononcés dans RELL Seas: The Movie 3 (sous-titres de la vidéo) : un clic, et la vidéo s'ouvre à la bonne minute.", toutes: "Toutes", plus: "Voir toutes les vidéos", gStudio: "Le studio RELL Games", gJeu: "Le jeu RELL Seas", gFondateurs: "Les fondateurs, RELLsin et RELLbad", imposteurs: "Attention aux faux comptes", liensIntro: "Seulement les comptes tenus par RELL. Méfie-toi de tout autre lien qui promet le jeu.",
     chiffresNote: (d) => `Chiffres publics relevés le ${d}.`, fondateur: "Fondateur", direction: "Direction", vitrine: "La vitrine du clan",
     regle: "Ici, jamais de rumeur ni de « comment l'obtenir » : le jeu n'est pas encore sorti, et personne ne le sait vraiment.",
     droits: (c) => `Wiki non officiel réalisé par le clan ${c} : textes, tri et mise en page © ${c}, reproduction interdite sans accord. RELL Seas, ses noms et ses images (illustrations des vidéos officielles) appartiennent à RELL Games.` },
@@ -27,12 +27,12 @@ const T = {
     explorer: "Open the grimoire", rejoindre: "Join the clan", fiches: "verified entries", favoris: "favourites on Roblox", groupe: "official group members", discord: "on the official Discord",
     commencer: "Where to start", resumes: { jeu: "The studio, the game's status, its story since RELL Piece.", monde: "Seas, factions, races, places and bosses.", lore: "The characters and stories told by RELL.", fiches: "Every verified entry, by sign.", actus: "The 52 official videos and Movie 3 minute by minute.", liens: "The official channels, Discords and groups." },
     derniere: "Latest official video", vues: "views", technique: "Key facts", dev: "Developer", proprio: "Owners", plateforme: "Platform", statutJeu: "Status", pasPublic: "Not public yet",
-    favorisR: "Favourites (Roblox)", groupeR: "RELL Seas group", studioR: "RELL GAMES group", discordR: "RELL Seas Discord", enLigne: "online", aSavoir: "Good to know", histoire: "The project's story", systemes: "Game systems",
+    favorisR: "Favourites (Roblox)", groupeR: "RELL Seas group", studioR: "RELL GAMES group", discordR: "RELL Seas Discord", enLigne: "online", aSavoir: "Good to know", deuxDiscord: "The two official Discords", membres: "members", histoire: "The project's story", systemes: "Game systems",
     createurs: "The creators", mers: "The seas", factions: "Factions", races: "Races", lieux: "Places", boss: "Bosses", ilesNote: "The exact number of seas and islands hasn't been officially announced yet: only the seas named by RELL are listed.",
     loreIntro: "What RELL tells itself: every line comes from an official video, quoted.", source: "Source", regarder: "Watch",
-    categories: "The harbour signs", tout: "All", chercher: "Search an entry (French or English name)…", sans: "No entry matches.", choisir: "Pick a sign, or search an entry.", retour: "← All signs",
+    categories: "The harbour signs", tout: "All", chercher: "Search an entry (French or English name)…", sans: "No entry matches.", choisir: "Pick a sign, or search an entry.", retour: "All signs",
     preuve: "Shown in", m3: "Movie 3", verifie: "Verified", fermer: "Close", actusTitre: "Official videos", m3Titre: "Movie 3, minute by minute",
-    m3Note: "Game terms spoken in RELL Seas: The Movie 3 (video subtitles): one click opens the video at the right minute.", toutes: "All", plus: "See all videos", liensIntro: "Only accounts run by RELL. Beware of any other link promising the game.",
+    m3Note: "Game terms spoken in RELL Seas: The Movie 3 (video subtitles): one click opens the video at the right minute.", toutes: "All", plus: "See all videos", gStudio: "The RELL Games studio", gJeu: "The RELL Seas game", gFondateurs: "The founders, RELLsin and RELLbad", imposteurs: "Beware of fake accounts", liensIntro: "Only accounts run by RELL. Beware of any other link promising the game.",
     chiffresNote: (d) => `Public figures as of ${d}.`, fondateur: "Founder", direction: "Leadership", vitrine: "The clan's showcase",
     regle: "Never rumours nor “how to get it” here: the game isn't out yet, and nobody really knows.",
     droits: (c) => `Unofficial wiki made by the ${c} clan: texts, sorting and layout © ${c}, no reproduction without permission. RELL Seas, its names and images (official video artwork) belong to RELL Games.` } };
@@ -58,13 +58,13 @@ const nom = (e) => (langue === "fr" ? e.nom : e.nom_en);
 const nombre = (n) => (n == null ? "—" : Number(n).toLocaleString(langue === "fr" ? "fr-FR" : "en-US"));
 const lien = (url, ...enfants) => el("a", { href: url, target: "_blank", rel: "noopener noreferrer" }, ...enfants);
 const ongletActif = () => { const h = (location.hash || "").slice(1); return ONGLETS.some(([k]) => k === h) ? h : "accueil"; };
-const titreSection = (txt) => el("h2", { classe: "w-section revele" }, txt);
+const titreSection = (txt, ic) => el("h2", { classe: "w-section revele" }, ic ? icone(ic) : null, el("span", {}, txt));
 function fond(elm, chemin, petit) { if (chemin) elm.style.backgroundImage = fondDe(chemin, petit); return elm; }
 
 function image(e) {
   const b = el("span", { classe: "w-image" + (e.image ? "" : " vide"), "aria-hidden": "true" });
   if (e.image) b.style.backgroundImage = `url("${src(e.image)}")`;   // en fond : pas d'« enregistrer l'image »
-  else b.textContent = ICONES[e.type] || "✦";
+  else b.append(icone(PAR_TYPE[e.type] || "etoile"));
   return b;
 }
 
@@ -74,14 +74,14 @@ function carte(e, grande) {
       el("span", { classe: "w-nom" }, nom(e)),
       langue === "fr" && e.nom !== e.nom_en ? el("span", { classe: "w-nom-en" }, e.nom_en) : null,
       el("span", { classe: "w-resume" }, e[langue]),
-      el("span", { classe: "w-badges" }, el("span", { classe: "w-badge" }, "✓ " + t().verifie), e.m3 ? el("span", { classe: "w-badge m3" }, t().m3) : null)));
+      el("span", { classe: "w-badges" }, el("span", { classe: "w-badge" }, icone("verifie"), t().verifie), e.m3 ? el("span", { classe: "w-badge m3" }, t().m3) : null)));
 }
 
 function fiche(e) {
   const ty = D.types.find((x) => x.cle === e.type) || {};
   const voile = el("div", { classe: "w-fond", role: "dialog", "aria-modal": "true", "aria-label": nom(e), onclick: (ev) => { if (ev.target === voile) fermer(); } });
   const bandeau = fond(el("div", { classe: "w-fiche-bandeau" }), (e.preuves && e.preuves[0] && e.preuves[0].fond) || ty.fond);
-  const btn = el("button", { type: "button", classe: "w-fermer", "aria-label": t().fermer, onclick: () => fermer() }, "×");
+  const btn = el("button", { type: "button", classe: "w-fermer", "aria-label": t().fermer, onclick: () => fermer() }, icone("fermer"));
   voile.append(el("div", { classe: "w-fiche" }, bandeau, btn,
     el("div", { classe: "w-fiche-corps" },
       el("div", { classe: "w-fiche-tete" }, image(e),
@@ -90,7 +90,7 @@ function fiche(e) {
       el("p", { classe: "w-fiche-texte" }, e[langue]),
       ...(e.preuves || []).map((p) => el("div", { classe: "w-preuve" },
         el("span", {}, el("span", { classe: "w-sceau", "aria-hidden": "true" }), `${t().preuve} « ${p.titre} » · ${p.minute}`),
-        el("a", { classe: "w-lien", href: p.url, target: "_blank", rel: "noopener noreferrer" }, "▶ " + t().regarder))))));
+        el("a", { classe: "w-lien", href: p.url, target: "_blank", rel: "noopener noreferrer" }, icone("lecture"), t().regarder))))));
   document.body.append(voile);
   document.body.classList.add("w-bloque");
   btn.focus();
@@ -115,21 +115,21 @@ function vueAccueil() {
           el("h1", { classe: "w-affiche-titre" }, "RELL Seas"),
           el("p", { classe: "w-accroche" }, t().accroche),
           el("div", { classe: "w-actions" },
-            el("a", { classe: "w-bouton laiton", href: "#fiches" }, "📖 " + t().explorer),
-            c.discord ? el("a", { classe: "w-bouton bois", href: c.discord, target: "_blank", rel: "noopener noreferrer" }, "⚓ " + t().rejoindre) : null)),
+            el("a", { classe: "w-bouton laiton", href: "#fiches" }, icone("livre"), t().explorer),
+            c.discord ? el("a", { classe: "w-bouton bois", href: c.discord, target: "_blank", rel: "noopener noreferrer" }, icone("ancre"), t().rejoindre) : null)),
         el("div", { classe: "w-pancartes" }, pancarte(nombre(D.entrees.length), t().fiches), pancarte(nombre(ch.favoris), t().favoris),
           pancarte(nombre(ch.groupe), t().groupe), pancarte(nombre(ch.discord), t().discord)))),
     el("div", { classe: "w-feuille" },
       titreSection(t().commencer),
       el("div", { classe: "w-portes" }, ONGLETS.filter(([k]) => k !== "accueil").map(([k, ic], i) =>
         fond(el("a", { classe: "w-porte revele", href: "#" + k },
-          el("span", { classe: "w-porte-icone" }, ic), el("strong", {}, t().onglets[k]), el("span", {}, t().resumes[k])),
+          el("span", { classe: "w-porte-icone" }, icone(ic)), el("strong", {}, t().onglets[k]), el("span", {}, t().resumes[k])),
         (D.heros || [])[i % Math.max(1, (D.heros || []).length)]?.fond, true))),
-      derniere ? [titreSection("🎬 " + t().derniere), videoGrande(derniere)] : null)];
+      derniere ? [titreSection(t().derniere, "pellicule"), videoGrande(derniere)] : null)];
 }
 
 function videoGrande(v) {
-  return lien(v.url, fond(el("span", { classe: "w-video-une-image" }, el("span", { classe: "w-lecture grand" }, "▶")), v.fond),
+  return lien(v.url, fond(el("span", { classe: "w-video-une-image" }, el("span", { classe: "w-lecture grand" }, icone("lecture"))), v.fond),
     el("span", { classe: "w-video-une-texte" }, el("strong", {}, v.titre),
       el("span", { classe: "w-nom-en" }, [v.date, v.chaine, v.duree, nombre(v.vues) + " " + t().vues].filter(Boolean).join(" · ")),
       v.extrait ? el("span", {}, v.extrait) : null));
@@ -141,16 +141,22 @@ function vueJeu() {
   const ligne = (k, v) => el("div", { classe: "w-tech-ligne" }, el("span", {}, k), el("strong", {}, v));
   const sys = D.entrees.filter((e) => e.type === "systeme");
   return el("div", { classe: "w-feuille" },
-    titreSection("🎮 " + t().onglets.jeu),
+    titreSection(t().onglets.jeu, "gouvernail"),
     el("div", { classe: "w-deux" },
       el("div", {}, el("p", { classe: "w-chapeau revele" }, (P.intro || {})[langue] || ""),
-        P.statut ? el("div", { classe: "w-avis revele" }, el("strong", {}, "⚠ " + t().statutJeu + " : " + t().pasPublic), el("p", {}, P.statut[langue]),
+        P.statut ? el("div", { classe: "w-avis revele" }, el("strong", {}, icone("alerte"), t().statutJeu + " : " + t().pasPublic), el("p", {}, P.statut[langue]),
           lien(P.statut.source, t().source + " : " + P.statut.source_titre)) : null),
       el("div", { classe: "w-tech revele" }, el("h3", {}, t().technique),
         ligne(t().dev, "RELL Games"), ligne(t().proprio, "RELLbad & RELLsin"), ligne(t().plateforme, "Roblox"), ligne(t().statutJeu, t().pasPublic),
         ligne(t().favorisR, nombre(ch.favoris)), ligne(t().groupeR, nombre(ch.groupe)), ligne(t().studioR, nombre(ch.studio)),
         ligne(t().discordR, nombre(ch.discord) + (ch.discord_en_ligne ? ` (${nombre(ch.discord_en_ligne)} ${t().enLigne})` : "")),
         el("p", { classe: "w-note" }, t().chiffresNote(ch.releve || "")))),
+    titreSection(t().deuxDiscord, "discord"),
+    el("div", { classe: "w-discords" }, ((D.pages || {}).liens || []).filter((x) => x.url.includes("discord.gg")).map((x) => {
+      const n = x.url.toLowerCase().includes("rellgames") ? ch.discord_studio : ch.discord;
+      return lien(x.url, el("span", { classe: "w-lien-tete" }, icone("discord"), el("strong", {}, x.nom)), el("span", {}, x[langue]),
+        n ? el("span", { classe: "w-discord-n" }, nombre(n) + " " + t().membres) : null);
+    })),
     titreSection(t().aSavoir),
     el("ul", { classe: "w-points" }, (P.points || []).map((x) => el("li", { classe: "revele" }, lien(x.url, x[langue])))),
     titreSection(t().histoire),
@@ -162,7 +168,7 @@ function vueJeu() {
 // ── Le monde ──
 function vueMonde() {
   const bloc = (titre, type) => { const l = D.entrees.filter((e) => e.type === type); return l.length ? [titreSection(titre), el("div", { classe: "w-grille" }, l.map((e) => carte(e)))] : null; };
-  return el("div", { classe: "w-feuille" }, titreSection("🗺 " + t().onglets.monde),
+  return el("div", { classe: "w-feuille" }, titreSection(t().onglets.monde, "carte"),
     el("p", { classe: "w-note revele" }, t().ilesNote),
     bloc(t().mers, "mer"), bloc(t().factions, "faction"), bloc(t().races, "race"), bloc(t().lieux, "lieu"), bloc(t().boss, "boss"));
 }
@@ -170,9 +176,9 @@ function vueMonde() {
 // ── Lore ──
 function vueLore() {
   const P = D.pages || {};
-  return el("div", { classe: "w-feuille" }, titreSection("📖 " + t().onglets.lore), el("p", { classe: "w-chapeau revele" }, t().loreIntro),
+  return el("div", { classe: "w-feuille" }, titreSection(t().onglets.lore, "livre"), el("p", { classe: "w-chapeau revele" }, t().loreIntro),
     el("div", { classe: "w-lore" }, (P.lore || []).map((x) => fond(el("article", { classe: "w-recit revele" },
-      el("div", { classe: "w-recit-texte" }, el("h3", {}, x.nom), el("p", {}, x[langue]), lien(x.url, "▶ " + t().regarder))), x.fond, true))),
+      el("div", { classe: "w-recit-texte" }, el("h3", {}, x.nom), el("p", {}, x[langue]), lien(x.url, icone("lecture"), t().regarder))), x.fond, true))),
     titreSection(t().createurs),
     el("div", { classe: "w-createurs" }, (P.createurs || []).map((x) => el("div", { classe: "w-createur revele" }, el("strong", {}, x.nom), el("span", {}, x[langue])))));
 }
@@ -184,20 +190,20 @@ function vueFiches() {
     const recherche = el("input", { classe: "w-recherche", type: "search", placeholder: t().chercher, value: q, "aria-label": t().chercher,
       oninput: (ev) => { q = ev.target.value; liste(); } });
     const corps = el("div", {});
-    zone.replaceChildren(titreSection("📜 " + t().categories), recherche, corps);
+    zone.replaceChildren(titreSection(t().categories, "parchemin"), recherche, corps);
     function liste() {
       const sel = D.entrees.filter((e) => (!filtre || e.type === filtre) && (!q || plier([e.nom, e.nom_en, e.fr, e.en].join(" ")).includes(plier(q))));
       if (!filtre && !q) { corps.replaceChildren(enseignes()); return; }
       const ty = D.types.find((x) => x.cle === filtre);
       const entete = filtre ? fond(el("div", { classe: "w-rubrique" }, el("span", {}, ty ? ty[langue] : ""), el("span", { classe: "w-rubrique-nb" }, String(sel.length))), ty && ty.fond, true) : null;
-      corps.replaceChildren(el("button", { type: "button", classe: "w-retour", onclick: () => { filtre = ""; q = ""; dessinerF(); } }, t().retour), entete || "",
+      corps.replaceChildren(el("button", { type: "button", classe: "w-retour", onclick: () => { filtre = ""; q = ""; dessinerF(); } }, icone("fleche"), t().retour), entete || "",
         sel.length ? el("div", { classe: "w-grille" }, sel.map((e) => carte(e))) : el("p", { classe: "w-attente" }, t().sans));
       animer(corps);
     }
     function enseignes() {
       return el("div", { classe: "w-enseignes" }, D.types.map((ty) => {
         const nb = D.entrees.filter((e) => e.type === ty.cle).length;
-        const img = el("span", { classe: "w-enseigne-image" + (ty.icone ? "" : " vide"), "aria-hidden": "true" }, ty.icone ? "" : (ICONES[ty.cle] || "✦"));
+        const img = el("span", { classe: "w-enseigne-image" + (ty.icone ? "" : " vide"), "aria-hidden": "true" }, ty.icone ? "" : icone(PAR_TYPE[ty.cle] || "etoile"));
         if (ty.icone) img.style.backgroundImage = `url("${src(ty.icone)}")`;
         const pl = el("span", { classe: "w-planchette" }, img, el("span", { classe: "w-enseigne-nom" }, ty[langue]), el("span", { classe: "w-enseigne-nb" }, String(nb)));
         if (ty.fond) pl.style.setProperty("--fond", fondDe(ty.fond, true));
@@ -220,13 +226,13 @@ function vueActus() {
     const l = toutesVideos ? tout : tout.slice(0, 12);
     const puce = (k, lib) => el("button", { type: "button", classe: "w-puce", "aria-pressed": String(chaine === k), onclick: () => { chaine = k; dessinerA(); } }, lib);
     zone.replaceChildren(
-      titreSection("🎞 " + t().m3Titre), el("p", { classe: "w-note" }, t().m3Note),
+      titreSection(t().m3Titre, "pellicule"), el("p", { classe: "w-note" }, t().m3Note),
       el("div", { classe: "w-m3" }, (D.movie3 || []).map((b) => el("div", { classe: "w-m3-bloc revele" }, el("span", { classe: "w-m3-temps" }, b.de),
         el("div", { classe: "w-m3-termes" }, b.termes.map((x) => lien(x.url, x.nom + " · " + x.minute)))))),
-      titreSection("🎬 " + t().actusTitre),
+      titreSection(t().actusTitre, "lecture"),
       el("div", { classe: "w-puces" }, puce("", t().toutes), puce("RELLGames", "RELLGames"), puce("CaribBros", "CaribBros")),
       el("div", { classe: "w-videos" }, l.map((v) => lien(v.url,
-        fond(el("span", { classe: "w-video-image" }, el("span", { classe: "w-lecture" }, "▶"), v.duree ? el("span", { classe: "w-duree" }, v.duree) : null), v.fond, true),
+        fond(el("span", { classe: "w-video-image" }, el("span", { classe: "w-lecture" }, icone("lecture")), v.duree ? el("span", { classe: "w-duree" }, v.duree) : null), v.fond, true),
         el("span", { classe: "w-video-titre" }, v.titre),
         el("span", { classe: "w-nom-en" }, [v.date, v.chaine, nombre(v.vues) + " " + t().vues].join(" · "))))),
       tout.length > l.length ? el("button", { type: "button", classe: "w-bouton laiton w-plus", onclick: () => { toutesVideos = true; dessinerA(); } },
@@ -241,8 +247,16 @@ function vueActus() {
 // ── Liens officiels ──
 function vueLiens() {
   const P = D.pages || {};
-  return el("div", { classe: "w-feuille" }, titreSection("🔗 " + t().onglets.liens), el("p", { classe: "w-chapeau revele" }, t().liensIntro),
-    el("div", { classe: "w-liens" }, (P.liens || []).map((x) => lien(x.url, el("strong", {}, x.nom), el("span", {}, x[langue]), el("span", { classe: "w-url" }, x.url.replace("https://", ""))))));
+  const logo = (u) => (u.includes("youtube") ? "youtube" : u.includes("discord") ? "discord" : u.includes("roblox") ? "roblox"
+    : u.includes("tiktok") ? "tiktok" : u.includes("instagram") ? "instagram" : /\/\/(x|twitter)\.com/.test(u) ? "x" : "maillons");
+  const carteLien = (x) => lien(x.url, el("span", { classe: "w-lien-tete" }, icone(logo(x.url)), el("strong", {}, x.nom)),
+    el("span", {}, x[langue]), el("span", { classe: "w-url" }, x.url.replace("https://", "")));
+  const groupes = [["studio", t().gStudio, "drapeau"], ["jeu", t().gJeu, "gouvernail"], ["fondateurs", t().gFondateurs, "plume"]];
+  return el("div", { classe: "w-feuille" }, titreSection(t().onglets.liens, "maillons"), el("p", { classe: "w-chapeau revele" }, t().liensIntro),
+    P.liens_avis ? el("div", { classe: "w-avis revele" }, el("strong", {}, icone("alerte"), t().imposteurs), el("p", {}, P.liens_avis[langue]),
+      lien(P.liens_avis.url, t().source)) : null,
+    ...groupes.map(([g, titre, ic]) => { const l = (P.liens || []).filter((x) => (x.groupe || "studio") === g);
+      return l.length ? [el("h3", { classe: "w-sous-titre revele" }, icone(ic), titre), el("div", { classe: "w-liens" }, l.map(carteLien))] : null; }).flat());
 }
 
 const VUES = { accueil: vueAccueil, jeu: vueJeu, monde: vueMonde, lore: vueLore, fiches: vueFiches, actus: vueActus, liens: vueLiens };
@@ -250,7 +264,7 @@ const VUES = { accueil: vueAccueil, jeu: vueJeu, monde: vueMonde, lore: vueLore,
 function nav() {
   const actif = ongletActif();
   document.getElementById("w-nav").replaceChildren(...ONGLETS.map(([k, ic]) =>
-    el("a", { href: "#" + k, classe: "w-onglet", "aria-current": k === actif ? "page" : null }, el("span", { "aria-hidden": "true" }, ic), t().onglets[k])));
+    el("a", { href: "#" + k, classe: "w-onglet", "aria-current": k === actif ? "page" : null }, icone(ic), t().onglets[k])));
   const a = document.querySelector(".w-onglet[aria-current]"); if (a) a.scrollIntoView({ block: "nearest", inline: "center" });
 }
 
@@ -261,8 +275,8 @@ function pied() {
       el("div", {}, el("div", {}, el("strong", {}, t().fondateur + " : "), c.fondateur || ""),
         (c.direction || []).length ? el("div", {}, el("strong", {}, t().direction + " : "), c.direction.join(", ")) : null,
         el("div", { classe: "w-note" }, t().regle))),
-    el("div", { classe: "w-actions" }, el("a", { classe: "w-bouton bois", href: "/equipage" }, "🏴‍☠️ " + t().vitrine),
-      c.discord ? el("a", { classe: "w-bouton laiton", href: c.discord, target: "_blank", rel: "noopener noreferrer" }, "⚓ " + t().rejoindre) : null)),
+    el("div", { classe: "w-actions" }, el("a", { classe: "w-bouton bois", href: "/equipage" }, icone("drapeau"), t().vitrine),
+      c.discord ? el("a", { classe: "w-bouton laiton", href: c.discord, target: "_blank", rel: "noopener noreferrer" }, icone("ancre"), t().rejoindre) : null)),
   el("p", { classe: "w-note" }, t().droits(c.clan || "GoRP SEA"))];
 }
 

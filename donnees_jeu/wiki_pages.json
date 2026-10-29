@@ -178,53 +178,113 @@
  ],
  "liens": [
   {
+   "cle": "dc_games",
+   "nom": "Discord · RELL Games",
+   "fr": "Le Discord officiel du studio RELL Games, dirigé par ses deux fondateurs, RELLbad et RELLsin : il regroupe les nouvelles de RELL Seas et des studios qui développent.",
+   "en": "The official Discord of the RELL Games studio, run by its two founders, RELLbad and RELLsin: it gathers the news of RELL Seas and of the developing studios.",
+   "url": "https://discord.gg/rellgames",
+   "groupe": "studio"
+  },
+  {
+   "cle": "x_rell",
+   "groupe": "studio",
+   "nom": "X · @RELLGames",
+   "fr": "Le compte X officiel du studio : les nouvelles en premier.",
+   "en": "The studio's official X account: news first.",
+   "url": "https://x.com/RELLGames"
+  },
+  {
    "cle": "yt_rell",
    "nom": "YouTube · RELLGames",
    "fr": "La chaîne officielle du studio : Movies, Dev Logs, teasers, animations.",
    "en": "The studio's official channel: Movies, Dev Logs, teasers, animations.",
-   "url": "https://www.youtube.com/@RELLGames"
+   "url": "https://www.youtube.com/@RELLGames",
+   "groupe": "studio"
   },
   {
-   "cle": "yt_carib",
-   "nom": "YouTube · CaribBros",
-   "fr": "La chaîne des frères RELL : aperçus, journaux de développement, musiques.",
-   "en": "The RELL brothers' channel: previews, dev logs, music.",
-   "url": "https://www.youtube.com/@CaribBros"
-  },
-  {
-   "cle": "dc_seas",
-   "nom": "Discord · RELL Seas",
-   "fr": "Le serveur officiel du jeu.",
-   "en": "The game's official server.",
-   "url": "https://discord.gg/RELLSEAS"
-  },
-  {
-   "cle": "dc_games",
-   "nom": "Discord · RELL Games",
-   "fr": "Le serveur officiel du studio.",
-   "en": "The studio's official server.",
-   "url": "https://discord.gg/rellgames"
-  },
-  {
-   "cle": "rb_jeu",
-   "nom": "Roblox · RELL Seas (jeu)",
-   "fr": "La page officielle du jeu (pas encore publique).",
-   "en": "The game's official page (not public yet).",
-   "url": "https://www.roblox.com/games/7089993809/RELL-Seas"
-  },
-  {
-   "cle": "rb_groupe",
-   "nom": "Roblox · groupe RELL Seas",
-   "fr": "Le groupe officiel du jeu, badge vérifié.",
-   "en": "The game's official group, verified badge.",
-   "url": "https://www.roblox.com/communities/11020595/RELL-Seas"
+   "cle": "tt_rell",
+   "groupe": "studio",
+   "nom": "TikTok · @rellbrothers",
+   "fr": "Le TikTok officiel de RELL Games (« Official RELL Games »).",
+   "en": "RELL Games' official TikTok (“Official RELL Games”).",
+   "url": "https://www.tiktok.com/@rellbrothers"
   },
   {
    "cle": "rb_studio",
    "nom": "Roblox · groupe RELL GAMES",
    "fr": "Le groupe du studio (RELL Games, aussi derrière Shindo Life).",
    "en": "The studio's group (RELL Games, also behind Shindo Life).",
-   "url": "https://www.roblox.com/communities/4939446"
+   "url": "https://www.roblox.com/communities/4939446",
+   "groupe": "studio"
+  },
+  {
+   "cle": "dc_seas",
+   "nom": "Discord · RELL Seas",
+   "fr": "Le Discord officiel du jeu RELL Seas, dirigé lui aussi par RELLbad et RELLsin.",
+   "en": "The official Discord of the RELL Seas game, also run by RELLbad and RELLsin.",
+   "url": "https://discord.gg/RELLSEAS",
+   "groupe": "jeu"
+  },
+  {
+   "cle": "rb_jeu",
+   "nom": "Roblox · RELL Seas (jeu)",
+   "fr": "La page officielle du jeu (pas encore publique).",
+   "en": "The game's official page (not public yet).",
+   "url": "https://www.roblox.com/games/7089993809/RELL-Seas",
+   "groupe": "jeu"
+  },
+  {
+   "cle": "rb_groupe",
+   "nom": "Roblox · groupe RELL Seas",
+   "fr": "Le groupe officiel du jeu, badge vérifié.",
+   "en": "The game's official group, verified badge.",
+   "url": "https://www.roblox.com/communities/11020595/RELL-Seas",
+   "groupe": "jeu"
+  },
+  {
+   "cle": "x_sin",
+   "groupe": "fondateurs",
+   "nom": "RELLsin · X @CaribBros",
+   "fr": "Le compte X de RELLsin, co-fondateur.",
+   "en": "RELLsin's X account, co-founder.",
+   "url": "https://x.com/CaribBros"
+  },
+  {
+   "cle": "x_bad",
+   "groupe": "fondateurs",
+   "nom": "RELLbad · X @CaribVros",
+   "fr": "Le compte X de RELLbad, co-fondateur.",
+   "en": "RELLbad's X account, co-founder.",
+   "url": "https://x.com/CaribVros"
+  },
+  {
+   "cle": "yt_carib",
+   "nom": "YouTube · CaribBros",
+   "fr": "La chaîne des frères RELL : aperçus, journaux de développement, musiques.",
+   "en": "The RELL brothers' channel: previews, dev logs, music.",
+   "url": "https://www.youtube.com/@CaribBros",
+   "groupe": "fondateurs"
+  },
+  {
+   "cle": "ig_sin",
+   "groupe": "fondateurs",
+   "nom": "Instagram · CaribBros",
+   "fr": "L'Instagram de RELLsin, cité par la chaîne officielle.",
+   "en": "RELLsin's Instagram, linked by the official channel.",
+   "url": "https://instagram.com/CaribBros"
+  },
+  {
+   "cle": "ig_bad",
+   "groupe": "fondateurs",
+   "nom": "Instagram · CaribVros",
+   "fr": "L'Instagram de RELLbad, cité par la chaîne CaribBros.",
+   "en": "RELLbad's Instagram, linked by the CaribBros channel.",
+   "url": "https://www.instagram.com/CaribVros"
   }
- ]
+ ],
+ "liens_avis": {
+  "fr": "Un développeur « RELL » que @RELLGames ne suit pas ou ne met pas en avant n'a rien à voir avec le studio : c'est un imposteur (message officiel). En cas de doute, vérifie sur le Discord officiel.",
+  "en": "A “RELL” developer that @RELLGames doesn't follow or promote is unaffiliated: an impersonator (official post). If in doubt, check on the official Discord.",
+  "url": "https://x.com/CaribVros/status/1955327664102727946"
+ }
 }

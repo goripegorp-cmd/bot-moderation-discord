@@ -13,6 +13,7 @@ import {
 import { affiche, insigneImage, primeNoeud, nomAffiche } from "./affiche.js";
 import { E, T, lire, texteRiche, textePlat, ouvrirAffiche, afficheParId, catalogue, sceau } from "./equipage_commun.js";
 import { cadreBanniere, choixBanniere } from "./banniere.js";
+import { sceneMarine } from "./scene_marine.js";
 import { editerPublication, modifiable, idPublication } from "./equipage_publication.js";
 
 // ─── Les types de blocs ─────────────────────────────────────────────────────
@@ -128,7 +129,8 @@ function blocBandeau(c, titrePage) {
   const src = srcSure(c.image);
   const img = src ? h("img", { classe: "bandeau-eq-image", src, alt: "", decoding: "async" }) : null;
   if (img) img.addEventListener("error", () => img.remove(), { once: true });
-  return h("div", { classe: "bandeau-eq" + (src ? " avec-image" : "") }, img,
+  //  29/10/2026 : sans image, la scène marine animée, dessinée de toutes pièces (scene_marine.js).
+  return h("div", { classe: "bandeau-eq" + (src ? " avec-image" : " avec-scene") }, img || sceneMarine(),
     h("div", { classe: "bandeau-eq-texte" }, h(titrePage ? "h1" : "h2", { classe: "bandeau-eq-titre" }, sansEmoji(c.titre) || "L'équipage"),
       c.sous_titre ? h("p", { classe: "bandeau-eq-sous" }, c.sous_titre) : null));
 }

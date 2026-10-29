@@ -255,3 +255,35 @@ a:has(> .w-video-une-image) { display: grid; grid-template-columns: minmax(0, 1.
 }
 @media (prefers-reduced-motion: reduce) { .revele { opacity: 1; transform: none; transition: none; } .w-vagues, .w-lecture.grand { animation: none; } .w-page.w-entre > * { animation: none; } }
 .w-plus { display: flex; margin: 16px auto 0; border: 1px solid #7a5a22; cursor: pointer; }
+
+/* ═════ Les icônes dessinées (29/10/2026) : un trait de laiton, aucune émoji ═════ */
+.w-ico { width: 1.15em; height: 1.15em; flex: none; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round;
+  vertical-align: -0.18em; }
+.w-onglet .w-ico { width: 18px; height: 18px; }
+.w-section .w-ico { width: 28px; height: 28px; color: var(--laiton-fonce, #7a5a22); stroke-width: 1.5; }
+.w-bouton .w-ico, .w-lien .w-ico, .w-retour .w-ico { margin-right: 8px; }
+.w-bouton, .w-lien, .w-retour, .w-avis strong, .w-recit a { display: inline-flex; align-items: center; gap: 0; }
+.w-avis strong .w-ico { margin-right: 6px; color: var(--cire, #8e2a24); }
+.w-badge { display: inline-flex; align-items: center; gap: 3px; } .w-badge .w-ico { width: 12px; height: 12px; stroke-width: 2.4; }
+.w-image.vide .w-ico { width: 60%; height: 60%; color: var(--corde-fonce, #8a6f45); stroke-width: 1.4; }
+.w-enseigne-image.vide .w-ico { width: 62%; height: 62%; color: #4a2e1a; stroke-width: 1.5; }
+.w-porte-icone .w-ico { width: 34px; height: 34px; color: var(--laiton-clair, #c9a35a); stroke-width: 1.4;
+  filter: drop-shadow(0 2px 3px rgba(0,0,0,.5)); transition: transform .3s var(--ease, ease); }
+.w-porte:hover .w-porte-icone .w-ico { transform: rotate(-8deg) scale(1.08); }
+.w-lecture .w-ico { width: 18px; height: 18px; fill: currentColor; stroke-width: 1; margin-left: 3px; }
+.w-lecture.grand .w-ico { width: 28px; height: 28px; }
+.w-fermer { display: grid; place-items: center; } .w-fermer .w-ico { width: 20px; height: 20px; stroke-width: 2; }
+.w-lien-tete { display: flex; align-items: center; gap: 8px; } .w-lien-tete .w-ico { width: 24px; height: 24px; color: var(--laiton-clair, #c9a35a); }
+.w-recit a .w-ico { margin-right: 6px; }
+.w-onglet[aria-current="page"] .w-ico { animation: w-tangue 2.8s ease-in-out infinite; transform-origin: 50% 80%; }
+@keyframes w-tangue { 0%, 100% { transform: rotate(-6deg); } 50% { transform: rotate(6deg); } }
+@media (prefers-reduced-motion: reduce) { .w-onglet[aria-current="page"] .w-ico { animation: none; } }
+.w-discords { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+.w-discords a { display: flex; flex-direction: column; gap: 6px; padding: 16px; border-radius: 8px; text-decoration: none; color: #e8e9ff;
+  background: linear-gradient(135deg, #3c45a5, #5865f2); border: 2px solid #2b2f77; box-shadow: 0 6px 16px rgba(0, 0, 0, .3); transition: transform .2s ease; }
+.w-discords a:hover, .w-discords a:focus-visible { transform: translateY(-3px); outline: none; border-color: #c9a35a; }
+.w-discords strong { font-family: "Rye", Georgia, serif; font-weight: normal; font-size: 20px; color: #fff; }
+.w-discords .w-lien-tete .w-ico { color: #fff; }
+.w-discord-n { font-family: "Alegreya SC", Georgia, serif; color: #dcc08a; }
+.w-sous-titre { display: flex; align-items: center; gap: 8px; margin: 18px 0 8px; font-family: "Alegreya SC", Georgia, serif; font-size: 19px; color: var(--sienne, #7a4b2a); }
+.w-sous-titre .w-ico { width: 22px; height: 22px; color: var(--laiton-fonce, #7a5a22); }

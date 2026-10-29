@@ -1,4 +1,6 @@
 """29/10/2026 : le savoir de RELL Seas (savoir.py) et les trois familles de questions — Jeu, Site, Studio."""
+import re
+
 import reponses_auto as R
 import savoir as S
 
@@ -18,7 +20,8 @@ def test_SAVOIR_un_mot_courant_seul_ne_declenche_rien():
 
 def test_SAVOIR_la_fiche_dit_d_ou_vient_ce_qu_elle_affirme():
     titre, corps, boutons = S.reponse(S.trouver("c'est quoi Yahu ?")["cle"], "fr")
-    assert "Yahu" in titre and "✅ Confirmé" in corps and "Vu dans « RELL Seas" in corps
+    assert "Yahu" in titre and "**Confirmé**" in corps and "Vu dans « RELL Seas" in corps
+    assert not re.search(r"[\U0001F300-\U0001FAFF\u2600-\u27BF]", titre + corps + "".join(l for l, _u in boutons))
     assert boutons[0][1].startswith("https://youtu.be/") and "?t=" in boutons[0][1]
     assert any(u.startswith("https://rellseas.fandom.com/wiki/") for _l, u in boutons)
     f = next(f for f in S.fiches().values() if f["statut"] == "a_verifier" and not f["preuves"])

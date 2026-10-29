@@ -127,16 +127,21 @@ def test_N3_un_clic_un_formulaire_l_apercu_exact_puis_publier(env):
     run(bouton(apercu, "Mention").callback(m))
     apercu = m.response.edits[-1]["view"]
     assert "@everyone" in textes(apercu) and "Mention : @everyone" in textes(apercu)
+    #  29/10/2026 : le suivi « Vu » se demande (par défaut, l'annonce est un simple message)
+    s_ = interaction(g, tete)
+    run(bouton(apercu, "Suivi").callback(s_))
+    apercu = s_.response.edits[-1]["view"]
+    assert "Suivi « Vu » : oui" in textes(apercu)
     p = interaction(g, tete)
     run(bouton(apercu, "Publier").callback(p))
-    assert "✅ Annonce publiée : https://discord.com/channels/1/" in textes(p.suivis[-1][1]["view"])
+    assert "Annonce publiée : https://discord.com/channels/1/" in textes(p.suivis[-1][1]["view"])
     mid, _c, envoi = salon.envois[-1]
     assert envoi["file"].filename == "annonce.png" and envoi["allowed_mentions"].everyone is True
     vue = envoi["view"]
     assert ids(vue) == ["an:v:1"] and "@everyone" in textes(vue) and "## La mise à jour 2.4 est là" in textes(vue)
-    assert "📣 GoRP SEA" in textes(vue) and compter(vue) <= 40
+    assert "GoRP SEA" in textes(vue) and compter(vue) <= 40
     fil = g.fils[mid]
-    assert fil.name == "📌 La mise à jour 2.4 est là", "la suite se range dans son fil"
+    assert fil.name == "La mise à jour 2.4 est là", "la suite se range dans son fil"
     a = run(A.charger(1))
     assert (a["message_id"], a["fil_id"], a["image"], a["mention"]) == (mid, mid, "annonce.png", "@everyone")
     assert env.journal[-1][0] == "annonce.publiee"
@@ -147,7 +152,7 @@ def test_N4_la_coche_verte_une_fois_par_membre_le_compteur_suit(env, monkeypatch
     tete = g.membre(FONDATEUR)
     salon = g.nom("🟢target-roblox")
     lien, erreur = run(A.publier(g, tete, A.Brouillon(salon_id=salon.id, titre="Objectif atteint",
-                                                      texte="Merci à tous !", fil=False)))
+                                                      texte="Merci à tous !", fil=False, suivi=True)))
     assert erreur == "" and lien.startswith("https://") and salon.envois[-1][-1].get("file") is None
     assert "Target Roblox" in str(salon.envois[-1][-1]["view"].to_components()), "le bandeau du salon"
     env.langues[8] = "en"
@@ -182,7 +187,7 @@ def test_N5_les_annonces_du_clan_le_clan_mentionne_les_arrivees_annoncees(env, m
     tete = g.membre(FONDATEUR)
     b = A.Brouillon(salon_id=salon.id, titre="Réunion du clan", texte="Ce soir, 21 h.", mention="clan")
     vue = A.VueApercu(tete, g, b, (), env.conf)
-    assert vue.options_mention == ["", "everyone", "clan"] and "Mention : le clan" in textes(vue)
+    assert vue.options_mention == ["", "everyone", "here", "clan"] and "Mention : le clan" in textes(vue)
     assert run(A.publier(g, tete, b))[1] == ""
     envoi = salon.envois[-1][-1]
     assert envoi["allowed_mentions"].roles == [role] and role.mention in textes(envoi["view"])
@@ -208,7 +213,8 @@ def test_N6_ce_qui_ne_peut_pas_partir_le_dit(env):
     g = serveur(env)
     tete = g.membre(FONDATEUR)
     salon = g.nom("🧾sneak-fix")
-    b = A.Brouillon(salon_id=salon.id, titre="Correctif", texte="Le bug des quêtes est réglé.", mention="everyone")
+    b = A.Brouillon(salon_id=salon.id, titre="Correctif", texte="Le bug des quêtes est réglé.", mention="everyone",
+                    suivi=True)
     salon.refus = {"mention_everyone"}
     assert "personne ne sera notifié" in textes(A.VueApercu(tete, g, b, (), env.conf)), "aucun bouton qui ment"
     salon.refus = {"send_messages"}
@@ -235,3 +241,27 @@ def test_N7_branche_dans_le_bot():
     assert "annonces.sur_maj_membre(before, after)" in maj
     boucle = next(ast.unparse(n) for n in arbre.body if getattr(n, "name", "") == "entraide_task")
     assert "_installer_clan(g, c)" in boucle and '"clan_zone": any(' in src
+
+
+def test_N8_annonce_simple_affiche_au_choix_tout_salon_et_here(env):
+    """29/10/2026 : « des annonces événements, cadeaux, Discord, mise à jour… dans n'importe quel salon… ça se poste
+    comme un message, ça se stocke pas » — par défaut : ni « Vu », ni ligne en base ; l'affiche se choisit."""
+    g = serveur(env)
+    tete = g.membre(FONDATEUR)
+    salon = g.nom("📜annonce")
+    i = interaction(g, tete)
+    run(A.BoutonComposer().callback(i))
+    composer = i.suivis[0][1]["view"]
+    assert any(isinstance(c, discord.ui.ChannelSelect) for c in composer.walk_children()), "n'importe quel salon"
+    b = A.Brouillon(salon_id=salon.id, titre="Grand cadeau", texte="Un Mythical Wolf à gagner.", mention="here",
+                    type="cadeau")
+    vue = A.VueApercu(tete, g, b, (), env.conf)
+    assert "Affiche : Cadeau" in textes(vue) and "Suivi « Vu » : non" in textes(vue)
+    lien, erreur = run(A.publier(g, tete, b))
+    assert erreur == "" and lien.startswith("https://")
+    envoi = salon.envois[-1][-1]
+    assert ids(envoi["view"]) == [], "pas de « Vu »"
+    assert "@here" in textes(envoi["view"]) and envoi["allowed_mentions"].everyone is True
+    assert "Cadeau" in str(envoi["view"].to_components()), "l'affiche choisie"
+    assert run(A.charger(1)) is None, "rien en base : on la supprime comme un message"
+    assert env.journal[-1][0] == "annonce.publiee"

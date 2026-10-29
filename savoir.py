@@ -25,9 +25,10 @@ from pathlib import Path
 import textes
 
 DONNEES = Path(__file__).resolve().parent / "donnees_jeu"
-DOMAINES = {"jeu": "🎮 Jeu", "site": "🌐 Site", "studio": "🏴‍☠️ Studio"}
-STATUTS = {"confirme": ("✅ Confirmé", "✅ Confirmed"), "a_verifier": ("🔎 À vérifier", "🔎 Unverified"),
-           "retire": ("⛔ Retiré du jeu", "⛔ Removed from the game")}
+DOMAINES = {"jeu": "Jeu", "site": "Site", "studio": "Studio"}
+STATUTS = {"confirme": ("**Confirmé** · source officielle", "**Confirmed** · official source"),
+           "a_verifier": ("**À vérifier** · wiki des fans", "**Unverified** · fans' wiki"),
+           "retire": ("**Retiré du jeu**", "**Removed from the game**")}
 #  Des mots de tous les jours : jamais une fiche à eux seuls (« t'as vu la light ? »).
 COMMUNS = {"light", "medium", "heavy", "ranged", "fire", "ice", "poison", "lightning", "love", "dark", "soul", "luck",
            "health", "defense", "chop", "bomb", "doctor", "spiritual", "pirates", "material", "equipment", "randomize",
@@ -161,7 +162,7 @@ def reponse(cle: str, langue: str = "fr") -> tuple | None:
         return None
     en = langue == "en"
     nom = f["nom_en"] if en or f["nom"] == f["nom_en"] else f"{f['nom']} ({f['nom_en']})"
-    titre = f"🎮 {nom}" + (f" · {f['type']}" if f["type"] else "")
+    titre = nom + (f" · {f['type']}" if f["type"] else "")
     lignes = []
     texte = (f.get("texte_en") or f["resume_en"] or f["description"]) if en else (f["description"] or f["resume_en"])
     if texte:
@@ -174,10 +175,10 @@ def reponse(cle: str, langue: str = "fr") -> tuple | None:
     elif f["statut"] != "retire":
         lignes.append("Fans' wiki only: not shown officially yet." if en else
                       "Seulement le wiki des fans : pas encore montré officiellement.")
-    boutons = [(("📺 Video" if en else "📺 La vidéo") + f" · {_minute(t)}", f"https://youtu.be/{v}?t={t}")
+    boutons = [(("Video" if en else "La vidéo") + f" · {_minute(t)}", f"https://youtu.be/{v}?t={t}")
                for v, t, _x in f["preuves"][:2]]
     if f["wiki"]:
-        boutons.append(("📖 Wiki", f["wiki"]))
+        boutons.append(("Wiki", f["wiki"]))
     return titre, "\n".join(lignes), boutons[:5]
 
 
@@ -212,12 +213,12 @@ SUJETS_SITE = {
 }
 ADRESSES_SITE = {"wiki": "/wiki", "vitrine": "/equipage"}
 TEXTES_SITE = {
-    "wiki": ("📖 Le wiki RELL Seas", "📖 The RELL Seas wiki",
+    "wiki": ("Le wiki RELL Seas", "The RELL Seas wiki",
              "Le grimoire du clan : tout ce que RELL a vraiment montré, vérifié fiche par fiche — le jeu, le monde, le lore, "
              "les vidéos officielles. En français et en anglais.",
              "The clan's grimoire: everything RELL has really shown, verified entry by entry — the game, the world, the lore, "
              "the official videos. In French and English.", "Ouvrir le wiki", "Open the wiki"),
-    "vitrine": ("🏴‍☠️ La vitrine du clan", "🏴‍☠️ The clan's showcase",
+    "vitrine": ("La vitrine du clan", "The clan's showcase",
                 "La vitrine de l'équipage GoRP : ses membres, ses affiches, ses nouvelles.",
                 "The GoRP crew's showcase: its members, posters and news.", "Voir la vitrine", "See the showcase"),
 }

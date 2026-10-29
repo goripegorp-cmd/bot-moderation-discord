@@ -39,6 +39,14 @@ STYLES = (
 )
 STYLE_CLAN = ("an_clan", "Annonce du clan", 0x14B8A6)
 STYLE_DEFAUT = ("an_annonce", "Annonce", 0xF59E0B)
+#  29/10/2026, le fondateur : « des annonces événements, cadeaux, Discord, mise à jour de jeu… pour le clan… je le place
+#  dans n'importe quel salon… ça se poste comme un message ». L'affiche se choisit dans l'aperçu (sinon : celle du salon).
+TYPES = (("", "Selon le salon", None), ("general", "Annonce", STYLE_DEFAUT),
+         ("evenement", "Événement", ("an_evenement", "Événement", 0xA855F7)),
+         ("cadeau", "Cadeau", ("an_cadeau", "Cadeau", 0xEC4899)),
+         ("discord", "Le serveur", ("an_discord", "Le serveur", 0x5865F2)),
+         ("maj", "Mise à jour du jeu", ("an_maj", "Mise à jour du jeu", 0x22C55E)),
+         ("clan", "Annonce du clan", STYLE_CLAN))
 #  Les actus Roblox (sneak-news-roblox) arrivent seules : « faut pas trop y toucher ».
 EXCLUS = ("news",)
 TYPES_IMAGE = {"image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp"}
@@ -121,6 +129,8 @@ async def init_db():
             "CREATE TABLE IF NOT EXISTS annonces_vues (annonce_id INTEGER NOT NULL, membre_id INTEGER NOT NULL,"
             " quand INTEGER NOT NULL, PRIMARY KEY (annonce_id, membre_id))")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_annonces_guild ON annonces(guild_id, id)")
+        #  29/10/2026 : l'affiche choisie d'une annonce suivie (le compteur « Vu » la redessine à l'identique).
+        await db.execute("CREATE TABLE IF NOT EXISTS annonces_types (annonce_id INTEGER PRIMARY KEY, type TEXT NOT NULL)")
         #  Le dernier retrait du rôle du clan, par membre : un rôle qui revient n'est pas une arrivée.
         await db.execute(
             "CREATE TABLE IF NOT EXISTS annonces_clan_retraits (guild_id INTEGER NOT NULL, membre_id INTEGER NOT NULL,"
@@ -335,7 +345,8 @@ class BoutonVu(discord.ui.DynamicItem[Button], template=r"an:v:(?P<aid>\d+)"):
                 await i.followup.send("Impossible pour le moment : réessaie dans un instant.", ephemeral=True)
 
 
-def composants(a: dict, style: tuple, *, serveur: str = "", vues: int = 0, apercu: bool = False) -> list:
+def composants(a: dict, style: tuple, *, serveur: str = "", vues: int = 0, apercu: bool = False,
+               suivi: bool = True) -> list:
     """L'annonce : la mention (au-dessus, comme un message), puis la carte — l'image ou le bandeau,
     le titre, le texte, les liens, la signature et « ✅ Vu »."""
     cle, titre_bandeau, couleur = style
@@ -349,11 +360,13 @@ def composants(a: dict, style: tuple, *, serveur: str = "", vues: int = 0, aperc
     if a.get("liens"):
         items.append(discord.ui.ActionRow(*[Button(label=nom, url=url) for nom, url in a["liens"][:LIENS_MAX]]))
     items.append(discord.ui.Separator())
-    pied = f"-# 📣 {serveur} · <t:{int(a['cree'])}:D>" if serveur else f"-# 📣 <t:{int(a['cree'])}:D>"
-    vu = (Button(label="Vu · Seen", emoji="✅", style=discord.ButtonStyle.success, disabled=True) if apercu
-          else BoutonVu(a["id"], vues))
+    pied = f"-# {serveur} · <t:{int(a['cree'])}:D>" if serveur else f"-# <t:{int(a['cree'])}:D>"
     items.append(discord.ui.TextDisplay(pied))
-    items.append(discord.ui.ActionRow(vu))
+    #  29/10/2026 : sans suivi (par défaut), l'annonce est un simple message : ni « Vu », ni rien en base.
+    if suivi and (apercu or a.get("id")):
+        vu = (Button(label="Vu · Seen", style=discord.ButtonStyle.success, disabled=True) if apercu
+              else BoutonVu(a["id"], vues))
+        items.append(discord.ui.ActionRow(vu))
     out = [discord.ui.TextDisplay(a["mention"])] if a.get("mention") else []
     return out + [discord.ui.Container(*items, accent_color=discord.Color(couleur))]
 
@@ -405,7 +418,11 @@ async def maj_annonce(g, aid: int) -> bool:
     salon = await _salon(g, a["salon_id"]) if a else None
     if a is None or salon is None or not a["message_id"] or not await _reveiller(salon):
         return False
-    vue = vue_annonce(a, style_de(salon, await _cfg(g.id)), serveur=g.name, vues=await compter_vues(aid))
+    async with _get_db() as db:
+        async with db.execute("SELECT type FROM annonces_types WHERE annonce_id=?", (int(aid),)) as cur:
+            ty = await cur.fetchone()
+    b = Brouillon(type=ty[0] if ty else "")
+    vue = vue_annonce(a, style_annonce(salon, await _cfg(g.id), b), serveur=g.name, vues=await compter_vues(aid))
     try:
         await salon.get_partial_message(int(a["message_id"])).edit(view=vue,
                                                                   allowed_mentions=discord.AllowedMentions.none())
@@ -430,8 +447,10 @@ class Brouillon:
     liens: list = field(default_factory=list)
     image: bytes = b""
     image_ext: str = ""
-    mention: str = ""          # "" · "everyone" · "clan"
+    mention: str = ""          # "" · "everyone" · "here" · "clan"
     fil: bool = True
+    type: str = ""             # 29/10/2026 : l'affiche (TYPES) ; "" : celle du salon
+    suivi: bool = False        # 29/10/2026 : « Vu » et trace en base, seulement si demandé
     #  24/10/2026 (revue) : un second clic sur « Publier » publiait une seconde annonce (second
     #  @everyone). "" brouillon · "envoi" en cours · "publiee" · "incertaine" (Discord n'a pas
     #  confirmé et le salon n'a pas pu être relu). Hors brouillon, l'aperçu ne bouge plus.
@@ -482,11 +501,16 @@ class VueComposer(LayoutView):
                                  description=(getattr(getattr(ch, "category", None), "name", "") or None))
             for ch in salons])
         choix.callback = self._cb_salon
+        #  29/10/2026 : « je le place dans n'importe quel salon » — tout salon écrit, en plus des salons d'annonces.
+        autre = discord.ui.ChannelSelect(placeholder="Ou n'importe quel autre salon…", channel_types=[
+            discord.ChannelType.text, discord.ChannelType.news, discord.ChannelType.public_thread])
+        autre.callback = self._cb_autre
         self.add_item(discord.ui.Container(
             visuels.bandeau("an_annonce", "Annonce"),
-            discord.ui.TextDisplay("### 📣 Nouvelle annonce\nChoisis le salon : un formulaire s'ouvre (titre, texte, "
-                                   "liens, image). Tu verras l'aperçu exact avant de publier."),
-            discord.ui.ActionRow(choix), accent_color=discord.Color(STYLE_DEFAUT[2])))
+            discord.ui.TextDisplay("### Nouvelle annonce\nChoisis le salon : un formulaire s'ouvre (titre, texte, "
+                                   "liens, image). Dans l'aperçu : l'affiche (événement, cadeau, serveur, mise à jour, "
+                                   "clan…), la mention, le suivi. Rien ne part avant « Publier »."),
+            discord.ui.ActionRow(choix), discord.ui.ActionRow(autre), accent_color=discord.Color(STYLE_DEFAUT[2])))
 
     async def interaction_check(self, i):
         return i.user.id == self.auteur.id
@@ -495,10 +519,14 @@ class VueComposer(LayoutView):
         self.b.salon_id = int(i.data["values"][0])
         await i.response.send_modal(FormulaireAnnonce(self))
 
+    async def _cb_autre(self, i):
+        self.b.salon_id = int(i.data["values"][0])
+        await i.response.send_modal(FormulaireAnnonce(self))
+
 
 class FormulaireAnnonce(discord.ui.Modal):
     def __init__(self, porteur):
-        super().__init__(title="📣 Annonce", timeout=1800)
+        super().__init__(title="Annonce", timeout=1800)
         self.porteur, b = porteur, porteur.b
         self.titre = discord.ui.TextInput(max_length=TITRE_MAX, default=b.titre or None,
                                           placeholder="Ex. La mise à jour 2.4 est là")
@@ -554,10 +582,10 @@ async def soumettre(i, f: FormulaireAnnonce) -> None:
 
 def _mention(g, salon, c: dict, b: Brouillon) -> tuple:
     """(le texte affiché, les mentions permises, un avertissement)."""
-    if b.mention == "everyone":
+    if b.mention in ("everyone", "here"):
         peut = salon.permissions_for(g.me).mention_everyone
-        return ("@everyone", discord.AllowedMentions(everyone=True, users=False, roles=False),
-                "" if peut else "⚠️ Je n'ai pas le droit de mentionner @everyone ici : personne ne sera notifié.")
+        return ("@" + b.mention, discord.AllowedMentions(everyone=True, users=False, roles=False),
+                "" if peut else f"Je n'ai pas le droit de mentionner @{b.mention} ici : personne ne sera notifié.")
     if b.mention == "clan":
         role = _role_clan(g, c) if _role_clan else None
         if role is not None:
@@ -582,7 +610,7 @@ class VueApercu(LayoutView):
         a = {"id": 0, "titre": b.titre or "(sans titre)", "texte": b.texte or "(sans texte)", "liens": b.liens,
              "image": b.image_nom, "mention": texte_mention, "cree": int(time.time())}
         if salon is not None:
-            for x in composants(a, style_de(salon, c), serveur=g.name, apercu=True):
+            for x in composants(a, style_annonce(salon, c, b), serveur=g.name, apercu=True, suivi=b.suivi):
                 self.add_item(x)
         notes = [f"-# Aperçu : toi seul le vois · salon {salon.mention if salon else 'introuvable'}"]
         notes += [f"⚠️ {e}" if not e.startswith("⚠️") else e for e in list(erreurs) + ([avertissement]
@@ -594,18 +622,23 @@ class VueApercu(LayoutView):
         modifier.callback = self._cb_modifier
         annuler = Button(label="Annuler", style=discord.ButtonStyle.secondary, emoji=visuels.icone("annuler"))
         annuler.callback = self._cb_annuler
-        options_mention = ["", "everyone"] + (["clan"] if salon is not None and style_de(salon, c) == STYLE_CLAN
-                                              and _role_clan and _role_clan(g, c) is not None else [])
+        options_mention = ["", "everyone", "here"] + (["clan"] if salon is not None and _role_clan
+                                                      and _role_clan(g, c) is not None else [])
         self.options_mention = options_mention
-        libelle = {"": "Mention : personne", "everyone": "Mention : @everyone", "clan": "Mention : le clan"}
+        libelle = {"": "Mention : personne", "everyone": "Mention : @everyone", "here": "Mention : @here",
+                   "clan": "Mention : le clan"}
         mention = Button(label=libelle.get(b.mention, "Mention : personne"), style=discord.ButtonStyle.secondary,
                          emoji=visuels.icone("cloche" if b.mention else "cloche_off"))
         mention.callback = self._cb_mention
-        fil = Button(label="Fil de suite : " + ("oui" if b.fil else "non"), style=discord.ButtonStyle.secondary,
-                     emoji="🧵")
+        fil = Button(label="Fil de suite : " + ("oui" if b.fil else "non"), style=discord.ButtonStyle.secondary)
         fil.callback = self._cb_fil
-        #  Dans un post (📣 Annonces du clan), pas de fil dans le fil : le bouton n'est pas proposé.
-        reglages = [mention] if isinstance(salon, discord.Thread) else [mention, fil]
+        affiche = Button(label="Affiche : " + dict((k, n) for k, n, _s in TYPES).get(b.type, "Selon le salon"),
+                         style=discord.ButtonStyle.secondary, emoji=visuels.icone("palette"))
+        affiche.callback = self._cb_affiche
+        suivi = Button(label="Suivi « Vu » : " + ("oui" if b.suivi else "non"), style=discord.ButtonStyle.secondary)
+        suivi.callback = self._cb_suivi
+        #  Dans un post (Annonces du clan), pas de fil dans le fil : le bouton n'est pas proposé.
+        reglages = [affiche, mention] + ([] if isinstance(salon, discord.Thread) else [fil]) + [suivi]
         self.add_item(discord.ui.Container(discord.ui.TextDisplay("\n".join(notes)),
                                            discord.ui.ActionRow(publier_b, modifier, annuler),
                                            discord.ui.ActionRow(*reglages), accent_color=Palette.NEUTRAL))
@@ -618,9 +651,9 @@ class VueApercu(LayoutView):
         « abandonnée » sur une annonce partie. Rend True (et répond) si le clic est refusé."""
         if not self.b.etat:
             return False
-        texte = {"envoi": "⏳ La publication est en cours.",
-                 "publiee": f"✅ Cette annonce est déjà publiée : {self.b.lien}",
-                 }.get(self.b.etat, "⚠️ Cette annonce est peut-être déjà partie : regarde le salon avant d'en refaire "
+        texte = {"envoi": "La publication est en cours.",
+                 "publiee": f"Cette annonce est déjà publiée : {self.b.lien}",
+                 }.get(self.b.etat, "Cette annonce est peut-être déjà partie : regarde le salon avant d'en refaire "
                                     "une.")
         await i.response.send_message(texte, ephemeral=True)
         return True
@@ -641,6 +674,19 @@ class VueApercu(LayoutView):
         self.b.fil = not self.b.fil
         await self._reafficher(i)
 
+    async def _cb_affiche(self, i):
+        if await self._fige(i):
+            return
+        cles = [k for k, _n, _s in TYPES]
+        self.b.type = cles[(cles.index(self.b.type) + 1) % len(cles)] if self.b.type in cles else ""
+        await self._reafficher(i)
+
+    async def _cb_suivi(self, i):
+        if await self._fige(i):
+            return
+        self.b.suivi = not self.b.suivi
+        await self._reafficher(i)
+
     async def _cb_modifier(self, i):
         if await self._fige(i):
             return
@@ -659,7 +705,7 @@ class VueApercu(LayoutView):
         b = self.b
         b.etat = "envoi"
         try:
-            await i.response.edit_message(view=_vue_message("⏳ Publication en cours…"), attachments=[])
+            await i.response.edit_message(view=_vue_message("Publication en cours…"), attachments=[])
         except discord.HTTPException:
             b.etat = ""  # pas d'acquittement : rien n'est parti, l'aperçu reste utilisable
             raise
@@ -671,7 +717,7 @@ class VueApercu(LayoutView):
             lien, erreur = "", "Une erreur m'a arrêté avant l'envoi : rien n'a été publié, réessaie."
         if lien:
             b.etat, b.lien = "publiee", lien
-            return await i.edit_original_response(view=_vue_message(f"✅ Annonce publiée : {lien}", Palette.SUCCESS),
+            return await i.edit_original_response(view=_vue_message(f"Annonce publiée : {lien}", Palette.SUCCESS),
                                                   attachments=[])
         if b.etat == "incertaine":  # peut-être partie : pas de « Publier » à côté
             return await i.edit_original_response(view=_vue_message(erreur, Palette.WARNING), attachments=[])
@@ -741,13 +787,17 @@ async def publier(g, auteur, b: Brouillon) -> tuple:
     c = await _cfg(g.id)
     texte_mention, mentions, _avert = _mention(g, salon, c, b)
     t = int(time.time())
+    if not b.suivi:
+        return await _publier_simple(g, auteur, b, salon, c, texte_mention, mentions, t)
     aid = await _ecrire("INSERT INTO annonces(guild_id, salon_id, auteur_id, titre, texte, liens, image, mention, cree)"
                         " VALUES(?,?,?,?,?,?,?,?,?)", (g.id, salon.id, auteur.id, b.titre, b.texte,
                                                        json.dumps(b.liens, ensure_ascii=False), b.image_nom,
                                                        texte_mention, t))
+    if b.type:
+        await _ecrire("INSERT OR REPLACE INTO annonces_types(annonce_id, type) VALUES(?,?)", (aid, b.type))
     a = {"id": aid, "titre": b.titre, "texte": b.texte, "liens": b.liens, "image": b.image_nom,
          "mention": texte_mention, "cree": t}
-    envoi = {"view": vue_annonce(a, style_de(salon, c), serveur=g.name), "allowed_mentions": mentions}
+    envoi = {"view": vue_annonce(a, style_annonce(salon, c, b), serveur=g.name), "allowed_mentions": mentions}
     if b.image:
         envoi["file"] = b.fichier()
     try:
@@ -767,7 +817,7 @@ async def publier(g, auteur, b: Brouillon) -> tuple:
     fil_id = 0
     if b.fil and not isinstance(salon, discord.Thread):
         try:
-            fil = await msg.create_thread(name=f"📌 {b.titre}"[:100], auto_archive_duration=10080,
+            fil = await msg.create_thread(name=b.titre[:100], auto_archive_duration=10080,
                                           reason="Annonce : la suite dans son fil")
             fil_id = fil.id
         except Exception as ex:
@@ -783,6 +833,40 @@ async def publier(g, auteur, b: Brouillon) -> tuple:
     except Exception as ex:
         _log("[ANNONCES][E9] annonce publiée, journal non écrit")
         _log(f"[ANNONCES][E9:DETAIL] annonce={aid} {type(ex).__name__} {ex}")
+    return msg.jump_url, ""
+
+
+def style_annonce(salon, c: dict, b: Brouillon) -> tuple:
+    """L'affiche choisie dans l'aperçu, sinon celle du salon."""
+    return next((st for k, _n, st in TYPES if k == b.type and st), None) or style_de(salon, c)
+
+
+async def _publier_simple(g, auteur, b: Brouillon, salon, c: dict, texte_mention: str, mentions, t: int) -> tuple:
+    """29/10/2026 (« ça se stocke pas dans les données… comme si ça mettait un message ») : l'annonce part comme un
+    message — ni « Vu », ni ligne en base ; on la supprime comme un message. Le journal du staff garde qui l'a publiée."""
+    a = {"id": 0, "titre": b.titre, "texte": b.texte, "liens": b.liens, "image": b.image_nom, "mention": texte_mention,
+         "cree": t}
+    envoi = {"view": vue_annonce(a, style_annonce(salon, c, b), serveur=g.name, suivi=False), "allowed_mentions": mentions}
+    if b.image:
+        envoi["file"] = b.fichier()
+    try:
+        msg = await salon.send(**envoi)
+    except Exception as ex:
+        _log("[ANNONCES][E1] annonce non publiée")
+        _log(f"[ANNONCES][E1:DETAIL] salon={salon.id} {type(ex).__name__} {ex}")
+        b.etat = "incertaine"          # rien en base pour la retrouver : on ne propose pas de republier à l'aveugle
+        return "", (f"Discord n'a pas confirmé la publication dans {salon.mention} : regarde le salon avant d'en refaire "
+                    "une.")
+    if b.fil and not isinstance(salon, discord.Thread):
+        try:
+            await msg.create_thread(name=b.titre[:100], auto_archive_duration=10080, reason="Annonce : la suite")
+        except Exception as ex:
+            _log(f"[ANNONCES:DETAIL] fil non créé {type(ex).__name__} {ex}")
+    try:
+        await _journal(g, "annonce.publiee", f"{auteur.mention} a publié une annonce dans {salon.mention} : {b.titre}",
+                       auteur_id=auteur.id)
+    except Exception as ex:
+        _log(f"[ANNONCES:DETAIL] journal non écrit {type(ex).__name__} {ex}")
     return msg.jump_url, ""
 
 
