@@ -525,7 +525,7 @@ def test_Z18_les_quatre_anciens_salons_partent_info_est_recopie(env, monkeypatch
     env.conf.update(link_allowed_channels=[chat.id], zones_correspondances={"5": 6})
     role = run(g.create_role(name="GoRPC"))
     _annonces_pretes(env, monkeypatch, role)
-    run(A.publier(g, g.membre(1), A.Brouillon(salon_id=v1_annonces.id, titre="Sortie", texte="Ce soir 21 h", fil=False)))
+    run(A.publier(g, g.membre(1), A.Brouillon(suivi=True, salon_id=v1_annonces.id, titre="Sortie", texte="Ce soir 21 h", fil=False)))
     run(A.marquer_vu(interaction(g, g.membre(7)), 1))
     run(ZN.installer_clan(g, role, []))
     faits = run(ZN.demenager_clan(g, deplacer_annonces=A.deplacer))
@@ -600,11 +600,11 @@ def test_Z20_les_annonces_du_clan_vivent_dans_leur_post(env, monkeypatch):
     run(ZN.installer_clan(g, role, []))
     fil = g.fils[env.conf["clan_posts"]["annonces"]["id"]]
     assert fil in A.destinations(g, env.conf), "le post 📣 Annonces est proposé"
-    vue = A.VueApercu(g.membre(1), g, A.Brouillon(salon_id=fil.id, titre="t", texte="x"), (), env.conf)
+    vue = A.VueApercu(g.membre(1), g, A.Brouillon(suivi=True, salon_id=fil.id, titre="t", texte="x"), (), env.conf)
     assert not any("Fil de suite" in (getattr(b, "label", "") or "") for b in vue.walk_children()), \
         "pas de fil dans un fil : le bouton n'est pas proposé"
     fil.archived = True
-    lien, erreur = run(A.publier(g, g.membre(1), A.Brouillon(salon_id=fil.id, titre="Raid", texte="Ce soir", fil=True)))
+    lien, erreur = run(A.publier(g, g.membre(1), A.Brouillon(suivi=True, salon_id=fil.id, titre="Raid", texte="Ce soir", fil=True)))
     a = run(A.charger(1))
     assert erreur == "" and not fil.archived, "le post endormi se rouvre"
     assert (a["salon_id"], a["fil_id"]) == (fil.id, 0) and "Raid" in textes(fil.messages[-1].kw["view"])

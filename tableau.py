@@ -218,7 +218,7 @@ ACCES_STATIQUES = {
                "noyau.js", "ui.js", "style.css", "composants.css", "pieces.css", "ateliers.css", "equipage.css",
                #  27/10/2026 : les bannières, et le petit module des publications modifiables (son éditeur, annonces.js,
                #  n'est chargé qu'à la demande, par la tête : il reste à elle, comme l'adresse qui écrit).
-               "banniere.js", "banniere.css", "equipage_publication.js", "scene_marine.js",
+               "banniere.js", "banniere.css", "equipage_publication.js",
                #  27/10/2026 : la hiérarchie de l'équipage (son dessin, lu par la vitrine et le site de l'équipage ; son
                #  éditeur, hierarchie_admin.js, reste à la tête).
                "hierarchie.js", "hierarchie.css",

@@ -55,7 +55,7 @@ def test_S1_le_site_a_l_entraide_et_les_annonces(env):
     run(E.publier(interaction(g, g.membre(9)), E.ZONES["boss"], {"titre": "Akuma", "pseudo": "P", "niveau": "",
                                                                     "joueurs": "", "details": ""}))
     salon = g._salon(Texte, "📜annonce", {"category": g.categorie("· Information")})
-    run(A.publier(g, g.membre(1), A.Brouillon(salon_id=salon.id, titre="Mise à jour", texte="Nouvelles îles", fil=False)))
+    run(A.publier(g, g.membre(1), A.Brouillon(suivi=True, salon_id=salon.id, titre="Mise à jour", texte="Nouvelles îles", fil=False)))
     for uid in (7, 8):
         run(A.marquer_vu(interaction(g, g.membre(uid)), 1))
     qui = T._Personnes(g)

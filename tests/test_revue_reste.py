@@ -132,7 +132,7 @@ def test_R1_deux_clics_sur_publier_une_seule_annonce(env):
         await asyncio.sleep(0.05)
         return await envoyer(content, **kw)
     salon.send = lent
-    apercu = A.VueApercu(tete, g, A.Brouillon(salon_id=salon.id, titre="Grande nouvelle", texte="Ce soir.",
+    apercu = A.VueApercu(tete, g, A.Brouillon(suivi=True, salon_id=salon.id, titre="Grande nouvelle", texte="Ce soir.",
                                               mention="everyone"), (), env.conf)
     i1, i2 = interaction(g, tete), interaction(g, tete)
 
@@ -142,12 +142,12 @@ def test_R1_deux_clics_sur_publier_une_seule_annonce(env):
     assert len(salon.envois) == 1, "un seul @everyone"
     attente = i1.response.edits[0]["view"]
     assert ids(attente) == [] and "Publication en cours" in textes(attente), "le bouton disparaît AVANT l'envoi"
-    assert i2.response.messages[0][0] == "⏳ La publication est en cours."
-    assert "✅ Annonce publiée" in textes(i1.suivis[-1][1]["view"])
+    assert i2.response.messages[0][0] == "La publication est en cours."
+    assert "Annonce publiée" in textes(i1.suivis[-1][1]["view"])
     for nom in ("Publier", "Annuler", "Modifier"):  # un client resté sur l'ancien aperçu
         i = interaction(g, tete)
         run(bouton(apercu, nom).callback(i))
-        assert i.response.messages[0][0].startswith("✅ Cette annonce est déjà publiée : https://"), nom
+        assert i.response.messages[0][0].startswith("Cette annonce est déjà publiée : https://"), nom
         assert not i.response.edits and not i.response.modals, "ni « abandonnée », ni formulaire"
     assert len(salon.envois) == 1
 
@@ -161,7 +161,7 @@ def test_R1_une_erreur_apres_l_envoi_ne_fait_pas_republier(env):
         salon.historique.insert(0, _message_recu(g, salon, kw))
         raise discord.HTTPException(Obj(status=503, reason="x"), "indisponible")
     salon.send = recue_puis_erreur
-    lien, erreur = run(A.publier(g, tete, A.Brouillon(salon_id=salon.id, titre="Maj", texte="Texte.")))
+    lien, erreur = run(A.publier(g, tete, A.Brouillon(suivi=True, salon_id=salon.id, titre="Maj", texte="Texte.")))
     m = salon.historique[0]
     assert erreur == "" and lien == m.jump_url, "partie : on ne dit pas « réessaie »"
     a = run(A.charger(1))
@@ -171,7 +171,7 @@ def test_R1_une_erreur_apres_l_envoi_ne_fait_pas_republier(env):
     async def refus(content=None, **kw):
         raise discord.HTTPException(Obj(status=500, reason="x"), "panne")
     salon.send = refus
-    b = A.Brouillon(salon_id=salon.id, titre="Autre", texte="Texte.")
+    b = A.Brouillon(suivi=True, salon_id=salon.id, titre="Autre", texte="Texte.")
     apercu = A.VueApercu(tete, g, b, (), env.conf)
     i = interaction(g, tete)
     run(bouton(apercu, "Publier").callback(i))
@@ -184,7 +184,7 @@ def test_R1_une_erreur_apres_l_envoi_ne_fait_pas_republier(env):
         raise discord.HTTPException(Obj(status=503, reason="x"), "indisponible")
         yield  # noqa — un générateur asynchrone qui lève
     salon.history = illisible
-    b = A.Brouillon(salon_id=salon.id, titre="Troisième", texte="Texte.")
+    b = A.Brouillon(suivi=True, salon_id=salon.id, titre="Troisième", texte="Texte.")
     apercu = A.VueApercu(tete, g, b, (), env.conf)
     i = interaction(g, tete)
     run(bouton(apercu, "Publier").callback(i))
@@ -202,7 +202,7 @@ def test_R1_apres_l_envoi_plus_rien_ne_fait_echouer(env, monkeypatch):
     async def journal_en_panne(*_a, **_k):
         raise aiosqlite.OperationalError("database is locked")
     monkeypatch.setattr(A, "_journal", journal_en_panne)
-    lien, erreur = run(A.publier(g, tete, A.Brouillon(salon_id=salon.id, titre="Maj", texte="Texte.")))
+    lien, erreur = run(A.publier(g, tete, A.Brouillon(suivi=True, salon_id=salon.id, titre="Maj", texte="Texte.")))
     assert erreur == "" and lien and len(salon.envois) == 1 and run(A.charger(1))["message_id"] == salon.envois[0][0]
 
 
@@ -352,7 +352,7 @@ def test_R4_le_menage_epargne_les_annonces(env, monkeypatch):
     #  Le ménage lit les annonces publiées une fois par serveur et les passe aux deux purges.
     g = serveur(env)
     salon = g.nom("📀sneak-rellseas")
-    run(A.publier(g, g.membre(FONDATEUR), A.Brouillon(salon_id=salon.id, titre="Sneak", texte="Texte.", fil=False)))
+    run(A.publier(g, g.membre(FONDATEUR), A.Brouillon(suivi=True, salon_id=salon.id, titre="Sneak", texte="Texte.", fil=False)))
     assert run(A.messages_publies(g.id)) == frozenset({salon.envois[0][0]})
     appels = []
 
@@ -474,7 +474,7 @@ def test_R8_la_mention_du_clan_qui_ne_partira_pas_est_annoncee(env):
     run(ZN.installer_clan(g, role))
     post = g.get_channel_or_thread(env.conf["clan_annonces"])
     tete = g.membre(FONDATEUR)
-    b = A.Brouillon(salon_id=post.id, titre="Réunion", texte="Ce soir.", mention="clan")
+    b = A.Brouillon(suivi=True, salon_id=post.id, titre="Réunion", texte="Ce soir.", mention="clan")
     post.parent.refus = {"mention_everyone"}
     assert "personne ne sera notifié" in textes(A.VueApercu(tete, g, b, (), env.conf))
     role.mentionable = True
@@ -725,7 +725,7 @@ def test_R13_vu_et_nouvelle_annonce_acquittent_avant_la_base(env, monkeypatch):
     g = serveur(env)
     tete = g.membre(FONDATEUR)
     salon = g.nom("📜annonce")
-    run(A.publier(g, tete, A.Brouillon(salon_id=salon.id, titre="T", texte="X", fil=False)))
+    run(A.publier(g, tete, A.Brouillon(suivi=True, salon_id=salon.id, titre="T", texte="X", fil=False)))
     i = interaction(g, g.membre(7))
     vraie_base, vraie_cfg = A._get_db, A._cfg
 
