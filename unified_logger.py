@@ -76,6 +76,7 @@ class EventType(str, Enum):
     SEC_QRCODE = "sec.qrcode"
     SEC_NSFW = "sec.nsfw"
     SEC_ESCALATION = "sec.escalation"
+    SEC_MINEURS = "sec.mineurs"   # 29/10/2026 : approche prédatrice — plus classée « Scam »
 
     # Membres
     MEMBER_JOIN = "member.join"
@@ -145,6 +146,7 @@ EVENT_META: dict[EventType, dict] = {
     EventType.SEC_QRCODE:    {"icon": "📱", "color": 0xC0392B, "label": "QR code détecté",     "cat": "Sécurité"},
     EventType.SEC_NSFW:      {"icon": "🔞", "color": 0xE67E22, "label": "NSFW détecté",        "cat": "Sécurité"},
     EventType.SEC_ESCALATION:{"icon": "🚨", "color": 0xC0392B, "label": "Membre à surveiller",  "cat": "Sécurité"},
+    EventType.SEC_MINEURS:   {"icon": "🧒", "color": 0xC0392B, "label": "Protection des mineurs", "cat": "Sécurité"},
 
     # MEMBRES (vert / bleu)
     EventType.MEMBER_JOIN:   {"icon": "👋", "color": 0x2ECC71, "label": "Arrivée membre",      "cat": "Membres"},

@@ -27,3 +27,13 @@ def test_AUDIT_phrases_normales_pas_arnaque():
 def test_AUDIT_arnaque_crypto_lien_prise():
     for t in ARNAQUES:
         assert B.check_scam(t)[0], t
+
+
+def test_AUDIT_approche_predatrice_alerte_protection_des_mineurs_pas_scam():
+    import inspect
+    import unified_logger as U
+    assert U.EVENT_META[U.EventType.SEC_MINEURS]["label"] == "Protection des mineurs"
+    src = inspect.getsource(B.on_message)
+    i = src.index("pmineurs.analyser(")
+    assert "'anti_grooming'" in src[i:i + 800] and "'anti_scam'" not in src[i:i + 800]
+    assert "'anti_grooming':   ulogger2026.EventType.SEC_MINEURS" in inspect.getsource(B.send_log)

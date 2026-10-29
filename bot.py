@@ -4905,6 +4905,7 @@ async def send_log(g, key, m, msg, reason, extra=None):
             'anti_newaccount': ulogger2026.EventType.SEC_NEWACCOUNT,
             'anti_alt':        ulogger2026.EventType.SEC_ALT,
             'anti_nsfw':       ulogger2026.EventType.SEC_NSFW,
+            'anti_grooming':   ulogger2026.EventType.SEC_MINEURS,  # 29/10/2026 : plus « Scam détecté »
         }
         ev = key_to_event.get(key, ulogger2026.EventType.SEC_SPAM)
         chan_for_log = msg.channel if msg and getattr(msg, 'channel', None) else None
@@ -26461,7 +26462,7 @@ async def on_message(msg):
                         pass
                 try:
                     await send_log(
-                        msg.guild, 'anti_scam', msg.author, msg,
+                        msg.guild, 'anti_grooming', msg.author, msg,
                         ("🚨 Approche prédatrice — signal FORT"
                          if _pm["gravite"] == "forte"
                          else "⚠️ Approche prédatrice — signaux combinés"),
