@@ -32,7 +32,6 @@ from pathlib import Path
 import acces_direction
 import site_vitrine
 import tableau
-import textes
 
 ADRESSE = "/wiki"
 DONNEES = Path(__file__).resolve().parent / "donnees_jeu"
@@ -50,17 +49,6 @@ FOND_TYPE = {"metier": "QuClr80Pmc0", "race": "Mm8Ybn-AzcE", "faction": "P2MhP3F
              "monnaie": "ZCzdKbmQerg", "boss": "ji-L9CdSvN8", "lieu": "QuClr80Pmc0", "systeme": "q09y0z5Vyxw"}
 CSP = site_vitrine.CSP.replace("form-action 'none'", "form-action 'none'; media-src 'none'")
 _cache: dict = {}
-#  29/10/2026 : l'annonce de l'ouverture du wiki (postée UNE fois par le bot dans le salon des annonces du serveur).
-ANNONCE = textes.declarer(
-    "site.wiki_annonce",
-    "## 📖 Le wiki RELL Seas du clan est ouvert !\n"
-    "Tout ce que RELL a vraiment montré de RELL Seas — le jeu, le monde, le lore, les fruits, les boss, les 52 vidéos "
-    "officielles — vérifié fiche par fiche, avec la vidéo et la minute comme preuve. Jamais de rumeur.\n"
-    "En français et en anglais, sur ordinateur comme sur téléphone. Partage-le !\n\n"
-    "**EN** — The clan's RELL Seas wiki is open: everything RELL has really shown, verified entry by entry, with "
-    "official video proof. Share it!",
-    groupe="site", titre="Annonce de l'ouverture du wiki", max_=1500,
-    aide="Postée une seule fois par le bot dans le salon des annonces, avec l'image du wiki et le bouton « Ouvrir le wiki ».")
 
 
 def _lire(nom: str) -> dict:

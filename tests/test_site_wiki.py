@@ -95,10 +95,10 @@ def test_WIKI_rubriques_sourcees_et_chiffres_officiels():
         assert f'["{onglet}"' in js, onglet
 
 
-def test_WIKI_annonce_unique_et_liens_croises():
-    import textes
+def test_WIKI_le_bot_ne_poste_aucune_annonce_et_liens_croises():
+    #  « mets pas des annonces quand c'est pas moi qui l'ai dit » : l'annonce postée est retirée, plus rien n'en poste
     src = (RACINE / "bot.py").read_text(encoding="utf-8")
-    assert '"_annoncer_wiki",' in src and "c.get('wiki_annonce_v1')" in src and "db_set(g.id, 'wiki_annonce_v1'" in src
-    assert textes.declare("site.wiki_annonce") and "52 vidéos" in textes.defaut("site.wiki_annonce")
+    assert '"_retirer_annonce_wiki",' in src and "_annoncer_wiki" not in src
+    assert "msg.author.id == g.me.id" in src                       # ne retire que le message du bot
     assert 'href: "/wiki"' in (RACINE / "site" / "vitrine.js").read_text(encoding="utf-8")       # la vitrine mène au wiki
     assert 'href: "/equipage"' in (RACINE / "site" / "wiki.js").read_text(encoding="utf-8")      # et le wiki à la vitrine
