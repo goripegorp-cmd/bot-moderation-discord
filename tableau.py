@@ -225,7 +225,9 @@ ACCES_STATIQUES = {
                #  26/10/2026 : la page du CANDIDAT (site/candidature.html) — son cookie est limité à `/tableau/candidature/` : son
                #  navigateur ne l'envoie jamais ici, ses deux fichiers propres sont donc publics (le reste qu'elle charge l'est
                #  déjà) ; la vue de la direction (candidature_direct.*) reste à la tête.
-               "candidature.js", "candidature.css"),
+               "candidature.js", "candidature.css",
+               #  29/10/2026 : le WIKI PUBLIC de RELL Seas (site/wiki.html, `/wiki`) — ses deux fichiers, rien d'autre.
+               "wiki.js", "wiki.css"),
     #  Le site de l'équipage (site/equipage.html) : ce que sa page charge EN PLUS de la vitrine (`direct.js` n'est chargé
     #  qu'en mode édition, par la tête).
     "equipage": ("equipage.js", "direct.css"),

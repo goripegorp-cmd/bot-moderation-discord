@@ -1,0 +1,558 @@
+{
+ "textes": {
+  "metier.cooking": {
+   "fr": "Feu de camp puis cuisine complète en mini-jeux : découpe, poêle, four, mixeur. Nutrition et recettes.",
+   "en": "Campfire, then a full kitchen played as mini-games: chopping, pan, oven, blender. Nutrition and recipes."
+  },
+  "metier.thieving": {
+   "fr": "Crochetage, exécution furtive, pickpocket et interrogatoire. Attire les Marines.",
+   "en": "Lockpicking, stealth executions, pickpocketing and interrogation. Draws the Marines' attention."
+  },
+  "metier.navigation": {
+   "fr": "Longue-vue pour repérer les apparitions rares, boussole améliorable, trésors et lieux découverts.",
+   "en": "Spyglass to spot rare spawns, an upgradable compass, treasures and discovered places."
+  },
+  "metier.fishing": {
+   "fr": "Système de pêche refait dans Movie 3, avec la canne à Léviathan et le journal des poissons.",
+   "en": "Fishing system reworked in Movie 3, with the Leviathan rod and the fish log."
+  },
+  "metier.crafting": {
+   "fr": "Forge en mini-jeux (fondre, couler, refroidir, affûter), plans d'armes et d'armures.",
+   "en": "Forging as mini-games (melt, cast, cool, sharpen), weapon and armour blueprints."
+  },
+  "metier.woodcutting": {
+   "fr": "Abattage des arbres ; le bois sert au feu et à l'artisanat.",
+   "en": "Tree felling; the wood is used for fires and crafting."
+  },
+  "metier.doctor": {
+   "fr": "Soigne les maladies et prépare des potions ; progresse avec la connaissance (livres).",
+   "en": "Cures illnesses and brews potions; progresses through knowledge (books)."
+  },
+  "metier.mining": {
+   "fr": "Extraction de roche et de minerais, comme le cuivre et l'étain.",
+   "en": "Mining rock and ores, such as copper and tin."
+  },
+  "race.human": {
+   "fr": "La race de base, la plus répandue.",
+   "en": "The base race, the most common one."
+  },
+  "race.beastman": {
+   "fr": "Anciennement Mink. Plusieurs sous-espèces animales : loup, lion, bison, girafe, cerf, mouton.",
+   "en": "Formerly Mink. Several animal subspecies: wolf, lion, bison, giraffe, deer, sheep."
+  },
+  "race.marinian": {
+   "fr": "Anciennement Fishman. Peuple de la mer, avec plusieurs types et rangs (Lowborn, Highborn, Royalty).",
+   "en": "Formerly Fishman. A sea people with several types and ranks (Lowborn, Highborn, Royalty)."
+  },
+  "race.avalonian": {
+   "fr": "Anciennement Skypiean. Reconnaissable à ses ailes blanches.",
+   "en": "Formerly Skypiean. Recognisable by its white wings."
+  },
+  "race.cyborg": {
+   "fr": "Un corps en partie mécanique.",
+   "en": "A partly mechanical body."
+  },
+  "race.giant": {
+   "fr": "Nouvelle race : très grande taille, barbes exclusives.",
+   "en": "New race: very tall, exclusive beards."
+  },
+  "race.dwarf": {
+   "fr": "Nouvelle race : petite taille, barbes exclusives.",
+   "en": "New race: short, exclusive beards."
+  },
+  "race.three_eyes": {
+   "fr": "Nouvelle race à trois yeux, avec plusieurs sous-espèces.",
+   "en": "New three-eyed race with several subspecies."
+  },
+  "faction.pirates": {
+   "fr": "Anciennement Council of Piracy. Plus de 40 factions pirates, selon les RELL Bros dans Movie 2.",
+   "en": "Formerly Council of Piracy. Over 40 pirate factions, according to the RELL Bros in Movie 2."
+  },
+  "faction.marines": {
+   "fr": "Anciennement Marines. La force armée du gouvernement : l'ordre, la justice et la chasse aux pirates, de Recruit à Fleet Admiral.",
+   "en": "Formerly Marines. The government's armed force: order, justice and pirate hunting, from Recruit to Fleet Admiral."
+  },
+  "faction.revolution": {
+   "fr": "Anciennement Revolutionary Army. Une faction secrète qui veut renverser l'ordre du monde.",
+   "en": "Formerly Revolutionary Army. A secret faction that wants to overthrow the world order."
+  },
+  "faction.gouvernement": {
+   "fr": "Anciennement World Government. Dirige le monde et commande le Marine Corps.",
+   "en": "Formerly World Government. Rules the world and commands the Marine Corps."
+  },
+  "mer.desolate": {
+   "fr": "Une des mers du monde de RELL Seas : la mer 4.",
+   "en": "One of the seas of the RELL Seas world: sea 4."
+  },
+  "mer.sunken": {
+   "fr": "Une des mers du monde de RELL Seas : la mer 5.",
+   "en": "One of the seas of the RELL Seas world: sea 5."
+  },
+  "mer.molten": {
+   "fr": "Une des mers du monde de RELL Seas.",
+   "en": "One of the seas of the RELL Seas world."
+  },
+  "mer.uncharted": {
+   "fr": "Une des mers du monde de RELL Seas.",
+   "en": "One of the seas of the RELL Seas world."
+  },
+  "trait.health": {
+   "fr": "Un des six traits principaux, choisi une fois pour toutes.",
+   "en": "One of the six main traits, chosen once and for all."
+  },
+  "trait.endurance": {
+   "fr": "Un des six traits principaux, choisi une fois pour toutes.",
+   "en": "One of the six main traits, chosen once and for all."
+  },
+  "trait.defense": {
+   "fr": "Un des six traits principaux, choisi une fois pour toutes.",
+   "en": "One of the six main traits, chosen once and for all."
+  },
+  "trait.willpower": {
+   "fr": "Un des six traits principaux, choisi une fois pour toutes.",
+   "en": "One of the six main traits, chosen once and for all."
+  },
+  "trait.spiritual": {
+   "fr": "Un des six traits principaux, choisi une fois pour toutes.",
+   "en": "One of the six main traits, chosen once and for all."
+  },
+  "trait.luck": {
+   "fr": "Un des six traits principaux, choisi une fois pour toutes.",
+   "en": "One of the six main traits, chosen once and for all."
+  },
+  "classe.light": {
+   "fr": "Une des quatre classes principales, choisie une fois pour toutes.",
+   "en": "One of the four main classes, chosen once and for all."
+  },
+  "fruit.rubber": {
+   "fr": "Corps en caoutchouc.",
+   "en": "A rubber body."
+  },
+  "fruit.quake": {
+   "fr": "Séismes et secousses.",
+   "en": "Earthquakes and tremors."
+  },
+  "fruit.dough": {
+   "fr": "Créer, contrôler et devenir de la pâte.",
+   "en": "Create, control and become dough."
+  },
+  "fruit.operation": {
+   "fr": "Crée un domaine sphérique où tout se modifie.",
+   "en": "Creates a spherical room where anything can be altered."
+  },
+  "fruit.venom": {
+   "fr": "Le poison ; son utilisateur ne craint aucun poison.",
+   "en": "Poison; its user is immune to every poison."
+  },
+  "fruit.soul": {
+   "fr": "Manipuler les âmes.",
+   "en": "Manipulate souls."
+  },
+  "fruit.paw": {
+   "fr": "Coups de pression et répulsion.",
+   "en": "Pressure blasts and repulsion."
+  },
+  "fruit.gravity": {
+   "fr": "Contrôle de la gravité ; ultime : Meteor Shower.",
+   "en": "Gravity control; ultimate: Meteor Shower."
+  },
+  "fruit.string": {
+   "fr": "Manier des fils.",
+   "en": "Wield strings."
+  },
+  "fruit.barrier": {
+   "fr": "Dresser des barrières.",
+   "en": "Raise barriers."
+  },
+  "fruit.love": {
+   "fr": "Amour et désir : projectiles d'amour, explosion de cœurs.",
+   "en": "Love and desire: love projectiles, a burst of hearts."
+  },
+  "fruit.revive": {
+   "fr": "Ressuscite après la première mort.",
+   "en": "Comes back to life after the first death."
+  },
+  "fruit.bomb": {
+   "fr": "Fait exploser n'importe quelle partie du corps.",
+   "en": "Makes any part of the body explode."
+  },
+  "fruit.chop": {
+   "fr": "Se découper en morceaux ; insensible aux attaques tranchantes.",
+   "en": "Split into pieces; immune to slashing attacks."
+  },
+  "fruit.flame": {
+   "fr": "Logia du feu.",
+   "en": "Fire Logia."
+  },
+  "fruit.ice": {
+   "fr": "Logia de la glace.",
+   "en": "Ice Logia."
+  },
+  "fruit.sand": {
+   "fr": "Logia du sable.",
+   "en": "Sand Logia."
+  },
+  "fruit.smoke": {
+   "fr": "Logia de la fumée.",
+   "en": "Smoke Logia."
+  },
+  "fruit.light": {
+   "fr": "Logia de la lumière.",
+   "en": "Light Logia."
+  },
+  "fruit.dark": {
+   "fr": "Logia des ténèbres.",
+   "en": "Darkness Logia."
+  },
+  "fruit.rumble": {
+   "fr": "Anciennement Lightning. Logia de la foudre.",
+   "en": "Formerly Lightning. Lightning Logia."
+  },
+  "fruit.magma": {
+   "fr": "Logia du magma.",
+   "en": "Magma Logia."
+  },
+  "fruit.dragon": {
+   "fr": "Zoan mythique : dragon azur, forme hybride ou complète.",
+   "en": "Mythical Zoan: azure dragon, hybrid or full form."
+  },
+  "fruit.phoenix": {
+   "fr": "Zoan mythique : phénix, forme hybride ou complète.",
+   "en": "Mythical Zoan: phoenix, hybrid or full form."
+  },
+  "fruit.buddha": {
+   "fr": "Zoan mythique : un bouddha géant doré.",
+   "en": "Mythical Zoan: a giant golden buddha."
+  },
+  "fruit.mythical_wolf": {
+   "fr": "Zoan mythique : une ancienne divinité loup. Annoncé pour une mise à jour après la sortie.",
+   "en": "Mythical Zoan: an ancient wolf deity. Announced for an update after release."
+  },
+  "fruit.allosaurus": {
+   "fr": "Zoan antique : allosaure.",
+   "en": "Ancient Zoan: allosaurus."
+  },
+  "fruit.leopard": {
+   "fr": "Zoan : léopard.",
+   "en": "Zoan: leopard."
+  },
+  "fruit.wolf": {
+   "fr": "Zoan : un hybride proche du loup-garou.",
+   "en": "Zoan: a werewolf-like hybrid."
+  },
+  "fruit.giraffe": {
+   "fr": "Zoan : girafe.",
+   "en": "Zoan: giraffe."
+  },
+  "fruit.falcon": {
+   "fr": "Zoan : se transforme en faucon.",
+   "en": "Zoan: turns into a falcon."
+  },
+  "fruit.bison": {
+   "fr": "Zoan : bison, forme hybride ou complète.",
+   "en": "Zoan: bison, hybrid or full form."
+  },
+  "haki.armament": {
+   "fr": "Une armure invisible d'énergie spirituelle, qui permet de toucher les Logia. Touche R.",
+   "en": "An invisible armour of spiritual energy that lets you hit Logias. Key R."
+  },
+  "haki.observation": {
+   "fr": "Un sixième sens : sentir la présence et la force des autres, et un peu l'avenir. Touche T.",
+   "en": "A sixth sense: feel others' presence and strength, and a bit of the future. Key T."
+  },
+  "haki.conqueror": {
+   "fr": "Imposer sa volonté : étourdit et assomme les plus faibles. Touche G.",
+   "en": "Impose your will: stuns and knocks out the weaker. Key G."
+  },
+  "carte_haki.bri_o_tarth": {
+   "fr": "Carte de Haki de l'Armement.",
+   "en": "Armament Haki card."
+  },
+  "carte_haki.sir_galahad": {
+   "fr": "Carte de Haki de l'Armement.",
+   "en": "Armament Haki card."
+  },
+  "carte_haki.sir_gawain": {
+   "fr": "Carte de Haki de l'Armement.",
+   "en": "Armament Haki card."
+  },
+  "carte_haki.sir_lancelot": {
+   "fr": "Carte de Haki de l'Armement.",
+   "en": "Armament Haki card."
+  },
+  "carte_haki.sie_g_fried": {
+   "fr": "Carte de Haki de l'Armement.",
+   "en": "Armament Haki card."
+  },
+  "carte_haki.sir_lannister": {
+   "fr": "Carte de Haki de l'Armement.",
+   "en": "Armament Haki card."
+  },
+  "carte_haki.sigma_freud": {
+   "fr": "Carte de Haki de l'Observation.",
+   "en": "Observation Haki card."
+  },
+  "carte_haki.xanda_d_goat": {
+   "fr": "Carte de Haki de du Conquérant.",
+   "en": "Conqueror Haki card."
+  },
+  "carte_haki.nap_o_leon": {
+   "fr": "Carte de Haki de du Conquérant.",
+   "en": "Conqueror Haki card."
+  },
+  "carte_haki.opp_e_heimer": {
+   "fr": "Carte de Haki de l'Observation : Future Sight, esquive 8 attaques.",
+   "en": "Observation Haki card: Future Sight, dodges 8 attacks."
+  },
+  "carte_haki.new_d_ton": {
+   "fr": "Carte de Haki de l'Observation : un signal avant la dernière M1 adverse.",
+   "en": "Observation Haki card: a warning before the opponent's last M1."
+  },
+  "carte_haki.ein_s_tein": {
+   "fr": "Carte de Haki de l'Observation : sentir la force des adversaires.",
+   "en": "Observation Haki card: sense your opponents' strength."
+  },
+  "carte_haki.dar_d_win": {
+   "fr": "Carte de Haki de l'Observation : sentir la présence des adversaires.",
+   "en": "Observation Haki card: sense your opponents' presence."
+  },
+  "carte_haki.tom_e_dison": {
+   "fr": "Carte de Haki de l'Observation : l'esquive devient une contre-attaque par saisie.",
+   "en": "Observation Haki card: the evade turns into a grab counter."
+  },
+  "carte_haki.julius_c_zar": {
+   "fr": "Carte de Haki du Conquérant : immobilise les ennemis proches et baisse leur défense.",
+   "en": "Conqueror Haki card: roots nearby enemies and lowers their defence."
+  },
+  "carte_haki.geng_d_khan": {
+   "fr": "Carte de Haki du Conquérant : à terre, une explosion de Haki repousse les attaquants.",
+   "en": "Conqueror Haki card: when knocked down, a Haki burst repels attackers."
+  },
+  "carte_haki.go_d_zilla": {
+   "fr": "Carte de Haki du Conquérant : étourdit tout le monde et coupe les transformations.",
+   "en": "Conqueror Haki card: stuns everyone and cancels transformations."
+  },
+  "poster.m1_god": {
+   "fr": "Poster Fierce : prolonge le combo de M1 jusqu'à rejoindre l'adversaire sur la dernière.",
+   "en": "Fierce poster: extends the M1 combo, reaching the opponent on the last hit."
+  },
+  "poster.faster_punch": {
+   "fr": "Poster Fierce : un Strong Punch plus rapide et de plus longue portée.",
+   "en": "Fierce poster: a faster, longer-range Strong Punch."
+  },
+  "poster.flash_dash": {
+   "fr": "Poster Agile : un dash invisible avec des images rémanentes.",
+   "en": "Agile poster: an invisible dash with afterimages."
+  },
+  "poster.sir_pitcher": {
+   "fr": "Poster Agile : après une projection, trois Geppo Dash puis un écrasement.",
+   "en": "Agile poster: after a throw, three Geppo Dashes then a slam."
+  },
+  "poster.quick_parry": {
+   "fr": "Poster Tactic, montré dans Movie 3.",
+   "en": "Tactic poster, shown in Movie 3."
+  },
+  "style.black_leg": {
+   "fr": "Style de combat aux jambes.",
+   "en": "A leg-based fighting style."
+  },
+  "style.rokushiki": {
+   "fr": "Style de combat des six techniques.",
+   "en": "The six-techniques fighting style."
+  },
+  "arme.katana": {
+   "fr": "Arme montrée dans Movie 3.",
+   "en": "Weapon shown in Movie 3."
+  },
+  "arme.yahu_great_sword": {
+   "fr": "Grande épée montrée dans Movie 3, liée au boss Yahu.",
+   "en": "Great sword shown in Movie 3, tied to the boss Yahu."
+  },
+  "equipement.spyglass": {
+   "fr": "Observer au loin ; avec le talent Navigation, repère les apparitions rares.",
+   "en": "Look far away; with the Navigation talent, spots rare spawns."
+  },
+  "equipement.snail_phone": {
+   "fr": "Appeler ou écrire aux joueurs du même serveur.",
+   "en": "Call or text players on the same server."
+  },
+  "equipement.ship_in_a_bottle": {
+   "fr": "Fait apparaître son navire ou son sous-marin et ouvre le constructeur de navire.",
+   "en": "Spawns your ship or submarine and opens the ship builder."
+  },
+  "equipement.lock_pick": {
+   "fr": "Ouvre coffres et portes par un mini-jeu ; un échec casse le crochet.",
+   "en": "Opens chests and doors through a mini-game; a fail breaks the pick."
+  },
+  "equipement.shovel": {
+   "fr": "Chasse au trésor : déterre des coffres.",
+   "en": "Treasure hunting: digs up chests."
+  },
+  "equipement.paraglider": {
+   "fr": "Planer depuis un point haut, sans dégâts de chute.",
+   "en": "Glide from high places, with no fall damage."
+  },
+  "equipement.compass": {
+   "fr": "Se repérer et retrouver son île ; améliorable avec le talent Navigation.",
+   "en": "Find your way and your island; upgradable with the Navigation talent."
+  },
+  "equipement.fishing_rod": {
+   "fr": "Pêcher en mini-jeu ; Movie 3 montre la canne à Léviathan.",
+   "en": "Fish through a mini-game; Movie 3 shows the Leviathan rod."
+  },
+  "equipement.grappling_hook": {
+   "fr": "S'accrocher aux murs et aux tyroliennes.",
+   "en": "Latch onto walls and ziplines."
+  },
+  "navire.sloop": {
+   "fr": "Navire montré dans Movie 3.",
+   "en": "Ship shown in Movie 3."
+  },
+  "navire.caravel": {
+   "fr": "Navire présenté dans The Movie.",
+   "en": "Ship presented in The Movie."
+  },
+  "navire.sovereign": {
+   "fr": "Navire préconstruit montré dans Movie 3.",
+   "en": "Pre-built ship shown in Movie 3."
+  },
+  "navire.submarine": {
+   "fr": "Explore les sept couches de profondeur ; on l'invoque sous l'eau avec le navire en bouteille.",
+   "en": "Explores the seven depth layers; summoned underwater with the ship in a bottle."
+  },
+  "piece_navire.heavy_cannon": {
+   "fr": "Canon de navire : un seul boulet, de gros dégâts.",
+   "en": "Ship cannon: a single ball, heavy damage."
+  },
+  "piece_navire.burst_cannon": {
+   "fr": "Canon de navire : trois boulets à la fois.",
+   "en": "Ship cannon: three balls at once."
+  },
+  "piece_navire.mortar_cannon": {
+   "fr": "Canon de navire à tir en cloche ; on peut y grimper pour être projeté sur un navire ennemi.",
+   "en": "Ship cannon with arcing shots; you can climb in to be launched onto an enemy ship."
+  },
+  "monture.bee": {
+   "fr": "Monture montrée dans Movie 3.",
+   "en": "Mount shown in Movie 3."
+  },
+  "monnaie.relli": {
+   "fr": "La monnaie principale. Anciennement RELL Coins.",
+   "en": "The main currency. Formerly RELL Coins."
+  },
+  "monnaie.tickets": {
+   "fr": "Une monnaie rare, liée au Fruit Tournament.",
+   "en": "A rare currency, tied to the Fruit Tournament."
+  },
+  "monnaie.randomize": {
+   "fr": "Des tirages (spins).",
+   "en": "Spins."
+  }
+ },
+ "hors_catalogue": {
+  "boss.yahu": {
+   "type": "boss",
+   "nom": "Yahu",
+   "fr": "Boss des grands fonds, de la famille des Léviathans.",
+   "en": "Deep-sea boss from the Leviathan family."
+  },
+  "boss.kraken": {
+   "type": "boss",
+   "nom": "Kraken",
+   "fr": "Boss marin géant, proche d'un calmar, montré dans Movie 3.",
+   "en": "Giant sea boss, squid-like, shown in Movie 3."
+  },
+  "boss.big_boss_man": {
+   "type": "boss",
+   "nom": "Big Boss Man",
+   "fr": "Un des premiers boss, chef d'équipage, montré dans Movie 2.",
+   "en": "One of the first bosses, a crew leader, shown in Movie 2."
+  },
+  "boss.katame": {
+   "type": "boss",
+   "nom": "Katame",
+   "fr": "Boss qui manie une épée dans sa gueule, montré dans Movie 2.",
+   "en": "A boss wielding a sword in its jaws, shown in Movie 2."
+  },
+  "lieu.hades_asylum": {
+   "type": "lieu",
+   "nom": "Hades' Asylum",
+   "fr": "Prison géante de haute sécurité tenue par les Marines, pour les pires pirates.",
+   "en": "Giant high-security prison run by the Marines for the worst pirates."
+  },
+  "equipement.handcuffs": {
+   "type": "equipement",
+   "nom": "Handcuffs",
+   "fr": "Menottes pour arrêter PNJ et joueurs ; réservées à la faction Marine.",
+   "en": "Handcuffs to arrest NPCs and players; Marine faction only."
+  },
+  "equipement.utility_tool": {
+   "type": "equipement",
+   "nom": "Utility Tool",
+   "fr": "Un objet tout-en-un qui regroupe plusieurs outils.",
+   "en": "An all-in-one item combining several tools."
+  },
+  "systeme.reputation": {
+   "type": "systeme",
+   "nom": "Reputation",
+   "fr": "Ta réputation, bonne ou mauvaise, change la façon dont le monde réagit à toi.",
+   "en": "Your reputation, good or bad, changes how the world reacts to you."
+  },
+  "systeme.talents": {
+   "type": "systeme",
+   "nom": "Talents",
+   "fr": "Monter ses talents (navigation, pêche, cuisine…) est une des façons principales de progresser.",
+   "en": "Levelling your talents (navigation, fishing, cooking…) is one of the main ways to progress."
+  },
+  "systeme.dexes": {
+   "type": "systeme",
+   "nom": "Dexes",
+   "fr": "Les journaux du jeu (aventure, artisanat, pêche, recettes).",
+   "en": "The game's logs (adventure, crafting, fishing, recipes)."
+  },
+  "systeme.land_events": {
+   "type": "systeme",
+   "nom": "Land Events",
+   "fr": "Rencontres aléatoires sur terre qui donnent expérience, objets et argent.",
+   "en": "Random encounters on land giving experience, items and money."
+  },
+  "systeme.haki": {
+   "type": "systeme",
+   "nom": "Haki",
+   "fr": "Énergie spirituelle en chacun, contre direct des fruits ; trois formes.",
+   "en": "A spiritual energy within everyone, a direct counter to fruits; three forms."
+  },
+  "systeme.posters": {
+   "type": "systeme",
+   "nom": "Posters",
+   "fr": "Système de build : un poster Fierce, un Agile et un Tactic équipés à la fois.",
+   "en": "Build system: one Fierce, one Agile and one Tactic poster equipped at once."
+  },
+  "systeme.sailing": {
+   "type": "systeme",
+   "nom": "Sailing",
+   "fr": "Naviguer avec son propre navire, invoqué grâce au navire en bouteille.",
+   "en": "Sailing your own ship, summoned with the ship in a bottle."
+  },
+  "systeme.wildlife": {
+   "type": "systeme",
+   "nom": "Wildlife",
+   "fr": "La faune du jeu, amicale, neutre ou hostile, sur terre et en mer.",
+   "en": "The game's wildlife, friendly, neutral or hostile, on land and at sea."
+  }
+ },
+ "types": {
+  "systeme": [
+   "Systèmes du jeu",
+   "Game systems"
+  ],
+  "boss": [
+   "Boss",
+   "Bosses"
+  ],
+  "lieu": [
+   "Lieux",
+   "Places"
+  ]
+ }
+}

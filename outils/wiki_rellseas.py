@@ -82,8 +82,14 @@ def propre(w: str) -> str:
     return re.sub(r"\n\s*\n+", "\n", w).strip()
 
 
+BROUILLON = re.compile(r"(?i)lorem ipsum|placeholder|no(?:ting|thing) is true|to be (?:added|written)|\bwip\b")
+
+
 def resume(w: str) -> str:
+    """La première vraie phrase de la page ; rien pour un brouillon (« Lorem ipsum », « placeholder… nothing is true »)."""
     t = propre(w)
+    if BROUILLON.search(t[:4000]):
+        return ""
     blocs = [b.strip() for b in re.split(r"\n## [^\n]*", t) if len(b.strip()) > 40]
     return re.sub(r"\s+", " ", blocs[0])[:400] if blocs else ""
 

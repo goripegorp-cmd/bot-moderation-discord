@@ -77,6 +77,10 @@ def fiches() -> dict:
         k = plier(cle_terme)
         if len(k) >= 3 and k not in out:
             out[k] = f
+    brouillon = re.compile(r"(?i)lorem ipsum|placeholder|no(?:ting|thing) is true")
+    for p in wiki.get("pages", []):          # un brouillon du wiki des fans ne dit rien de vrai
+        if brouillon.search(p.get("resume", "")):
+            p["resume"] = ""
     pages = {plier(p["titre"]): p for p in wiki.get("pages", [])}
     for e in cat.get("elements", []):
         if not e.get("actif", True):

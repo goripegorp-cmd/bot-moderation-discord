@@ -47,7 +47,7 @@ import tableau
 ADRESSE = site_equipage.ADRESSE_VITRINE          # « /equipage »
 FRAIS = 60.0                     # s : une réponse publique gardée (une écriture de la direction la renouvelle aussitôt)
 BANNIERE_PAUSE = 30.0            # s : au plus une bannière redessinée par demi-minute (la précédente sert entre-temps)
-LIMITES = {"page": 120, "donnees": 120, "image": 1500, "banniere": 60}   # requêtes par minute et par adresse IP
+LIMITES = {"page": 120, "donnees": 120, "image": 1500, "banniere": 60, "wiki_page": 120, "wiki_donnees": 120}   # requêtes par minute et par adresse IP
 PASSAGES_MAX = 20000             # adresses suivies (les plus anciennes partent d'abord)
 LARGEUR, HAUTEUR = 1200, 630     # l'image de l'aperçu (Open Graph)
 AFFICHES_BANNIERE = 3

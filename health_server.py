@@ -273,6 +273,13 @@ async def _vitrine(request):
     return await getattr(site_vitrine, nom.split(":", 1)[1])(request)
 
 
+async def _wiki(request):
+    """Le wiki PUBLIC de RELL Seas (`site_wiki`) : sans session, lecture seule."""
+    import site_wiki
+    nom = request.match_info.route.name or ""
+    return await getattr(site_wiki, nom.split(":", 1)[1])(request)
+
+
 async def _websub(request):
     """YouTube (hub WebSub) : vérification d'abonnement (GET) et vidéos publiées (POST)."""
     import websub_youtube
@@ -363,6 +370,10 @@ def construire_app():
     app.router.add_get('/equipage/donnees', _vitrine, name="vitrine:donnees")
     app.router.add_get('/equipage/banniere.png', _vitrine, name="vitrine:banniere")
     app.router.add_get('/equipage/image/{jeton}', _vitrine, name="vitrine:image")
+    #  29/10/2026 : le WIKI PUBLIC de RELL Seas (vérifié seulement, FR · EN, à partager) — en lecture.
+    app.router.add_get('/wiki', _wiki, name="wiki:page")
+    app.router.add_get('/wiki/', _wiki, name="wiki:vers_wiki")
+    app.router.add_get('/wiki/donnees', _wiki, name="wiki:donnees")
     return app
 
 

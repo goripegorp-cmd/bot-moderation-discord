@@ -1,0 +1,69 @@
+/* wiki.css — le wiki public de RELL Seas (29/10/2026). Parchemin, laiton, bois : les couleurs du site. */
+body.page-wiki { margin: 0; background: var(--bois, #4a2e1a) url(textures/bois.webp); color: var(--encre, #2b1d12);
+  font-family: "Alegreya", Georgia, serif; font-size: 17px; -webkit-user-select: none; user-select: none;
+  -webkit-touch-callout: none; }
+.w-entete { position: sticky; top: 0; z-index: 5; background: rgba(43, 29, 18, .92); border-bottom: 2px solid var(--laiton, #a8823f);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, .35); }
+.w-planche { max-width: 1180px; margin: 0 auto; padding: 10px 16px; display: flex; align-items: center; gap: 12px; }
+.w-marque { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.w-titre { font-family: "Rye", "Pirata One", Georgia, serif; color: var(--laiton-pale, #dcc08a); font-size: clamp(20px, 3.4vw, 30px);
+  letter-spacing: .5px; }
+.w-sous { color: var(--corde, #b99a6b); font-size: 14px; }
+.w-langue { min-width: 48px; height: 40px; border: 1px solid var(--laiton, #a8823f); background: transparent; color: var(--laiton-pale, #dcc08a);
+  font-family: "Alegreya SC", Georgia, serif; font-size: 16px; border-radius: 4px; cursor: pointer; }
+.w-langue:hover, .w-langue:focus-visible { background: rgba(168, 130, 63, .2); outline: none; }
+.w-feuille { max-width: 1180px; margin: 18px auto; padding: 18px 16px 28px; background: var(--papier, #f4ead2) url(textures/parchemin.webp);
+  border-radius: 6px; box-shadow: 0 6px 30px rgba(0, 0, 0, .45); box-sizing: border-box; }
+@media (max-width: 1212px) { .w-feuille { margin: 12px 8px; } }
+.w-attente { text-align: center; color: var(--corde-fonce, #8a6f45); padding: 40px 0; }
+.w-intro { margin: 0 0 14px; line-height: 1.45; }
+.w-intro strong { font-family: "Alegreya SC", Georgia, serif; }
+.w-recherche { width: 100%; box-sizing: border-box; height: 44px; padding: 0 14px; border: 1px solid var(--trait-fort, rgba(43,29,18,.52));
+  border-radius: 4px; background: rgba(255, 255, 255, .55); font: inherit; color: inherit; -webkit-user-select: text; user-select: text; }
+.w-puces { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 16px; }
+.w-puce { border: 1px solid var(--corde-fonce, #8a6f45); background: transparent; color: inherit; font: inherit; font-size: 15px;
+  padding: 6px 12px; border-radius: 999px; cursor: pointer; min-height: 36px; }
+.w-puce[aria-pressed="true"] { background: var(--bois, #4a2e1a); color: var(--laiton-pale, #dcc08a); border-color: var(--bois, #4a2e1a); }
+.w-section { margin: 18px 0 8px; font-family: "Rye", "Pirata One", Georgia, serif; font-size: 22px; color: var(--sienne, #7a4b2a);
+  border-bottom: 1px solid var(--trait, rgba(43,29,18,.26)); padding-bottom: 4px; }
+.w-grille { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
+.w-carte { display: flex; gap: 10px; align-items: flex-start; text-align: left; border: 1px solid var(--trait, rgba(43,29,18,.26));
+  background: rgba(255, 255, 255, .42); border-radius: 6px; padding: 10px; cursor: pointer; font: inherit; color: inherit; width: 100%; }
+.w-carte:hover, .w-carte:focus-visible { border-color: var(--laiton-fonce, #7a5a22); background: rgba(255, 255, 255, .7); outline: none; }
+.w-image { position: relative; flex: none; width: 56px; height: 56px; border-radius: 6px; background: var(--papier-sombre, #e9dab8) center / contain no-repeat;
+  border: 1px solid var(--trait-doux, rgba(43,29,18,.14)); overflow: hidden; pointer-events: none; }
+.w-image::after { content: "GoRP"; position: absolute; right: 2px; bottom: 1px; font-size: 9px; letter-spacing: .5px; color: rgba(43, 29, 18, .42);
+  font-family: "Alegreya SC", Georgia, serif; }
+.w-image.vide { display: grid; place-items: center; font-size: 26px; color: var(--corde-fonce, #8a6f45); }
+.w-image.vide::after { content: ""; }
+.w-carte-texte { min-width: 0; }
+.w-nom { font-family: "Alegreya SC", Georgia, serif; font-size: 17px; line-height: 1.2; }
+.w-nom-en { color: var(--corde-fonce, #8a6f45); font-size: 14px; }
+.w-resume { font-size: 14.5px; line-height: 1.35; margin-top: 4px; color: rgba(43, 29, 18, .85); }
+.w-badges { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.w-badge { font-size: 12.5px; padding: 1px 7px; border-radius: 999px; background: rgba(63, 107, 58, .14); color: var(--vert-fonce, #2f5530);
+  border: 1px solid rgba(63, 107, 58, .35); }
+.w-badge.m3 { background: rgba(142, 42, 36, .1); color: var(--cire-fonce, #6a1c17); border-color: rgba(142, 42, 36, .3); }
+.w-fond { position: fixed; inset: 0; background: rgba(20, 12, 6, .62); z-index: 20; display: grid; place-items: center; padding: 16px; }
+.w-fiche { background: var(--papier, #f4ead2) url(textures/parchemin.webp); border-radius: 8px; max-width: 560px; width: 100%;
+  max-height: calc(100vh - 32px); overflow: auto; padding: 18px; box-shadow: 0 10px 40px rgba(0, 0, 0, .5); box-sizing: border-box; }
+.w-fiche-tete { display: flex; gap: 14px; align-items: center; }
+.w-fiche .w-image { width: 96px; height: 96px; }
+.w-fiche h2 { margin: 0; font-family: "Rye", "Pirata One", Georgia, serif; font-size: 24px; font-weight: normal; }
+.w-fiche p { line-height: 1.5; }
+.w-preuve { display: flex; align-items: center; justify-content: space-between; gap: 8px; border-top: 1px solid var(--trait, rgba(43,29,18,.26));
+  padding: 8px 0; font-size: 15px; }
+.w-lien { display: inline-flex; align-items: center; min-height: 40px; padding: 0 14px; border-radius: 4px; background: var(--bois, #4a2e1a);
+  color: var(--laiton-pale, #dcc08a); text-decoration: none; font-family: "Alegreya SC", Georgia, serif; white-space: nowrap; }
+.w-lien:hover, .w-lien:focus-visible { background: var(--bois-clair, #6b4527); outline: none; }
+.w-fermer { float: right; border: 0; background: transparent; font-size: 26px; cursor: pointer; color: inherit; width: 40px; height: 40px; }
+.w-note { font-size: 13.5px; color: var(--corde-fonce, #8a6f45); }
+.w-pied { max-width: 1180px; margin: 0 auto 30px; padding: 0 16px; color: var(--laiton-pale, #dcc08a); font-size: 14.5px; line-height: 1.5; }
+.w-pied a { color: var(--laiton-clair, #c9a35a); }
+.w-credits { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; border-top: 1px solid rgba(168,130,63,.5);
+  padding-top: 12px; }
+.w-rejoindre { display: inline-flex; align-items: center; min-height: 44px; padding: 0 18px; border-radius: 4px; background: var(--laiton, #a8823f);
+  color: var(--bois, #4a2e1a); text-decoration: none; font-family: "Alegreya SC", Georgia, serif; font-size: 17px; }
+.w-rejoindre:hover, .w-rejoindre:focus-visible { background: var(--laiton-clair, #c9a35a); outline: none; }
+.w-videos { margin: 6px 0 0; padding-left: 18px; }
+@media print { body.page-wiki { display: none !important; } }
