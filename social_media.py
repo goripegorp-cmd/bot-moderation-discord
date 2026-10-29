@@ -45,6 +45,27 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Optional
 
+#  29/10/2026 (le fondateur, devant « tiktok @rellbrothers : échec réseau/parse (TimeoutError) » dans Railway) : un
+#  flux qui ne répond pas UNE fois (TikTok lent, rsshub qui redémarre) n'est pas une alarme — tracé. L'avertissement
+#  part au 3e échec d'affilée, puis une fois tous les 12 (≈ toutes les quelques heures), et le compte repart à zéro dès
+#  que le flux répond.
+ECHECS_AVANT_ALERTE, ECHECS_RAPPEL = 3, 12
+_ECHECS_FLUX: dict = {}
+
+
+def _signaler_flux(cle, avertir: bool, message: str) -> None:
+    """Un échec de flux : tracé, ou averti au 3e d'affilée (puis tous les 12). FAIL-SAFE."""
+    n = _ECHECS_FLUX.get(cle, 0) + 1
+    if len(_ECHECS_FLUX) > 2000:
+        _ECHECS_FLUX.clear()
+    _ECHECS_FLUX[cle] = n
+    alerte = avertir and (n == ECHECS_AVANT_ALERTE or (n > ECHECS_AVANT_ALERTE and (n - ECHECS_AVANT_ALERTE) % ECHECS_RAPPEL == 0))
+    try:
+        import diag
+        (diag.warn if alerte else diag.trace)("social", "rss_fetch", message + (f" — {n} échecs d'affilée" if n > 1 else ""))
+    except Exception:
+        pass
+
 
 # =============================================================================
 # ENUMS & METADATA
@@ -693,33 +714,24 @@ class RSSHubAdapter(PlatformAdapter):
             self._session = aiohttp.ClientSession()
         url = url or self.feed_url(handle)
         self.dernier_statut = None
+        cle_flux = (getattr(self.platform, 'value', '?'), handle, url)
         try:
             async with self._session.get(url, headers=self._UA, timeout=15) as resp:
                 self.dernier_statut = resp.status
                 if resp.status != 200:
                     # owner 2026-07-18 : ne plus avaler en silence. rsshub.app public = 302/403,
                     # instance perso = 403/5xx si cookie mort → désormais VISIBLE dans [DIAG].
-                    try:
-                        import diag
-                        (diag.warn if avertir else diag.trace)(
-                            "social", "rss_fetch",
-                            f"{getattr(self.platform, 'value', '?')} @{handle} : "
-                            f"flux HTTP {resp.status} ({url})")
-                    except Exception:
-                        pass
+                    _signaler_flux(cle_flux, avertir,
+                                   f"{getattr(self.platform, 'value', '?')} @{handle} : flux HTTP {resp.status} ({url})")
                     return []
                 text = await resp.text()
             root = ET.fromstring(text)
         except Exception as _ex:
-            try:
-                import diag
-                (diag.warn if avertir else diag.trace)(
-                    "social", "rss_fetch",
-                    f"{getattr(self.platform, 'value', '?')} @{handle} : "
-                    f"échec réseau/parse ({type(_ex).__name__}) — {url}")
-            except Exception:
-                pass
+            _signaler_flux(cle_flux, avertir,
+                           f"{getattr(self.platform, 'value', '?')} @{handle} : "
+                           f"échec réseau/parse ({type(_ex).__name__}) — {url}")
             return []
+        _ECHECS_FLUX.pop(cle_flux, None)   # le flux répond de nouveau : le compte repart de zéro
         out: list[SocialPost] = []
         try:
             nodes = root.findall(".//item")
