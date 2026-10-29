@@ -15857,7 +15857,7 @@ async def _annoncer_wiki(g) -> None:
     vue.add_item(discord.ui.Container(
         discord.ui.TextDisplay(texte),
         discord.ui.MediaGallery(discord.MediaGalleryItem(f"{base}/wiki/banniere.png", description="Wiki RELL Seas")),
-        discord.ui.ActionRow(discord.ui.Button(label="📖 Ouvrir le wiki · Open the wiki", url=f"{base}/wiki")),
+        discord.ui.ActionRow(discord.ui.Button(label="Ouvrir le wiki · Open the wiki", url=f"{base}/wiki")),
         accent_color=discord.Color(0xA8823F)))
     msg = await salon.send(view=vue, allowed_mentions=discord.AllowedMentions.none())
     await db_set(g.id, 'wiki_annonce_v1', msg.id)
