@@ -1152,7 +1152,9 @@ def test_Q19_boutons_persistants_enregistres_et_routes_du_site(tmp_path):
                ("recrutement/chefs/proposition", "GET"): False, ("recrutement/chefs/proposer", "POST"): False,
                ("recrutement/chefs/dossier", "GET"): False, ("recrutement/chefs/decision", "POST"): False,
                ("recrutement/chefs/retirer", "POST"): False, ("recrutement/chefs/role", "POST"): False,
-               ("recrutement/chef", "GET"): False}
+               ("recrutement/chef", "GET"): False,
+               #  29/10/2026 : les questionnaires abandonnés (leurs réglages, qui a été relancé).
+               ("recrutement/relances", "GET"): False, ("recrutement/relances", "POST"): False}
     definitions = {(nom, r["methode"]): r for nom, d in Q.ROUTES_SITE.items()
                    for r in (d if isinstance(d, list) else [d])}
     assert set(definitions) == set(attendu), set(definitions) ^ set(attendu)
