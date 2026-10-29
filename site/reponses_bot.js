@@ -27,10 +27,11 @@ export function vueReponsesBot(f, maj) {
 
 function dessiner(d, f, maj) {
   const l = d.liste || [], st = d.stats || {}, rg = d.regles || {};
-  const filtre = f.rep || "tous";
-  const nb = { tous: l.length };
-  l.forEach((x) => { nb[x.genre] = (nb[x.genre] || 0) + 1; });
-  const choisis = l.filter((x) => (filtre === "tous" || x.genre === filtre)
+  const filtre = f.rep || "tous", fam = f.dom || "tous", doms = d.domaines || {};
+  const nb = { tous: l.length }, nd = { tous: l.length };
+  l.forEach((x) => { nb[x.genre] = (nb[x.genre] || 0) + 1; nd[x.domaine || ""] = (nd[x.domaine || ""] || 0) + 1; });
+  //  29/10/2026 : trois familles — le jeu, le site, le studio (le Discord, ses FAQ).
+  const choisis = l.filter((x) => (filtre === "tous" || x.genre === filtre) && (fam === "tous" || (x.domaine || "") === fam)
     && contient([x.texte, x.salon, x.libelle, (x.membre || {}).nom, (x.membre || {}).pseudo].join(" "), f.q));
   return [
     tuiles(
@@ -41,6 +42,9 @@ function dessiner(d, f, maj) {
     puces([["tous", "Tout", nb.tous], ["reponse", "Répondu", nb.reponse || 0, "#3f6b3a"], ["rappel", "Rappels", nb.rappel || 0, "#1f4e5a"],
       ["retenue", "Retenues", nb.retenue || 0, "#4a5560"], ["inconnu", "Pas su classer", nb.inconnu || 0, "#a8641c"]],
     filtre, (v) => { f.rep = v; resetPages("sal"); maj(); }, "Ce que le bot a fait"),
+    puces([["tous", "Toutes les familles", nd.tous], ...Object.entries(doms).map(([k, lib]) => [k, lib, nd[k] || 0]),
+      ["", "Sans famille", nd[""] || 0]],
+    fam, (v) => { f.dom = v; resetPages("sal"); maj(); }, "Famille de la question"),
     reglages(d.reglages || {}),
     h("p", { classe: "aide avance" }, "Le bot oriente une fois (demande d'aide du bon jeu, question fréquente, vrai salon), puis plus rien pendant "
       + (rg.cycle_h || 24) + " h ; un seul rappel s'il redemande au moins " + (rg.rappel_h || 1) + " h après sans avoir créé sa demande. "

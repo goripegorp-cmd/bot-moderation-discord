@@ -1240,11 +1240,36 @@ CLES_ELEMENT = ("type", "cle", "nom", "nom_en", "description", "categorie", "rar
                 "source", "ordre", "actif", "nouveau_movie3", "version")
 
 
+#  29/10/2026 : un élément « à vérifier » dont le nom EXACT est dit dans une vidéo officielle de RELL (chaîne RELLGames,
+#  relevé de `outils/videos_rellseas.py`) passe « confirmé », avec la vidéo et la minute dans sa description. Les mots
+#  courants (un « dagger », du « poison », « lightning »…) peuvent être dits dans un autre sens : ils restent à vérifier.
+VIDEOS = RACINE / "donnees_jeu" / "rell_videos.json"
+AMBIGUS = {"Dagger", "Mammoth", "Poison", "Lightning", "Fire", "Ice", "Sails", "Cannons", "Material", "Light", "Medium",
+           "Heavy", "Ranged", "Electro", "Jumper", "Galleon", "Dragon", "Shark", "Whale", "Cat", "Crab", "Fox", "Owl"}
+
+
+def preuve_video(e: dict) -> dict:
+    """L'élément, confirmé par une vidéo officielle si son nom exact y est dit (sinon inchangé)."""
+    if e.get("statut") != "a_verifier" or e["nom_en"] in AMBIGUS or not VIDEOS.exists():
+        return e
+    d = json.loads(VIDEOS.read_text(encoding="utf-8"))
+    vus = d["termes"].get(e["nom_en"]) or d["termes"].get(e["nom_en"] + "s")
+    if not vus:
+        return e
+    vid, t = vus[0]
+    titre = next((v["titre"] for v in d["videos"] if v["id"] == vid), "vidéo officielle")
+    e = dict(e, statut="confirme")
+    minute = f"{t // 3600}:{t % 3600 // 60:02d}:{t % 60:02d}" if t >= 3600 else f"{t // 60}:{t % 60:02d}"
+    e["description"] = (e["description"] + f" Dit dans « {titre} » ({minute}, "
+                        f"youtu.be/{vid}?t={t}).").strip()
+    return e
+
+
 def catalogue(produits: dict) -> dict:
     types = [dict(zip(CLES_TYPE, (c, n, ne, ch, m, i))) for i, (c, n, ne, ch, m) in enumerate(TYPES, 1)]
     rangs: dict[str, int] = {}
     elements = []
-    for e in ELEMENTS:
+    for e in map(preuve_video, ELEMENTS):
         rangs[e["type"]] = rangs.get(e["type"], 0) + 1
         a_icone = "site" in produits.get(f"{e['type']}/{e['cle']}", {})
         elements.append({

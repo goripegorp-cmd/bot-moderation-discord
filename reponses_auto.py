@@ -42,6 +42,7 @@ from discord.ui import Button
 import entraide
 import faq
 import questions
+import savoir
 import textes
 import zones
 from ui_v2 import LayoutView, Palette
@@ -155,6 +156,11 @@ def classer(texte: str, jeu_connu: bool = False) -> tuple:
             return "faq", s.cle, langue
     if aide:
         return "aide", "aide", langue
+    #  29/10/2026 : une vraie question sur un terme du jeu (« c'est quoi Yahu ? ») reçoit sa fiche (savoir.py).
+    if question and not conversation:
+        f = savoir.trouver(t)
+        if f is not None:
+            return "savoir", "jeu:" + f["cle"], langue
     if conversation or questions.BAVARDAGE.search(t) or questions.SOCIAL.search(p):
         return "bavardage", "", langue
     s = _sujet(bas, LARGES)
@@ -442,7 +448,7 @@ async def sur_message(msg, c=None, maintenant: float | None = None, attente: flo
     jeux = list(liens.get("jeux") or [])
     lieu = jeux_du_lieu(ch, jeux)
     genre, sujet, langue = classer(texte, jeu_connu=bool(lieu))
-    if genre not in ("aide", "faq") or (langue and langue not in LANGUES):
+    if genre not in ("aide", "faq", "savoir") or (langue and langue not in LANGUES):
         return ""
     if not questions.salon_public(ch) or _adresse_a_quelqu_un(msg, g, c):
         return ""
@@ -462,6 +468,10 @@ async def sur_message(msg, c=None, maintenant: float | None = None, attente: flo
     vises, carte = [], None
     if genre == "aide":
         vises = _jeux_aide(c, jeux_vises(texte, ch, jeux), regl)
+    elif genre == "savoir":
+        carte = savoir.reponse(sujet[4:], langue)
+        if carte is None:
+            return ""
     else:
         s = next(x for x in faq.SUJETS if x.cle == sujet)
         carte = faq.reponse(s, questions.nettoyer(texte).lower(), ch, liens, langue, gid=g.id)
@@ -541,6 +551,9 @@ def _libelle(sujet: str, jeux: str) -> str:
     if sujet == "aide":
         noms = {j.cle: j.nom for j in zones.JEUX}
         return "Aide · " + (" · ".join(noms.get(k, k) for k in jeux.split(",") if k) or "aucun jeu")
+    if sujet.startswith("jeu:"):
+        f = savoir.par_cle(sujet[4:])
+        return "Jeu · " + (f["nom"] if f else sujet[4:])
     s = next((x for x in faq.SUJETS if x.cle == sujet), None)
     return s.titre_fr if s is not None else sujet
 
@@ -593,6 +606,7 @@ async def surveillance(g, c: dict, maintenant: float | None = None) -> dict:
         liste.append({"id": f"r{rid}", "membre": _personne(g, uid), "salon": _nom_salon(g, sid),
                       "message": f"https://discord.com/channels/{g.id}/{sid}/{mid}", "texte": texte, "quand": quand,
                       "genre": genre, "sujet": sujet, "libelle": _libelle(sujet, jeux), "langue": langue,
+                      "domaine": savoir.domaine(sujet, texte),
                       "raison": RAISONS.get(raison, ""),
                       "reponse": f"https://discord.com/channels/{g.id}/{sid}/{rep}" if rep else ""})
     if questions._get_db is not None:
@@ -602,12 +616,13 @@ async def surveillance(g, c: dict, maintenant: float | None = None) -> dict:
             liste.append({"id": f"q{q['id']}", "membre": _personne(g, q["auteur_id"]), "salon": _nom_salon(g, q["salon_id"]),
                           "message": q["message"], "texte": q["texte"], "quand": q["quand"], "genre": "inconnu",
                           "sujet": "", "libelle": "", "langue": langue_de(q["texte"]),
+                          "domaine": savoir.domaine("", q["texte"]),
                           "raison": "répondue par un membre" if q["statut"] in ("repondue", "resolue") and not q["par_staff"]
                           else "répondue par le staff" if q["par_staff"] else "", "reponse": q["lien"] or ""})
     liste.sort(key=lambda x: -int(x["quand"] or 0))
     semaine = [x for x in liste if t - int(x["quand"] or 0) <= 7 * 86400]
     stats = {f"{k}_7": sum(1 for x in semaine if x["genre"] == k) for k in ("reponse", "rappel", "retenue", "inconnu")}
-    return {"liste": liste[:LISTE_MAX], "stats": stats, "reglages": _reglages_site(g, c),
+    return {"liste": liste[:LISTE_MAX], "stats": stats, "reglages": _reglages_site(g, c), "domaines": savoir.DOMAINES,
             "regles": {"cycle_h": CYCLE_S // 3600, "rappel_h": RAPPEL_APRES_S // 3600, "membre_min": MEMBRE_S // 60,
                        "salon_max": SALON_MAX, "salon_min": SALON_FENETRE_S // 60, "effacer_min": EFFACER_S // 60}}
 
