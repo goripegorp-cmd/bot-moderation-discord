@@ -250,6 +250,8 @@ const ATTENDUS_404 = /\/tableau\/espace\/s\/(icones\/rell|logos)\//;
 const SCENES = [
   // L'accueil « Ce qui t'attend », la recherche universelle, le mode simple et « Tout afficher » (rangement, 26/10).
   { nom: "accueil", ancre: "#accueil/attente", interdits: ["sans réponse"] },
+  //  29/10/2026 : la tuile « Relances · 60 jours » (relancés, ont repris, fermés), lue à part puis posée.
+  { nom: "accueil-relances", ancre: "#accueil/attente", interdits: ["undefined", "NaN"], geste: "(async () => { if (document.documentElement.classList.contains('mode-simple')) document.querySelector('.bascule-mode').click(); for (let i = 0; i < 40; i++) { const t = document.querySelector('[data-tuile=\"relances\"]'); if (t && !t.textContent.includes('…')) { t.scrollIntoView({ block: 'center' }); return 1; } await new Promise(r => setTimeout(r, 250)); } throw new Error('tuile des relances absente ou jamais remplie'); })()", apres: MODE_SIMPLE },
   //  27/10/2026 : l'accueil a absorbé l'Aperçu — ses tuiles et ses « Tendances » (dépliées), en « Tout afficher ».
   { nom: "accueil-tout-afficher", ancre: "#accueil/attente", geste: TOUT_AFFICHER, geste2: OUVRIR_GROUPE_TITRE("Tendances"), apres: MODE_SIMPLE },
   { nom: "recherche-membre", ancre: "#accueil/attente", geste: RECHERCHER("mi") },

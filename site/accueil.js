@@ -10,6 +10,7 @@
 import { h, icone, depuis, dans, maintenant, remplacer, quantite, ajouter, date, cleJour, nombre } from "./dom.js";
 import { etat, P, peutAgir, aller, emettre, filtres, CATEGORIES } from "./noyau.js";
 import { charger, vue as vueJeu } from "./donnees.js";
+import { lire } from "./api.js";
 import * as HL from "./hors_ligne.js";
 import { avatar, nomDe, vide, section, tuile, tuiles, groupe, barres, barresH, ENCRES } from "./ui.js";
 import { ouvrirFiche, etapeCandidature, chargerSuivi, nomSalon, propre } from "./fiche.js";
@@ -177,6 +178,30 @@ function voirAlertes() {
   aller("port", "repertoire");
 }
 /** Les tuiles d'un coup d'œil (« Tout afficher ») : chacune ouvre sa page. */
+//  29/10/2026 : les questionnaires abandonnés d'un coup d'œil — relancés, ont repris, fermés (60 jours). Lu à part
+//  (recrutement/relances) toutes les 5 minutes au plus ; la tuile se pose dès que la réponse arrive.
+let relancesBord = null, relancesLu = 0;
+function tuileRelances() {
+  const R = relancesBord;
+  const t = tuile(R ? { cle: "a8", lib: "Relances · 60 jours", val: R.relances, icone: "minuteur", teinte: "#a8641c",
+    sous: nombre(R.repris) + (R.repris > 1 ? " ont repris" : " a repris") + " · " + quantite(R.fermes, "fermé(s)") + (R.attente ? " · " + nombre(R.attente) + " en attente" : ""),
+    titre: "Les candidats relancés pour un questionnaire sans nouvelles", clic: () => aller("capitainerie", "recrutement", "reglages") }
+    : { cle: "a8", lib: "Relances · 60 jours", texte: "…", icone: "minuteur", teinte: "#a8641c" });
+  t.dataset.tuile = "relances";
+  return t;
+}
+function lireRelances() {
+  if (Date.now() - relancesLu < 300000) return;
+  relancesLu = Date.now();
+  lire("recrutement/relances").then((r) => {
+    if (!r.ok || !r.donnees) return;
+    const l = r.donnees.liste || [];
+    relancesBord = { relances: l.length, repris: l.filter((x) => x.cle === "repris").length,
+      fermes: l.filter((x) => x.cle === "abandon").length, attente: l.filter((x) => x.cle === "attente").length };
+    const vieille = document.querySelector('[data-tuile="relances"]');
+    if (vieille) vieille.replaceWith(tuileRelances());
+  });
+}
 function chiffresBord() {
   const d = etat.d;
   if (!d) return null;
@@ -195,6 +220,7 @@ function chiffresBord() {
     tuile({ cle: "a4", lib: "Sanctions · 30 jours", val: d.sanctions.trente_jours, icone: "sanctions", sous: nombre(d.sanctions.total) + " au casier", teinte: "#5e3a4e", clic: () => aller("port", "sanctions") }),
     tuile({ cle: "a5", lib: "Candidatures", val: d.en_cours.length, icone: "candidatures", sous: aDecider + " à décider · " + aCorriger + " à corriger", teinte: "#7a4b2a", clic: () => aller("capitainerie", "recrutement") }),
     tuile({ cle: "a6", lib: "Membres du clan", val: clan.length, icone: "equipage", sous: quantite(inactifs, "inactif(s)") + " depuis un mois", teinte: "#3f6b3a", clic: () => aller("equipage", "membres") }),
+    peutAgir() ? (lireRelances(), tuileRelances()) : null,
     attente ? tuile({ cle: "a7", lib: "Modifications à envoyer", val: attente, icone: "synchro", sous: "faites hors ligne, elles partent au retour", teinte: "#7a5a22", clic: () => emettre("file:ouvrir") }) : null);
 }
 /** « Tendances », replié en bas (« Tout afficher ») : l'activité du journal sur 14 jours, le travail de l'équipe sur 30. */
