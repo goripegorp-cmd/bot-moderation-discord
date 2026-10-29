@@ -105,8 +105,8 @@ TEXTES = {
                "en": "Counted since the launch: a real message (a sentence, not a GIF or emojis alone), one every 3 s at "
                      "most, a burst of short messages as one, one “hello” a day, no copy-paste, 60 an hour at most; a "
                      "real reply to someone counts double; voice outside AFK, not deafened."},
-    "ecartes": {"fr": "🚫 {n} message(s) non compté(s) : GIF ou émojis seuls, bonjours répétés, copiés-collés.",
-                "en": "🚫 {n} message(s) not counted: GIFs or emojis alone, repeated hellos, copy-paste."},
+    "ecartes": {"fr": "🚫 {n} message(s) non compté(s) : GIF ou émojis seuls, bonjours répétés, copiés-collés, ping-pong à deux.",
+                "en": "🚫 {n} message(s) not counted: GIFs or emojis alone, repeated hellos, copy-paste, two-person ping-pong."},
     "manque": {"fr": "⛔ **Pas encore** : il te faut d'abord ceci. Reclique « Participer » quand c'est bon.",
                "en": "⛔ **Not yet**: you need this first. Click “Enter” again once it's done."},
     "pas_inscrit_cond": {"fr": "🎟️ Pas encore inscrit : remplis les conditions, puis clique « Participer ».",
@@ -394,7 +394,9 @@ def sur_message(message) -> bool:
     #  comptent pas (qualite.py) ; une vraie réponse à quelqu'un compte double.
     cible = getattr(getattr(getattr(message, "reference", None), "resolved", None), "author", None)
     reponse = cible is not None and getattr(cible, "id", 0) != auteur.id and not getattr(cible, "bot", False)
-    raison, poids = _juge.juger(cle, texte, t, reponse=reponse)
+    raison, poids = _juge.juger(cle, texte, t, reponse=reponse,
+                                salon=getattr(getattr(message, "channel", None), "id", None),
+                                cible=getattr(cible, "id", None))
     if raison:
         for cid in cids:
             _ecartes[(cid, auteur.id)] += 1
@@ -1284,6 +1286,31 @@ async def montrer_participants(i, cid: int, page: int = 0, recherche: str = "", 
     await _repondre(i, await vue_participants(i.guild, c, page, recherche), nouveau=nouveau)
 
 
+async def reveilles(g, c: dict, uids) -> set:
+    """29/10/2026 : ceux qui se « réveillent » pour le cadeau — sur le serveur depuis plus de 30 jours avant le lancement,
+    mais 1 jour actif au plus sur ces 30 jours (activite.py). Un repère pour le staff dans la liste, JAMAIS une
+    exclusion. Rien si le suivi d'activité ne couvrait pas ces 30 jours (on ne reproche pas ce qu'on n'a pas vu)."""
+    try:
+        import activite
+        from datetime import timedelta
+        lance = datetime.fromtimestamp(int(c["debut"]))
+        suivi = await activite.anciennete_du_suivi(g.id)
+        if suivi is None or suivi < (_mur() - int(c["debut"])) / 86400 + 30:
+            return set()
+        depuis = (lance - timedelta(days=30)).strftime("%Y-%m-%d")
+        jusqu = (lance - timedelta(days=1)).strftime("%Y-%m-%d")
+        out = set()
+        for u in uids:
+            arrive = getattr(g.get_member(u), "joined_at", None)
+            if arrive is None or arrive.timestamp() > int(c["debut"]) - 30 * 86400:
+                continue
+            if len(await activite.jours_vus(g.id, u, depuis, jusqu)) <= 1:
+                out.add(u)
+        return out
+    except Exception:
+        return set()
+
+
 async def vue_participants(g, c: dict, page: int = 0, recherche: str = "") -> LayoutView:
     """25 par page dans une liste déroulante (le rang, le nom, où il en est), ◀ ▶ pour les pages, 🔎 pour un
     nom. Deux lectures de la base par page, quel que soit le nombre de participants."""
@@ -1329,6 +1356,7 @@ async def vue_participants(g, c: dict, page: int = 0, recherche: str = "") -> La
     items = [discord.ui.TextDisplay("\n".join(lignes))]
     if tranche:
         options = []
+        dormeurs = await reveilles(g, c, [u for u, _q in tranche])
         for u, _quand in tranche:
             m_, s_ = tous.get(u, (0, 0.0))
             membre = g.get_member(u)
@@ -1337,7 +1365,8 @@ async def vue_participants(g, c: dict, page: int = 0, recherche: str = "") -> La
             desc = " · ".join(x for x in (progres(c, m_, s_, invs.get(u, 0), membre),
                                           f"🍀 ×{_nombre(mult)}" if mult > 1 else "",
                                           #  29/10/2026 : plus de non comptés que de comptés — à regarder
-                                          f"🚫 {ec} non comptés" if ec and ec >= max(1, m_) else "") if x)
+                                          f"🚫 {ec} non comptés" if ec and ec >= max(1, m_) else "",
+                                          "😴 réveillé pour le cadeau" if u in dormeurs else "") if x)
             options.append(discord.SelectOption(
                 label=f"{rangs[u]}. {_nom(g, u)}"[:100], value=str(u), description=(desc or "Inscrit")[:100],
                 emoji=("✅" if remplit(c, m_, s_, invs.get(u, 0), membre) else "⏳") if conditions else "🎟️"))

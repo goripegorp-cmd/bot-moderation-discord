@@ -38,5 +38,30 @@ def test_Q3_le_plafond_de_l_heure():
 def test_Q4_branche_dans_les_cadeaux():
     from pathlib import Path
     src = (Path(__file__).resolve().parent.parent / "cadeaux.py").read_text(encoding="utf-8")
-    assert "raison, poids = _juge.juger(cle, texte, t, reponse=reponse)" in src
+    assert "raison, poids = _juge.juger(cle, texte, t, reponse=reponse," in src and "réveillé pour le cadeau" in src
     assert 'tr("ecartes", langue, n=ecartes)' in src and "non comptés" in src
+
+
+def test_QUALITE_ping_pong_a_deux_courts_ne_comptent_plus_vraies_phrases_si():
+    j = Q.Juge()
+    t = 0.0
+    for i in range(14):
+        r, _p = j.juger((1, 1 + i % 2), f"mdr {i}", t, salon=9, cible=2 - i % 2, reponse=True)
+        t += 4
+    assert r == "duo"
+    r, p = j.juger((1, 1), "je pense qu'on devrait refaire le donjon demain soir avec toute la team", t, salon=9,
+                   cible=2, reponse=True)
+    assert r == "" and p == 1      # compte, mais pas double dans un duo fermé
+
+
+def test_QUALITE_discussion_a_plusieurs_courts_comptent():
+    j = Q.Juge()
+    for i in range(15):
+        assert j.juger((1, 1 + i % 3), f"ouais {i}", i * 4.0, salon=9)[0] == ""
+
+
+def test_QUALITE_bonus_double_plafonne_vers_la_meme_personne():
+    j = Q.Juge()
+    poids = [j.juger((1, 1), f"réponse numéro {i} avec une vraie phrase", i * 60.0, reponse=True, cible=2)[1]
+             for i in range(12)]
+    assert poids[:10] == [2] * 10 and poids[10:] == [1, 1]

@@ -55,4 +55,9 @@ def permission(perms_du_bot) -> discord.PermissionOverwrite:
     ow = discord.PermissionOverwrite(view_channel=True, connect=True, speak=True)
     if getattr(perms_du_bot, "move_members", False):
         ow.move_members = True
+    #  29/10/2026 : « les staffs peuvent bouger ou mute les gens s'ils font des bêtises dans les VOC créés ».
+    if getattr(perms_du_bot, "mute_members", False):
+        ow.mute_members = True
+    if getattr(perms_du_bot, "manage_messages", False):
+        ow.manage_messages = True
     return ow

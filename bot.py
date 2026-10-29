@@ -115,6 +115,7 @@ import questionnaire  # le recrutement du clan en deux étapes : banque de quest
 import registre  # le journal du serveur, lu sur le site (19/10/2026)
 import questions  # les questions posées dans les salons publics (onglet du site)
 import qualite  # un message « construit », ou du remplissage (cadeaux, activité — 29/10/2026)
+import droits_staff  # le staff modère partout où les membres écrivent ; lecture seule = le fondateur (29/10/2026)
 import reponses_auto  # le bot répond lui-même aux demandes d'aide et aux questions fréquentes (27/10/2026)
 import publications  # une publication des réseaux = un seul message (réservation atomique)
 import casier  # amnistie de 3 mois, effacer une personne ou une zone du casier, défaire pendant 30 jours
@@ -15817,6 +15818,28 @@ async def _recrutement_rellseas(g) -> None:
         await recrutements.publier_recap(g)
 
 
+def _equipes_droits(g, c) -> tuple:
+    """(staff, direction) pour droits_staff : les rôles du staff et au-dessus, et tout rôle dont le nom dit « staff »
+    (Staff GoRP) ; la Direction (acces_direction). Les rôles « Fondateur » ne sont jamais touchés."""
+    fondateurs = {r.id for r in g.roles if acces_direction._nom(r) in acces_direction.NOMS_FONDATEUR}
+    direction = [r for r in acces_direction.roles(g) if r.id not in fondateurs]
+    pris = fondateurs | {r.id for r in direction}
+    staff = [r for r in _roles_staff_et_plus(g, c) if r.id not in pris]
+    staff += [r for r in g.roles if "staff" in config_salons.normaliser(r.name) and not r.managed
+              and r.id not in pris and r not in staff]
+    return staff, direction
+
+
+async def _droits_staff(g) -> None:
+    """29/10/2026, à chaque démarrage : qui écrit, qui modère, qui déplace, salon par salon (droits_staff.py)."""
+    me = g.me
+    if not (me and me.guild_permissions.manage_roles):
+        return
+    b = await droits_staff.appliquer(g, *_equipes_droits(g, await cfg(g.id)))
+    health_server_module.ETAT_PUBLIC["droits_staff"] = dict(b)
+    print(f"[droits_staff] {b}")
+
+
 async def _boosts_au_demarrage(g) -> None:
     await boosts.installer(g, _roles_staff_et_plus(g, await cfg(g.id)))
 
@@ -15829,7 +15852,7 @@ _TRAVAUX = (
     "suggestions.installer", "_actus_en_annonces", "_flux_studio_rell", "_rattacher_flux_orphelins",
     "_configurer_salons", "_passer_logs_sur_site", "_recrutement_rellseas", "_salon_tableau",
     "_logs_direction_seule", "_configurer_salons_v2", "_automod_invitations", "_salon_aide",
-    "_boosts_au_demarrage", "_retirer_fonctions_mortes", "_vocaux_par_contexte",
+    "_boosts_au_demarrage", "_retirer_fonctions_mortes", "_vocaux_par_contexte", "_droits_staff",
 )
 
 
@@ -25432,6 +25455,12 @@ async def on_guild_channel_create(channel):
                                               reason="Isolement sécurité (nouveau salon)")
         except discord.HTTPException as _qex:
             _logerr("quarantaine.nouveau_salon", _qex, guild_id=channel.guild.id)
+        #  29/10/2026 : un nouveau studio, forum ou vocal — le staff peut y modérer tout de suite (droits_staff.py).
+        try:
+            if hasattr(channel, 'set_permissions') and channel.guild.me.guild_permissions.manage_roles:
+                await droits_staff.nouveau_salon(channel, *_equipes_droits(channel.guild, await cfg(channel.guild.id)))
+        except Exception as _dex:
+            _logerr("droits_staff.nouveau_salon", _dex, guild_id=channel.guild.id)
         await _log_audited(
             channel.guild, ulogger2026.EventType.CHAN_CREATE,
             discord.AuditLogAction.channel_create, channel.id,
