@@ -287,3 +287,106 @@ a:has(> .w-video-une-image) { display: grid; grid-template-columns: minmax(0, 1.
 .w-discord-n { font-family: "Alegreya SC", Georgia, serif; color: #dcc08a; }
 .w-sous-titre { display: flex; align-items: center; gap: 8px; margin: 18px 0 8px; font-family: "Alegreya SC", Georgia, serif; font-size: 19px; color: var(--sienne, #7a4b2a); }
 .w-sous-titre .w-ico { width: 22px; height: 22px; color: var(--laiton-fonce, #7a5a22); }
+
+/* ── Encyclopédie (29/10/2026) ── */
+.e-fil { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 14px; margin: 0 0 12px; color: var(--corde-fonce, #8a6f45); }
+.e-fil a { color: inherit; text-decoration: none; display: inline-flex; align-items: center; gap: 4px; }
+.e-fil a:hover { color: var(--encre, #2b1d12); text-decoration: underline; }
+.e-fil .w-ico { width: 16px; height: 16px; }
+.e-cats { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; margin-top: 12px; }
+.e-cat { position: relative; display: flex; flex-direction: column; justify-content: flex-end; min-height: 190px; padding: 14px; border-radius: 8px; overflow: hidden;
+  text-decoration: none; color: #fbf4e2; border: 2px solid #c9a35a; box-shadow: 0 6px 16px rgba(43, 29, 18, .25); isolation: isolate;
+  transition: transform .2s var(--ease, ease), box-shadow .2s var(--ease, ease); }
+.e-cat-fond { position: absolute; inset: 0; z-index: -2; background: #2b3b45 center / cover no-repeat; transition: transform .6s var(--ease, ease); }
+.e-cat::before { content: ""; position: absolute; inset: 0; z-index: -1; background: linear-gradient(180deg, rgba(15, 22, 28, .15) 0%, rgba(15, 22, 28, .55) 45%, rgba(15, 22, 28, .92) 100%); }
+.e-cat:hover, .e-cat:focus-visible { transform: translateY(-3px); box-shadow: 0 12px 26px rgba(43, 29, 18, .35); outline: none; }
+.e-cat:hover .e-cat-fond { transform: scale(1.06); }
+.e-cat-tete { display: flex; align-items: center; gap: 8px; }
+.e-cat-tete strong { font-family: "Rye", "Alegreya SC", Georgia, serif; font-size: 22px; font-weight: normal; text-shadow: 0 2px 6px rgba(0, 0, 0, .6); }
+.e-cat-tete .w-ico { width: 26px; height: 26px; color: #e8c983; flex: none; }
+.e-nb { margin-left: auto; font-size: 13px; padding: 1px 8px; border-radius: 999px; background: rgba(232, 201, 131, .2); border: 1px solid rgba(232, 201, 131, .5); color: #f3dfae; white-space: nowrap; }
+.e-cat-sous { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 8px; font-size: 13.5px; color: rgba(251, 244, 226, .88); }
+.e-cat-sous span::before { content: "· "; color: #e8c983; }
+.e-ancres { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 10px; }
+.e-ancres a { font-size: 14px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--trait, rgba(43,29,18,.26)); color: inherit; text-decoration: none; background: rgba(255, 255, 255, .45); }
+.e-ancres a:hover { background: rgba(255, 255, 255, .8); }
+.e-sous { scroll-margin-top: 80px; margin-top: 14px; }
+.e-sous-titre { display: flex; align-items: center; gap: 8px; font-family: "Alegreya SC", Georgia, serif; font-size: 20px; margin: 0 0 8px; border-bottom: 1px solid var(--trait, rgba(43,29,18,.26)); padding-bottom: 4px; }
+.e-sous-titre .e-nb { color: var(--corde-fonce, #8a6f45); background: rgba(201, 163, 90, .15); border-color: rgba(201, 163, 90, .45); margin-left: 0; }
+.e-grille { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; }
+.e-carte { display: flex; gap: 10px; align-items: center; padding: 8px; border-radius: 6px; text-decoration: none; color: inherit; border: 1px solid var(--trait, rgba(43,29,18,.26));
+  background: rgba(255, 255, 255, .45); transition: transform .15s ease, box-shadow .15s ease, background .15s ease; min-width: 0; }
+.e-carte:hover, .e-carte:focus-visible { transform: translateY(-2px); background: rgba(255, 255, 255, .8); box-shadow: 0 6px 14px rgba(43, 29, 18, .18); outline: none; }
+.e-carte-img { flex: none; width: 64px; height: 64px; border-radius: 6px; display: grid; place-items: center; overflow: hidden; background: var(--papier-sombre, #e9dab8); border: 1px solid var(--trait-doux, rgba(43,29,18,.14)); }
+.e-carte-img img { width: 100%; height: 100%; object-fit: contain; }
+.e-carte-img.vide .w-ico { width: 28px; height: 28px; color: var(--corde-fonce, #8a6f45); }
+.e-carte-texte { display: flex; flex-direction: column; min-width: 0; }
+.e-carte-texte strong { font-family: "Alegreya SC", Georgia, serif; font-weight: normal; font-size: 16.5px; line-height: 1.2; }
+.e-carte-info { font-size: 13px; color: rgba(43, 29, 18, .75); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.e-entete { display: flex; gap: 16px; align-items: center; margin-bottom: 12px; }
+.e-entete-img { flex: none; width: 150px; max-width: 38vw; aspect-ratio: 1; border-radius: 10px; overflow: hidden; background: var(--papier-sombre, #e9dab8) url(textures/papier_affiche.webp) center / cover; border: 2px solid #c9a35a; box-shadow: 0 6px 16px rgba(43, 29, 18, .22); }
+.e-entete-img .e-agrandir, .e-entete-img img { width: 100%; height: 100%; }
+.e-entete-img img { object-fit: contain; }
+.e-entete-texte h2 { font-family: "Rye", "Alegreya SC", Georgia, serif; font-weight: normal; font-size: 32px; margin: 0 0 4px; line-height: 1.1; }
+.e-colonnes { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 18px; align-items: start; }
+.e-corps { min-width: 0; }
+.e-titre { font-family: "Alegreya SC", Georgia, serif; font-weight: normal; margin: 18px 0 6px; color: var(--sienne, #7a3b1d); }
+h3.e-titre { font-size: 22px; border-bottom: 1px solid var(--trait, rgba(43,29,18,.26)); padding-bottom: 3px; }
+h4.e-titre { font-size: 18px; }
+.e-corps > .e-titre:first-child { margin-top: 0; }
+.e-texte { font-size: 16.5px; line-height: 1.6; margin: 0 0 10px; }
+.e-liste { margin: 0 0 12px; padding-left: 20px; line-height: 1.55; font-size: 16px; }
+.e-liste li { margin: 3px 0; }
+.e-liste li:has(img) { list-style: none; margin-left: -20px; display: flex; align-items: center; gap: 8px; }
+.e-img.mini { width: 34px; height: 34px; object-fit: contain; vertical-align: middle; }
+.e-vignettes, .e-galerie { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin: 6px 0 14px; }
+.e-galerie.seule { grid-template-columns: minmax(0, 560px); }
+.e-vignette { margin: 0; display: flex; flex-direction: column; gap: 4px; }
+.e-vignette figcaption { font-size: 14px; text-align: center; line-height: 1.3; }
+.e-agrandir { display: block; padding: 0; border: 1px solid var(--trait, rgba(43,29,18,.26)); border-radius: 6px; overflow: hidden; cursor: zoom-in; background: #1e2a33; width: 100%; aspect-ratio: 4 / 3; }
+.e-galerie.seule .e-agrandir { aspect-ratio: auto; }
+.e-agrandir img { width: 100%; height: 100%; object-fit: contain; display: block; transition: transform .3s var(--ease, ease); }
+.e-agrandir:hover img { transform: scale(1.04); }
+.e-vignettes .e-agrandir { background: var(--papier-sombre, #e9dab8); aspect-ratio: 1; }
+.e-table { overflow-x: auto; margin: 6px 0 14px; border: 1px solid var(--trait, rgba(43,29,18,.26)); border-radius: 6px; background: rgba(255, 255, 255, .45); }
+.e-table table { border-collapse: collapse; width: 100%; font-size: 15px; }
+.e-table caption { text-align: left; padding: 8px 10px 2px; font-family: "Alegreya SC", Georgia, serif; color: var(--sienne, #7a3b1d); }
+.e-table th, .e-table td { padding: 7px 10px; border-bottom: 1px solid var(--trait-doux, rgba(43,29,18,.14)); text-align: left; vertical-align: middle; }
+.e-table th { background: rgba(201, 163, 90, .16); font-weight: 600; }
+.e-table td span, .e-table th span { vertical-align: middle; }
+.e-table td .e-img.mini + span, .e-table th .e-img.mini + span { margin-left: 6px; }
+.e-fiche { position: sticky; top: 76px; border: 2px solid #c9a35a; border-radius: 8px; background: #fbf4e2 url(textures/papier_affiche.webp) center / cover; box-shadow: 0 6px 16px rgba(43, 29, 18, .2); padding: 12px 14px; }
+.e-fiche-titre { display: flex; align-items: center; gap: 6px; font-family: "Rye", "Alegreya SC", Georgia, serif; font-size: 19px; margin-bottom: 8px; color: var(--sienne, #7a3b1d); }
+.e-fiche-titre .w-ico { width: 20px; height: 20px; }
+.e-fiche dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 6px 10px; font-size: 15px; }
+.e-fiche dt { font-weight: 600; color: rgba(43, 29, 18, .8); }
+.e-fiche dd { margin: 0; overflow-wrap: anywhere; }
+.e-fiche dd.inconnu { color: rgba(43, 29, 18, .5); font-style: italic; }
+.e-voisins { display: flex; justify-content: space-between; gap: 10px; margin-top: 18px; padding-top: 10px; border-top: 1px solid var(--trait, rgba(43,29,18,.26)); }
+.e-voisins a { color: var(--sienne, #7a3b1d); text-decoration: none; font-family: "Alegreya SC", Georgia, serif; font-size: 16px; }
+.e-voisins a:hover { text-decoration: underline; }
+.e-source { margin-top: 10px; }
+.e-vue { display: grid; place-items: center; padding: 16px; background: rgba(10, 14, 18, .9); }
+.e-vue figure { margin: 0; max-width: min(1100px, 100%); display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.e-vue-img { max-width: 100%; max-height: calc(100vh - 120px); object-fit: contain; border-radius: 6px; box-shadow: 0 10px 40px rgba(0, 0, 0, .6); }
+.e-vue-leg { color: #fbf4e2; font-size: 16px; text-align: center; margin: 0; }
+.e-vue-nav { position: fixed; top: 50%; transform: translateY(-50%); width: 46px; height: 64px; border: 1px solid rgba(232, 201, 131, .5); border-radius: 6px;
+  background: rgba(20, 28, 34, .7); color: #f3dfae; font-size: 32px; cursor: pointer; }
+.e-vue-nav.g { left: 10px; } .e-vue-nav.d { right: 10px; }
+@media (max-width: 860px) {
+  .e-colonnes { grid-template-columns: 1fr; }
+  .e-fiche { position: static; order: -1; }
+  .e-colonnes > .e-fiche { grid-row: 1; }
+}
+@media (max-width: 560px) {
+  .e-cats { grid-template-columns: 1fr; }
+  .e-cat { min-height: 150px; }
+  .e-grille { grid-template-columns: 1fr; }
+  .e-entete { flex-direction: column; align-items: flex-start; }
+  .e-entete-img { width: 120px; }
+  .e-entete-texte h2 { font-size: 26px; }
+  .e-vignettes, .e-galerie { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .e-galerie.seule { grid-template-columns: 1fr; }
+  .e-vue-nav { width: 38px; height: 52px; font-size: 26px; }
+}
+@media (prefers-reduced-motion: reduce) { .e-cat, .e-cat-fond, .e-carte, .e-agrandir img { transition: none; } }

@@ -62,4 +62,4 @@ export function icone(nom, classe = "") {
 export const PAR_TYPE = { metier: "marteau", race: "masque", faction: "drapeau", mer: "vague", trait: "etoile", classe: "epees",
   fruit: "fruit", haki: "spirale", carte_haki: "carte_jeu", poster: "affiche", style: "poing", arme: "dague", equipement: "boussole",
   navire: "navire", piece_navire: "canon", monture: "patte", monnaie: "piece", boss: "crane", lieu: "ile", systeme: "engrenage" };
-export const PAR_ONGLET = { accueil: "ancre", jeu: "gouvernail", monde: "carte", lore: "livre", fiches: "parchemin", actus: "pellicule", liens: "maillons" };
+export const PAR_ONGLET = { accueil: "ancre", encyclo: "boussole", jeu: "gouvernail", monde: "carte", lore: "livre", fiches: "parchemin", actus: "pellicule", liens: "maillons" };

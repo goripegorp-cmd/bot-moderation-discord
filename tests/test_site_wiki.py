@@ -94,7 +94,7 @@ def test_WIKI_rubriques_sourcees_et_chiffres_officiels():
     assert d["chiffres"]["favoris"] and d["chiffres"]["discord"]
     assert all(t["nom"] != "RELL Seas" for b in d["movie3"] for t in b["termes"])
     js = (RACINE / "site" / "wiki.js").read_text(encoding="utf-8")
-    assert '["accueil", "jeu", "monde", "lore", "fiches", "actus", "liens"]' in js
+    assert '["accueil", "encyclo", "jeu", "monde", "lore", "fiches", "actus", "liens"]' in js
 
 
 def test_WIKI_le_bot_ne_poste_aucune_annonce_et_liens_croises():
@@ -107,9 +107,39 @@ def test_WIKI_le_bot_ne_poste_aucune_annonce_et_liens_croises():
 
 
 def test_WIKI_aucune_emoji_des_icones_dessinees():
-    for f in ("wiki.js", "wiki_icones.js", "wiki.css", "wiki.html"):
+    for f in ("wiki.js", "wiki_icones.js", "wiki_encyclo.js", "wiki.css", "wiki.html", "wiki/encyclo.json"):
         txt = (RACINE / "site" / f).read_text(encoding="utf-8")
         assert not re.search(r"[\U0001F300-\U0001FAFF\u2600-\u27BF\u2190-\u21FF]", txt), f
     js = (RACINE / "site" / "wiki_icones.js").read_text(encoding="utf-8")
     for nom in ("ancre", "gouvernail", "crane", "navire", "discord", "x", "tiktok", "youtube"):
         assert f"  {nom}: [" in js, nom
+
+
+def test_WIKI_encyclopedie_complete_propre_et_servie():
+    #  « que tout soit détaillé… des images vraiment propres… pas de One Piece… Inconnu sinon » (29/10/2026)
+    import json
+    from tableau import lecteurs_statique
+    d = json.loads((RACINE / "site" / "wiki" / "encyclo.json").read_text(encoding="utf-8"))
+    pages, dossier = d["pages"], RACINE / "site" / "wiki" / "encyclo"
+    assert len(pages) >= 200 and d["licence"].startswith("CC BY-SA")
+    texte = json.dumps(d, ensure_ascii=False)
+    assert not re.search(r"(?i)one piece|luffy|lorem ipsum|placeholder|no mi\b", texte)
+    vues = set()
+    def images(o):
+        if isinstance(o, dict):
+            if "src" in o and "w" in o:
+                vues.add(o["src"]); o.get("anim") and vues.add(o["anim"])
+            for v in o.values(): images(v)
+        elif isinstance(o, list):
+            for v in o: images(v)
+    images(d)
+    assert len(vues) >= 300 and all((dossier / f).is_file() for f in vues)
+    toutes = [p for c in d["cats"] for s in c["sous"] for p in s["pages"]]
+    assert set(toutes) <= set(pages) and len(set(toutes)) == len(pages)            # chaque page est rangée
+    fruits = [p for c in d["cats"] for s in c["sous"] if s["gabarit"] == "fruit" for p in s["pages"]]
+    assert len(fruits) == 32 and all(pages[p]["fiche"][0][2] for p in fruits)      # la classe de chaque fruit
+    assert lecteurs_statique("wiki_encyclo.js") is None and lecteurs_statique("wiki/encyclo.json") is None
+    js = (RACINE / "site" / "wiki.js").read_text(encoding="utf-8")
+    assert 'import { vueEncyclo } from "./wiki_encyclo.js";' in js and '"encyclo"' in js
+    assert "corps.replaceChildren(enseignes()); animer(corps); return;" in js        # « Retour » ne laisse plus la page vide
+

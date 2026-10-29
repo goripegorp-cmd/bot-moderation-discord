@@ -4,14 +4,15 @@
 // Les freins à la copie ralentissent la copie facile ; ils ne rendent rien invisible à qui le veut vraiment.
 
 import { icone, PAR_TYPE, PAR_ONGLET } from "./wiki_icones.js";
+import { vueEncyclo } from "./wiki_encyclo.js";
 
 //  29/10/2026 : aucune émoji — des icônes dessinées pour le Grimoire (wiki_icones.js).
-const ONGLETS = ["accueil", "jeu", "monde", "lore", "fiches", "actus", "liens"].map((k) => [k, PAR_ONGLET[k]]);
+const ONGLETS = ["accueil", "encyclo", "jeu", "monde", "lore", "fiches", "actus", "liens"].map((k) => [k, PAR_ONGLET[k]]);
 const T = {
-  fr: { onglets: { accueil: "Accueil", jeu: "Le jeu", monde: "Le monde", lore: "Lore", fiches: "Fiches", actus: "Actus & vidéos", liens: "Liens officiels" },
+  fr: { onglets: { accueil: "Accueil", encyclo: "Encyclopédie", jeu: "Le jeu", monde: "Le monde", lore: "Lore", fiches: "Fiches", actus: "Actus & vidéos", liens: "Liens officiels" },
     sous: "Le wiki vérifié du clan", titre1: "Le grimoire de", accroche: "Tout ce que RELL a vraiment montré de RELL Seas — fruits, races, Haki, navires, boss, lore — vérifié une fiche à la fois, source officielle à l'appui.",
     explorer: "Ouvrir le grimoire", rejoindre: "Rejoindre le clan", fiches: "fiches vérifiées", favoris: "favoris sur Roblox", groupe: "membres du groupe officiel", discord: "sur le Discord officiel",
-    commencer: "Par où commencer", resumes: { jeu: "Le studio, l'état du jeu, son histoire depuis RELL Piece.", monde: "Mers, factions, races, lieux et boss.", lore: "Les personnages et les histoires racontés par RELL.", fiches: "Toutes les fiches vérifiées, par pancarte.", actus: "Les 52 vidéos officielles et Movie 3 minute par minute.", liens: "Les chaînes, Discord et groupes officiels." },
+    commencer: "Par où commencer", resumes: { encyclo: "Tout le jeu rangé : races, fruits, Haki, armes, navires, métiers, boss, avec fiches et images.", jeu: "Le studio, l'état du jeu, son histoire depuis RELL Piece.", monde: "Mers, factions, races, lieux et boss.", lore: "Les personnages et les histoires racontés par RELL.", fiches: "Toutes les fiches vérifiées, par pancarte.", actus: "Les 52 vidéos officielles et Movie 3 minute par minute.", liens: "Les chaînes, Discord et groupes officiels." },
     derniere: "Dernière vidéo officielle", vues: "vues", technique: "Fiche technique", dev: "Développeur", proprio: "Propriétaires", plateforme: "Plateforme", statutJeu: "Statut", pasPublic: "Pas encore public",
     favorisR: "Favoris (Roblox)", groupeR: "Groupe RELL Seas", studioR: "Groupe RELL GAMES", discordR: "Discord RELL Seas", enLigne: "en ligne", aSavoir: "À savoir", deuxDiscord: "Les deux Discord officiels", membres: "membres", histoire: "L'histoire du projet", systemes: "Les systèmes du jeu",
     createurs: "Les créateurs", mers: "Les mers", factions: "Les factions", races: "Les races", lieux: "Lieux", boss: "Les boss", ilesNote: "Le nombre exact de mers et d'îles n'a pas encore été annoncé officiellement : seules les mers nommées par RELL sont listées.",
@@ -22,10 +23,10 @@ const T = {
     chiffresNote: (d) => `Chiffres publics relevés le ${d}.`, fondateur: "Fondateur", direction: "Direction", vitrine: "La vitrine du clan",
     regle: "Ici, jamais de rumeur ni de « comment l'obtenir » : le jeu n'est pas encore sorti, et personne ne le sait vraiment.",
     droits: (c) => `Wiki non officiel réalisé par le clan ${c} : textes, tri et mise en page © ${c}, reproduction interdite sans accord. RELL Seas, ses noms et ses images (illustrations des vidéos officielles) appartiennent à RELL Games.` },
-  en: { onglets: { accueil: "Home", jeu: "The game", monde: "The world", lore: "Lore", fiches: "Entries", actus: "News & videos", liens: "Official links" },
+  en: { onglets: { accueil: "Home", encyclo: "Encyclopedia", jeu: "The game", monde: "The world", lore: "Lore", fiches: "Entries", actus: "News & videos", liens: "Official links" },
     sous: "The clan's verified wiki", titre1: "The grimoire of", accroche: "Everything RELL has really shown of RELL Seas — fruits, races, Haki, ships, bosses, lore — verified one entry at a time, with an official source.",
     explorer: "Open the grimoire", rejoindre: "Join the clan", fiches: "verified entries", favoris: "favourites on Roblox", groupe: "official group members", discord: "on the official Discord",
-    commencer: "Where to start", resumes: { jeu: "The studio, the game's status, its story since RELL Piece.", monde: "Seas, factions, races, places and bosses.", lore: "The characters and stories told by RELL.", fiches: "Every verified entry, by sign.", actus: "The 52 official videos and Movie 3 minute by minute.", liens: "The official channels, Discords and groups." },
+    commencer: "Where to start", resumes: { encyclo: "The whole game sorted: races, fruits, Haki, weapons, ships, jobs, bosses, with sheets and images.", jeu: "The studio, the game's status, its story since RELL Piece.", monde: "Seas, factions, races, places and bosses.", lore: "The characters and stories told by RELL.", fiches: "Every verified entry, by sign.", actus: "The 52 official videos and Movie 3 minute by minute.", liens: "The official channels, Discords and groups." },
     derniere: "Latest official video", vues: "views", technique: "Key facts", dev: "Developer", proprio: "Owners", plateforme: "Platform", statutJeu: "Status", pasPublic: "Not public yet",
     favorisR: "Favourites (Roblox)", groupeR: "RELL Seas group", studioR: "RELL GAMES group", discordR: "RELL Seas Discord", enLigne: "online", aSavoir: "Good to know", deuxDiscord: "The two official Discords", membres: "members", histoire: "The project's story", systemes: "Game systems",
     createurs: "The creators", mers: "The seas", factions: "Factions", races: "Races", lieux: "Places", boss: "Bosses", ilesNote: "The exact number of seas and islands hasn't been officially announced yet: only the seas named by RELL are listed.",
@@ -57,7 +58,7 @@ const fondDe = (chemin, petit) => (chemin ? `url("${src(chemin)}${petit ? "_p" :
 const nom = (e) => (langue === "fr" ? e.nom : e.nom_en);
 const nombre = (n) => (n == null ? "—" : Number(n).toLocaleString(langue === "fr" ? "fr-FR" : "en-US"));
 const lien = (url, ...enfants) => el("a", { href: url, target: "_blank", rel: "noopener noreferrer" }, ...enfants);
-const ongletActif = () => { const h = (location.hash || "").slice(1); return ONGLETS.some(([k]) => k === h) ? h : "accueil"; };
+const ongletActif = () => { const h = (location.hash || "").slice(1).split("/")[0]; return ONGLETS.some(([k]) => k === h) ? h : "accueil"; };
 const titreSection = (txt, ic) => el("h2", { classe: "w-section revele" }, ic ? icone(ic) : null, el("span", {}, txt));
 function fond(elm, chemin, petit) { if (chemin) elm.style.backgroundImage = fondDe(chemin, petit); return elm; }
 
@@ -193,7 +194,7 @@ function vueFiches() {
     zone.replaceChildren(titreSection(t().categories, "parchemin"), recherche, corps);
     function liste() {
       const sel = D.entrees.filter((e) => (!filtre || e.type === filtre) && (!q || plier([e.nom, e.nom_en, e.fr, e.en].join(" ")).includes(plier(q))));
-      if (!filtre && !q) { corps.replaceChildren(enseignes()); return; }
+      if (!filtre && !q) { corps.replaceChildren(enseignes()); animer(corps); return; }
       const ty = D.types.find((x) => x.cle === filtre);
       const entete = filtre ? fond(el("div", { classe: "w-rubrique" }, el("span", {}, ty ? ty[langue] : ""), el("span", { classe: "w-rubrique-nb" }, String(sel.length))), ty && ty.fond, true) : null;
       corps.replaceChildren(el("button", { type: "button", classe: "w-retour", onclick: () => { filtre = ""; q = ""; dessinerF(); } }, icone("fleche"), t().retour), entete || "",
@@ -259,7 +260,7 @@ function vueLiens() {
       return l.length ? [el("h3", { classe: "w-sous-titre revele" }, icone(ic), titre), el("div", { classe: "w-liens" }, l.map(carteLien))] : null; }).flat());
 }
 
-const VUES = { accueil: vueAccueil, jeu: vueJeu, monde: vueMonde, lore: vueLore, fiches: vueFiches, actus: vueActus, liens: vueLiens };
+const VUES = { encyclo: () => vueEncyclo({ el, langue, lien, animer, src, redessiner: () => dessiner() }, (location.hash || "").slice(1).split("/").slice(1)), accueil: vueAccueil, jeu: vueJeu, monde: vueMonde, lore: vueLore, fiches: vueFiches, actus: vueActus, liens: vueLiens };
 
 function nav() {
   const actif = ongletActif();
