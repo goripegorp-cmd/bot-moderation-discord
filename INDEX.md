@@ -12,15 +12,15 @@
 | `activite_calendrier.py` | 144 | 0 | 12 |
 | `activite_demontage.py` | 390 | 0 | 20 |
 | `admin_panels_v2.py` | 517 | 6 | 12 |
-| `affiches.py` | 1519 | 1 | 79 |
+| `affiches.py` | 1578 | 1 | 82 |
 | `annonces.py` | 948 | 6 | 40 |
-| `annonces_modifiables.py` | 131 | 0 | 6 |
+| `annonces_modifiables.py` | 153 | 0 | 7 |
 | `anti_token_leak.py` | 193 | 0 | 4 |
 | `bannieres.py` | 144 | 1 | 5 |
 | `behavior_guard.py` | 98 | 0 | 4 |
 | `boosts.py` | 305 | 0 | 23 |
-| `bot.py` | 33669 | 107 | 631 |
-| `cadeaux.py` | 2365 | 15 | 103 |
+| `bot.py` | 33881 | 107 | 638 |
+| `cadeaux.py` | 2421 | 15 | 106 |
 | `candidature_site.py` | 1452 | 1 | 73 |
 | `casier.py` | 244 | 0 | 14 |
 | `clan.py` | 131 | 0 | 8 |
@@ -28,26 +28,27 @@
 | `compactage.py` | 159 | 0 | 7 |
 | `compromised_detector.py` | 410 | 0 | 12 |
 | `config_salons.py` | 286 | 0 | 16 |
-| `data_cleanup.py` | 297 | 0 | 9 |
+| `data_cleanup.py` | 299 | 0 | 9 |
 | `db_backup.py` | 259 | 0 | 9 |
 | `diag.py` | 111 | 0 | 8 |
-| `entraide.py` | 2102 | 11 | 86 |
+| `entraide.py` | 2115 | 11 | 87 |
 | `equipages.py` | 895 | 7 | 42 |
 | `error_logger.py` | 161 | 0 | 3 |
-| `evenements.py` | 2757 | 2 | 128 |
-| `faq.py` | 372 | 1 | 13 |
-| `gdpr.py` | 537 | 0 | 10 |
+| `evenements.py` | 2808 | 2 | 128 |
+| `faq.py` | 312 | 1 | 9 |
+| `gdpr.py` | 545 | 0 | 10 |
 | `generate_index.py` | 230 | 0 | 6 |
 | `health_server.py` | 406 | 0 | 15 |
+| `hierarchie.py` | 1229 | 0 | 59 |
 | `honeypot.py` | 274 | 0 | 6 |
 | `i18n.py` | 984 | 0 | 10 |
 | `impersonation_detector.py` | 488 | 0 | 14 |
-| `insult_filter.py` | 438 | 0 | 11 |
+| `insult_filter.py` | 550 | 0 | 15 |
 | `invitations.py` | 207 | 0 | 15 |
 | `journal.py` | 148 | 1 | 7 |
 | `liens_jeux.py` | 187 | 2 | 6 |
 | `longevite.py` | 844 | 0 | 58 |
-| `metiers.py` | 1347 | 1 | 69 |
+| `metiers.py` | 1516 | 1 | 75 |
 | `mod_dashboard.py` | 522 | 0 | 6 |
 | `mots_interdits.py` | 116 | 0 | 7 |
 | `nettoyage.py` | 196 | 0 | 12 |
@@ -86,7 +87,7 @@
 | `outils/refonte_configure.py` | 429 | 0 | 3 |
 | `outils/reparer_noms.py` | 154 | 0 | 2 |
 | `outils/retape_selecteurs.py` | 350 | 0 | 2 |
-| `outils/site_local.py` | 1466 | 0 | 19 |
+| `outils/site_local.py` | 1523 | 0 | 21 |
 | `outils/site_local_port.py` | 440 | 0 | 8 |
 | `outils/site_local_recrutement.py` | 232 | 1 | 1 |
 | `outils/site_maquette.py` | 3243 | 2 | 121 |
@@ -107,34 +108,36 @@
 | `persistants.py` | 66 | 0 | 2 |
 | `protection_mineurs.py` | 370 | 0 | 4 |
 | `publications.py` | 101 | 0 | 7 |
-| `questionnaire.py` | 6354 | 8 | 300 |
-| `questions.py` | 255 | 0 | 14 |
+| `questionnaire.py` | 6610 | 8 | 312 |
+| `questions.py` | 302 | 0 | 16 |
 | `raid_detector.py` | 821 | 1 | 19 |
 | `rate_limiter.py` | 217 | 0 | 9 |
 | `recidivism.py` | 561 | 0 | 21 |
 | `recrutements.py` | 561 | 3 | 30 |
 | `registre.py` | 240 | 0 | 10 |
 | `rellseas_panneau.py` | 1191 | 3 | 19 |
+| `reponses_auto.py` | 666 | 0 | 33 |
 | `roblox_news.py` | 1273 | 0 | 44 |
 | `roblox_news_contenu.py` | 782 | 0 | 23 |
 | `roblox_panneau.py` | 555 | 1 | 13 |
 | `roblox_pings.py` | 252 | 0 | 9 |
 | `salutations.py` | 113 | 0 | 5 |
 | `securite_site.py` | 462 | 0 | 23 |
-| `site_equipage.py` | 1663 | 1 | 79 |
-| `site_vitrine.py` | 750 | 0 | 33 |
-| `social_media.py` | 1653 | 11 | 13 |
+| `site_equipage.py` | 1689 | 1 | 79 |
+| `site_vitrine.py` | 847 | 0 | 36 |
+| `social_media.py` | 1665 | 11 | 14 |
 | `sondages.py` | 693 | 1 | 33 |
 | `staff_sanction.py` | 601 | 1 | 8 |
 | `stockage.py` | 230 | 1 | 11 |
 | `suggestions.py` | 892 | 8 | 37 |
-| `tableau.py` | 4194 | 6 | 217 |
+| `sujets_interdits.py` | 596 | 0 | 18 |
+| `tableau.py` | 4220 | 6 | 218 |
 | `tests/__init__.py` | 2 | 0 | 0 |
-| `tests/banc_ticket_recrutement.py` | 486 | 8 | 3 |
+| `tests/banc_ticket_recrutement.py` | 491 | 8 | 3 |
 | `tests/conftest.py` | 135 | 2 | 4 |
 | `tests/conftest_discord.py` | 187 | 8 | 4 |
 | `tests/faux_serveur.py` | 465 | 13 | 6 |
-| `tests/test_acces_site.py` | 889 | 0 | 30 |
+| `tests/test_acces_site.py` | 911 | 0 | 30 |
 | `tests/test_accueil_court.py` | 87 | 0 | 4 |
 | `tests/test_activite.py` | 258 | 4 | 22 |
 | `tests/test_activite_demontage.py` | 483 | 6 | 24 |
@@ -142,9 +145,10 @@
 | `tests/test_actus_essais.py` | 79 | 0 | 3 |
 | `tests/test_actus_sans_interet.py` | 225 | 0 | 12 |
 | `tests/test_actus_seules.py` | 122 | 1 | 6 |
+| `tests/test_alertes_sans_rafale.py` | 52 | 0 | 4 |
 | `tests/test_annonces.py` | 238 | 1 | 10 |
 | `tests/test_annonces_diffusion.py` | 46 | 1 | 3 |
-| `tests/test_annonces_modifiables.py` | 536 | 0 | 29 |
+| `tests/test_annonces_modifiables.py` | 550 | 0 | 30 |
 | `tests/test_approuver_bot.py` | 167 | 1 | 9 |
 | `tests/test_arret_chien_de_garde.py` | 71 | 0 | 4 |
 | `tests/test_audit_pousse.py` | 58 | 0 | 4 |
@@ -152,7 +156,7 @@
 | `tests/test_boosts.py` | 267 | 3 | 15 |
 | `tests/test_bouclier.py` | 232 | 3 | 11 |
 | `tests/test_bouton_langue.py` | 178 | 0 | 13 |
-| `tests/test_cadeaux.py` | 392 | 0 | 20 |
+| `tests/test_cadeaux.py` | 434 | 0 | 21 |
 | `tests/test_cadeaux_v3.py` | 297 | 0 | 14 |
 | `tests/test_candidat_ses_cases.py` | 649 | 0 | 21 |
 | `tests/test_candidature_site.py` | 1407 | 2 | 37 |
@@ -172,11 +176,14 @@
 | `tests/test_erreurs_rafale.py` | 33 | 0 | 1 |
 | `tests/test_evenements.py` | 947 | 1 | 47 |
 | `tests/test_evenements_site.py` | 349 | 1 | 8 |
-| `tests/test_faq_tickets.py` | 296 | 1 | 18 |
+| `tests/test_faq_tickets.py` | 227 | 0 | 14 |
 | `tests/test_faux_positifs.py` | 293 | 0 | 25 |
+| `tests/test_flux_echecs.py` | 34 | 0 | 2 |
 | `tests/test_fonctions_retirees.py` | 98 | 1 | 4 |
 | `tests/test_forum_refus.py` | 285 | 3 | 12 |
+| `tests/test_gif_texte.py` | 136 | 2 | 5 |
 | `tests/test_habillage.py` | 126 | 0 | 8 |
+| `tests/test_hierarchie.py` | 363 | 0 | 12 |
 | `tests/test_honeypot.py` | 81 | 0 | 4 |
 | `tests/test_image_une_fois.py` | 85 | 0 | 3 |
 | `tests/test_imports.py` | 85 | 0 | 3 |
@@ -185,6 +192,7 @@
 | `tests/test_installation_auto.py` | 474 | 7 | 26 |
 | `tests/test_invitations.py` | 144 | 0 | 8 |
 | `tests/test_journal.py` | 190 | 0 | 12 |
+| `tests/test_json_profond.py` | 34 | 0 | 3 |
 | `tests/test_liens_jeux.py` | 84 | 0 | 4 |
 | `tests/test_limites_ui.py` | 15 | 0 | 1 |
 | `tests/test_lives_memorises.py` | 91 | 0 | 3 |
@@ -193,7 +201,9 @@
 | `tests/test_logs_site.py` | 525 | 2 | 13 |
 | `tests/test_longevite.py` | 1133 | 2 | 34 |
 | `tests/test_menage.py` | 259 | 4 | 12 |
-| `tests/test_metiers.py` | 1195 | 6 | 41 |
+| `tests/test_metiers.py` | 1198 | 6 | 41 |
+| `tests/test_metiers_places.py` | 75 | 0 | 6 |
+| `tests/test_modeles_annonces.py` | 28 | 0 | 2 |
 | `tests/test_mots_vocaux_stockage.py` | 263 | 1 | 18 |
 | `tests/test_mp_sans_spam.py` | 46 | 0 | 3 |
 | `tests/test_navigation_site.py` | 242 | 0 | 10 |
@@ -209,18 +219,19 @@
 | `tests/test_persistants.py` | 61 | 2 | 2 |
 | `tests/test_protection_mineurs.py` | 268 | 0 | 20 |
 | `tests/test_publications.py` | 317 | 1 | 11 |
-| `tests/test_questionnaire.py` | 1306 | 3 | 35 |
+| `tests/test_questionnaire.py` | 1308 | 3 | 35 |
 | `tests/test_questions.py` | 134 | 1 | 6 |
 | `tests/test_qui_peut_quoi.py` | 1144 | 7 | 23 |
 | `tests/test_recours_v2.py` | 280 | 5 | 14 |
-| `tests/test_recrutement_ticket.py` | 1436 | 0 | 48 |
+| `tests/test_recrutement_ticket.py` | 1510 | 0 | 51 |
 | `tests/test_recrutements.py` | 181 | 1 | 11 |
 | `tests/test_rellseas.py` | 502 | 9 | 30 |
 | `tests/test_rellseas_liste.py` | 131 | 0 | 6 |
 | `tests/test_rellseas_persistance.py` | 367 | 4 | 33 |
+| `tests/test_reponses_auto.py` | 172 | 1 | 10 |
 | `tests/test_revue_admin.py` | 433 | 2 | 21 |
 | `tests/test_revue_cadeaux.py` | 717 | 1 | 36 |
-| `tests/test_revue_entraide.py` | 223 | 0 | 12 |
+| `tests/test_revue_entraide.py` | 201 | 0 | 11 |
 | `tests/test_revue_moderation.py` | 838 | 5 | 45 |
 | `tests/test_revue_reste.py` | 746 | 7 | 30 |
 | `tests/test_revue_restes.py` | 96 | 0 | 4 |
@@ -247,15 +258,17 @@
 | `tests/test_sondages.py` | 264 | 4 | 14 |
 | `tests/test_stats_tickets.py` | 32 | 0 | 1 |
 | `tests/test_suggestions.py` | 170 | 0 | 10 |
+| `tests/test_sujets_interdits.py` | 113 | 0 | 12 |
 | `tests/test_tableau.py` | 602 | 3 | 17 |
-| `tests/test_textes.py` | 963 | 2 | 34 |
+| `tests/test_textes.py` | 964 | 2 | 34 |
 | `tests/test_tickets_dossier.py` | 204 | 3 | 9 |
 | `tests/test_tickets_doublons.py` | 67 | 0 | 4 |
 | `tests/test_tickets_fils.py` | 516 | 6 | 26 |
 | `tests/test_tickets_inactifs_combat.py` | 211 | 1 | 9 |
+| `tests/test_tickets_interdits.py` | 394 | 2 | 17 |
 | `tests/test_tickets_panneau_unifie.py` | 325 | 0 | 26 |
 | `tests/test_tickets_rellseas.py` | 222 | 3 | 5 |
-| `tests/test_tickets_sous_menus.py` | 126 | 0 | 8 |
+| `tests/test_tickets_sous_menus.py` | 142 | 0 | 10 |
 | `tests/test_tickets_v2.py` | 151 | 1 | 5 |
 | `tests/test_tickets_visibles.py` | 157 | 1 | 8 |
 | `tests/test_transcripts_nommes.py` | 126 | 1 | 2 |
@@ -265,15 +278,17 @@
 | `tests/test_vigilance.py` | 157 | 1 | 5 |
 | `tests/test_visibilite_serveur.py` | 158 | 4 | 9 |
 | `tests/test_vitrine_equipes.py` | 655 | 0 | 31 |
+| `tests/test_vitrine_portraits.py` | 62 | 1 | 4 |
 | `tests/test_vocal_hop.py` | 126 | 1 | 7 |
 | `tests/test_vocaux.py` | 163 | 0 | 8 |
 | `tests/test_webhook_doublon.py` | 170 | 0 | 15 |
 | `tests/test_websub_details.py` | 96 | 0 | 6 |
 | `tests/test_youtube_chaine.py` | 316 | 2 | 23 |
 | `tests/test_zones.py` | 771 | 1 | 35 |
-| `textes.py` | 673 | 1 | 39 |
+| `textes.py` | 674 | 1 | 39 |
 | `tickets_enhance.py` | 904 | 0 | 23 |
 | `tickets_fils.py` | 169 | 0 | 11 |
+| `tickets_interdits.py` | 555 | 1 | 37 |
 | `token_grabber.py` | 431 | 0 | 7 |
 | `tracking_layer.py` | 330 | 1 | 10 |
 | `transcript_store.py` | 371 | 1 | 14 |
@@ -289,18 +304,19 @@
 | `webhook_tracker.py` | 389 | 0 | 8 |
 | `websub_youtube.py` | 190 | 0 | 13 |
 | `zones.py` | 1232 | 1 | 48 |
-| **TOTAL (282 files)** | **156594** | **480** | **5448** |
+| **TOTAL (297 files)** | **162357** | **486** | **5716** |
 
-## Alphabetical lookup (7625 symbols)
+## Alphabetical lookup (7913 symbols)
 
-- `_2026_on_ready_addon` — `bot.py`:31709  (async def)
+- `_2026_on_ready_addon` — `bot.py`:31921  (async def)
 - `StubDB.__aenter__` — `tests/conftest.py`:67  (method)
 - `_Curseur.__aenter__` — `tests/test_activite_observation.py`:63  (method)
 - `_Curseur.__aenter__` — `tests/test_recours_v2.py`:141  (method)
-- `_DBConnection.__aenter__` — `bot.py`:550  (method)
+- `_DBConnection.__aenter__` — `bot.py`:554  (method)
 - `_Db.__aenter__` — `tests/test_recours_v2.py`:152  (method)
 - `_FauxDB.__aenter__` — `tests/test_activite_observation.py`:107  (method)
 - `_Rep.__aenter__` — `tests/test_forum_refus.py`:71  (method)
+- `_Rep.__aenter__` — `tests/test_gif_texte.py`:27  (method)
 - `_Rep.__aenter__` — `tests/test_youtube_chaine.py`:101  (method)
 - `_SansVerrou.__aenter__` — `tests/test_revue_reste.py`:431  (method)
 - `_Sess.__aenter__` — `tests/test_forum_refus.py`:86  (method)
@@ -308,10 +324,11 @@
 - `StubDB.__aexit__` — `tests/conftest.py`:70  (method)
 - `_Curseur.__aexit__` — `tests/test_activite_observation.py`:66  (method)
 - `_Curseur.__aexit__` — `tests/test_recours_v2.py`:144  (method)
-- `_DBConnection.__aexit__` — `bot.py`:556  (method)
+- `_DBConnection.__aexit__` — `bot.py`:560  (method)
 - `_Db.__aexit__` — `tests/test_recours_v2.py`:155  (method)
 - `_FauxDB.__aexit__` — `tests/test_activite_observation.py`:110  (method)
 - `_Rep.__aexit__` — `tests/test_forum_refus.py`:74  (method)
+- `_Rep.__aexit__` — `tests/test_gif_texte.py`:30  (method)
 - `_Rep.__aexit__` — `tests/test_youtube_chaine.py`:104  (method)
 - `_SansVerrou.__aexit__` — `tests/test_revue_reste.py`:434  (method)
 - `_Sess.__aexit__` — `tests/test_forum_refus.py`:89  (method)
@@ -322,8 +339,8 @@
 - `Rien.__bool__` — `tests/test_revue_moderation.py`:77  (method)
 - `Rien.__call__` — `tests/test_revue_moderation.py`:66  (method)
 - `_Bruit.__call__` — `outils/dessins_site.py`:2189  (method)
-- `_Personnes.__call__` — `tableau.py`:811  (method)
-- `_Etape.__enter__` — `bot.py`:21919  (method)
+- `_Personnes.__call__` — `tableau.py`:816  (method)
+- `_Etape.__enter__` — `bot.py`:22097  (method)
 - `Cible.__eq__` — `tests/test_salons_v2.py`:25  (method)
 - `FauxRole.__eq__` — `tests/test_off_radiation.py`:76  (method)
 - `Rang.__eq__` — `tests/test_revue_reste.py`:514  (method)
@@ -331,10 +348,10 @@
 - `Role.__eq__` — `tests/test_qui_peut_quoi.py`:105  (method)
 - `Role.__eq__` — `tests/test_revue_moderation.py`:116  (method)
 - `_FauxRoleRang.__eq__` — `tests/test_roblox_pings.py`:205  (method)
-- `_Etape.__exit__` — `bot.py`:21922  (method)
+- `_Etape.__exit__` — `bot.py`:22100  (method)
 - `FauxRole.__ge__` — `tests/test_off_radiation.py`:70  (method)
 - `FauxRole.__ge__` — `tests/test_rellseas.py`:144  (method)
-- `Role.__ge__` — `tests/banc_ticket_recrutement.py`:162  (method)
+- `Role.__ge__` — `tests/banc_ticket_recrutement.py`:163  (method)
 - `Role.__ge__` — `tests/conftest_discord.py`:90  (method)
 - `Role.__ge__` — `tests/test_metiers.py`:90  (method)
 - `Role.__ge__` — `tests/test_qui_peut_quoi.py`:100  (method)
@@ -342,7 +359,7 @@
 - `_FauxRoleRang.__ge__` — `tests/test_roblox_pings.py`:202  (method)
 - `Droits.__getattr__` — `tests/faux_serveur.py`:184  (method)
 - `Rien.__getattr__` — `tests/test_revue_moderation.py`:69  (method)
-- `_Asyncio.__getattr__` — `tests/banc_ticket_recrutement.py`:77  (method)
+- `_Asyncio.__getattr__` — `tests/banc_ticket_recrutement.py`:78  (method)
 - `_Espion.__getattr__` — `tests/test_longevite.py`:95  (method)
 - `_Proxy.__getattr__` — `tests/test_revue_cadeaux.py`:102  (method)
 - `__getattr__` — `candidature_site.py`:1443  (def)
@@ -355,65 +372,65 @@
 - `Role.__hash__` — `tests/test_config_salons.py`:21  (method)
 - `Role.__hash__` — `tests/test_revue_moderation.py`:119  (method)
 - `_FauxRoleRang.__hash__` — `tests/test_roblox_pings.py`:208  (method)
-- `AccueilLangueView.__init__` — `bot.py`:32884  (method)
-- `ActionConfigPanelV2.__init__` — `bot.py`:18314  (method)
-- `AddDomainModal.__init__` — `bot.py`:18145  (method)
-- `AddQModal.__init__` — `bot.py`:21606  (method)
-- `AddStaffSelect.__init__` — `bot.py`:10720  (method)
-- `AddStaffView.__init__` — `bot.py`:10712  (method)
-- `AltConfidenceModal.__init__` — `bot.py`:18581  (method)
-- `AltConfigPanelV2.__init__` — `bot.py`:18437  (method)
-- `AltDetectionsPanelV2.__init__` — `bot.py`:18781  (method)
-- `AltScanResultsPanelV2.__init__` — `bot.py`:18612  (method)
-- `AntiRaidPanelV2.__init__` — `bot.py`:12606  (method)
-- `BadwordsConfigPanelV2.__init__` — `bot.py`:17662  (method)
+- `AccueilLangueView.__init__` — `bot.py`:33096  (method)
+- `ActionConfigPanelV2.__init__` — `bot.py`:18485  (method)
+- `AddDomainModal.__init__` — `bot.py`:18316  (method)
+- `AddQModal.__init__` — `bot.py`:21784  (method)
+- `AddStaffSelect.__init__` — `bot.py`:10872  (method)
+- `AddStaffView.__init__` — `bot.py`:10864  (method)
+- `AltConfidenceModal.__init__` — `bot.py`:18752  (method)
+- `AltConfigPanelV2.__init__` — `bot.py`:18608  (method)
+- `AltDetectionsPanelV2.__init__` — `bot.py`:18952  (method)
+- `AltScanResultsPanelV2.__init__` — `bot.py`:18783  (method)
+- `AntiRaidPanelV2.__init__` — `bot.py`:12778  (method)
+- `BadwordsConfigPanelV2.__init__` — `bot.py`:17833  (method)
 - `Banc.__init__` — `tests/test_metiers.py`:193  (method)
 - `Banc.__init__` — `tests/test_questionnaire.py`:61  (method)
-- `BancTicket.__init__` — `tests/banc_ticket_recrutement.py`:357  (method)
+- `BancTicket.__init__` — `tests/banc_ticket_recrutement.py`:359  (method)
 - `Base.__init__` — `outils/banc_annees.py`:189  (method)
 - `Base.__init__` — `tests/test_casier.py`:41  (method)
 - `BasePanel.__init__` — `ui_v2.py`:189  (method)
-- `BoostSupportButton.__init__` — `bot.py`:23997  (method)
-- `BoutonActualiser.__init__` — `cadeaux.py`:727  (method)
-- `BoutonAnciensSalons.__init__` — `bot.py`:7588  (method)
-- `BoutonAnnulerConfig.__init__` — `bot.py`:15321  (method)
-- `BoutonApercu.__init__` — `questionnaire.py`:2586  (method)
-- `BoutonApprouverBot.__init__` — `bot.py`:7238  (method)
-- `BoutonArchive.__init__` — `bot.py`:14181  (method)
-- `BoutonArchives.__init__` — `bot.py`:14892  (method)
-- `BoutonCadeaux.__init__` — `cadeaux.py`:756  (method)
-- `BoutonCertifier.__init__` — `entraide.py`:1333  (method)
-- `BoutonChercher.__init__` — `cadeaux.py`:821  (method)
+- `BoostSupportButton.__init__` — `bot.py`:24199  (method)
+- `BoutonActualiser.__init__` — `cadeaux.py`:782  (method)
+- `BoutonAnciensSalons.__init__` — `bot.py`:7734  (method)
+- `BoutonAnnulerConfig.__init__` — `bot.py`:15492  (method)
+- `BoutonApercu.__init__` — `questionnaire.py`:2622  (method)
+- `BoutonApprouverBot.__init__` — `bot.py`:7384  (method)
+- `BoutonArchive.__init__` — `bot.py`:14352  (method)
+- `BoutonArchives.__init__` — `bot.py`:15063  (method)
+- `BoutonCadeaux.__init__` — `cadeaux.py`:811  (method)
+- `BoutonCertifier.__init__` — `entraide.py`:1346  (method)
+- `BoutonChercher.__init__` — `cadeaux.py`:876  (method)
 - `BoutonComposer.__init__` — `annonces.py`:792  (method)
 - `BoutonContre.__init__` — `suggestions.py`:514  (method)
 - `BoutonDecision.__init__` — `recrutements.py`:434  (method)
-- `BoutonEtape1.__init__` — `questionnaire.py`:2534  (method)
-- `BoutonFermer.__init__` — `entraide.py`:1357  (method)
-- `BoutonFicheSite.__init__` — `bot.py`:7336  (method)
-- `BoutonGere.__init__` — `bot.py`:7308  (method)
+- `BoutonEtape1.__init__` — `questionnaire.py`:2570  (method)
+- `BoutonFermer.__init__` — `entraide.py`:1370  (method)
+- `BoutonFicheSite.__init__` — `bot.py`:7482  (method)
+- `BoutonGere.__init__` — `bot.py`:7454  (method)
 - `BoutonGerer.__init__` — `suggestions.py`:677  (method)
 - `BoutonLiens.__init__` — `liens_jeux.py`:174  (method)
-- `BoutonMiddleman.__init__` — `entraide.py`:1084  (method)
+- `BoutonMiddleman.__init__` — `entraide.py`:1097  (method)
 - `BoutonModifier.__init__` — `equipages.py`:573  (method)
 - `BoutonNotif.__init__` — `notifs.py`:84  (method)
-- `BoutonNouvelle.__init__` — `entraide.py`:935  (method)
-- `BoutonPage.__init__` — `cadeaux.py`:786  (method)
-- `BoutonPage.__init__` — `questionnaire.py`:2569  (method)
-- `BoutonParticipants.__init__` — `cadeaux.py`:770  (method)
-- `BoutonParticiper.__init__` — `cadeaux.py`:699  (method)
+- `BoutonNouvelle.__init__` — `entraide.py`:948  (method)
+- `BoutonPage.__init__` — `cadeaux.py`:841  (method)
+- `BoutonPage.__init__` — `questionnaire.py`:2605  (method)
+- `BoutonParticipants.__init__` — `cadeaux.py`:825  (method)
+- `BoutonParticiper.__init__` — `cadeaux.py`:754  (method)
 - `BoutonPour.__init__` — `suggestions.py`:500  (method)
 - `BoutonProposer.__init__` — `suggestions.py`:458  (method)
 - `BoutonPublier.__init__` — `equipages.py`:487  (method)
 - `BoutonQuestionnaire.__init__` — `candidature_site.py`:871  (method)
-- `BoutonQuitter.__init__` — `cadeaux.py`:741  (method)
+- `BoutonQuitter.__init__` — `cadeaux.py`:796  (method)
 - `BoutonRecrutement.__init__` — `equipages.py`:551  (method)
-- `BoutonRejoindre.__init__` — `entraide.py`:1034  (method)
+- `BoutonRejoindre.__init__` — `entraide.py`:1047  (method)
 - `BoutonRejoindre.__init__` — `equipages.py`:510  (method)
-- `BoutonRepondre.__init__` — `questionnaire.py`:2553  (method)
+- `BoutonRepondre.__init__` — `questionnaire.py`:2589  (method)
 - `BoutonReponse.__init__` — `evenements.py`:1399  (method)
 - `BoutonRetirer.__init__` — `equipages.py`:591  (method)
-- `BoutonSiteEquipage.__init__` — `site_equipage.py`:1612  (method)
-- `BoutonStats.__init__` — `cadeaux.py`:713  (method)
+- `BoutonSiteEquipage.__init__` — `site_equipage.py`:1638  (method)
+- `BoutonStats.__init__` — `cadeaux.py`:768  (method)
 - `BoutonTableau.__init__` — `recrutements.py`:405  (method)
 - `BoutonVu.__init__` — `annonces.py`:319  (method)
 - `BoutonVu.__init__` — `evenements.py`:1416  (method)
@@ -422,26 +439,26 @@
 - `Categorie.__init__` — `tests/test_tickets_dossier.py`:150  (method)
 - `CheminDuBot.__init__` — `outils/site_local_recrutement.py`:34  (method)
 - `ChoixBut.__init__` — `vocaux.py`:110  (method)
-- `ChoixMetier.__init__` — `metiers.py`:948  (method)
-- `ChoixParticipant.__init__` — `cadeaux.py`:802  (method)
+- `ChoixMetier.__init__` — `metiers.py`:1058  (method)
+- `ChoixParticipant.__init__` — `cadeaux.py`:857  (method)
 - `Cible.__init__` — `tests/test_salons_v2.py`:19  (method)
-- `ClearAllConfirmView.__init__` — `bot.py`:27663  (method)
+- `ClearAllConfirmView.__init__` — `bot.py`:27869  (method)
 - `Client.__init__` — `outils/banc_annees.py`:832  (method)
 - `Client.__init__` — `tests/test_evenements_site.py`:70  (method)
-- `ConfigCache.__init__` — `bot.py`:596  (method)
-- `ConfirmerAnciensSalons.__init__` — `bot.py`:7612  (method)
-- `ConfirmerArchives.__init__` — `bot.py`:14913  (method)
-- `ConfirmerIsolementV2.__init__` — `bot.py`:18717  (method)
-- `DBPool.__init__` — `bot.py`:450  (method)
+- `ConfigCache.__init__` — `bot.py`:600  (method)
+- `ConfirmerAnciensSalons.__init__` — `bot.py`:7758  (method)
+- `ConfirmerArchives.__init__` — `bot.py`:15084  (method)
+- `ConfirmerIsolementV2.__init__` — `bot.py`:18888  (method)
+- `DBPool.__init__` — `bot.py`:454  (method)
 - `Db.__init__` — `tests/test_optimisation.py`:27  (method)
 - `Dessin.__init__` — `outils/dessins_site.py`:504  (method)
-- `DossierCompromisAncien.__init__` — `bot.py`:20777  (method)
-- `DossierCompromisBouton.__init__` — `bot.py`:20761  (method)
+- `DossierCompromisAncien.__init__` — `bot.py`:20948  (method)
+- `DossierCompromisBouton.__init__` — `bot.py`:20932  (method)
 - `Droits.__init__` — `tests/faux_serveur.py`:181  (method)
-- `DurationConfigModal.__init__` — `bot.py`:18412  (method)
-- `EditPanelSelectViewV2.__init__` — `bot.py`:21049  (method)
-- `EntraidePanelV2.__init__` — `entraide.py`:1937  (method)
-- `EntraideRatingButton.__init__` — `bot.py`:12992  (method)
+- `DurationConfigModal.__init__` — `bot.py`:18583  (method)
+- `EditPanelSelectViewV2.__init__` — `bot.py`:21220  (method)
+- `EntraidePanelV2.__init__` — `entraide.py`:1950  (method)
+- `EntraideRatingButton.__init__` — `bot.py`:13164  (method)
 - `Env.__init__` — `tests/test_recrutements.py`:33  (method)
 - `Env.__init__` — `tests/test_tableau.py`:102  (method)
 - `Fabrique.__init__` — `tests/test_questions.py`:40  (method)
@@ -480,53 +497,54 @@
 - `FauxUtilisateur.__init__` — `tests/test_off_radiation.py`:593  (method)
 - `Fil.__init__` — `tests/faux_serveur.py`:29  (method)
 - `Fil.__init__` — `tests/test_menage.py`:39  (method)
-- `Fil.__init__` — `tests/test_metiers.py`:849  (method)
-- `FilTicket.__init__` — `tests/banc_ticket_recrutement.py`:101  (method)
+- `Fil.__init__` — `tests/test_metiers.py`:851  (method)
+- `FilTicket.__init__` — `tests/banc_ticket_recrutement.py`:102  (method)
 - `FilTicket.__init__` — `tests/test_tickets_visibles.py`:32  (method)
 - `Forme.__init__` — `outils/dessins_site.py`:411  (method)
-- `Formulaire.__init__` — `entraide.py`:840  (method)
+- `Formulaire.__init__` — `entraide.py`:853  (method)
 - `Formulaire.__init__` — `equipages.py`:364  (method)
 - `Formulaire.__init__` — `suggestions.py`:391  (method)
 - `FormulaireAnnonce.__init__` — `annonces.py`:500  (method)
-- `FormulaireChance.__init__` — `cadeaux.py`:2000  (method)
-- `FormulaireConditions.__init__` — `cadeaux.py`:1970  (method)
+- `FormulaireChance.__init__` — `cadeaux.py`:2056  (method)
+- `FormulaireConditions.__init__` — `cadeaux.py`:2026  (method)
 - `FormulaireDecision.__init__` — `suggestions.py`:532  (method)
-- `FormulaireFiche.__init__` — `questionnaire.py`:3834  (method)
+- `FormulaireFiche.__init__` — `questionnaire.py`:3879  (method)
 - `FormulaireLiens.__init__` — `liens_jeux.py`:128  (method)
-- `FormulaireLot.__init__` — `cadeaux.py`:1914  (method)
-- `FormulairePage.__init__` — `questionnaire.py`:2641  (method)
-- `FormulaireRecherche.__init__` — `cadeaux.py`:837  (method)
-- `FormulaireRefus.__init__` — `questionnaire.py`:2619  (method)
+- `FormulaireLot.__init__` — `cadeaux.py`:1970  (method)
+- `FormulairePage.__init__` — `questionnaire.py`:2677  (method)
+- `FormulaireRecherche.__init__` — `cadeaux.py`:892  (method)
+- `FormulaireRefus.__init__` — `questionnaire.py`:2655  (method)
 - `Forum.__init__` — `tests/faux_serveur.py`:152  (method)
 - `Guilde.__init__` — `tests/conftest_discord.py`:95  (method)
 - `Guilde.__init__` — `tests/test_tickets_dossier.py`:155  (method)
 - `GuildeDirection.__init__` — `tests/test_tickets_fils.py`:242  (method)
-- `ImageConfigPanelV2.__init__` — `bot.py`:17577  (method)
-- `ImmunePanelV2.__init__` — `bot.py`:19394  (method)
-- `ImmuneRemoveViewV2.__init__` — `bot.py`:19631  (method)
-- `Inter.__init__` — `tests/banc_ticket_recrutement.py`:239  (method)
+- `ImageConfigPanelV2.__init__` — `bot.py`:17748  (method)
+- `ImmunePanelV2.__init__` — `bot.py`:19565  (method)
+- `ImmuneRemoveViewV2.__init__` — `bot.py`:19802  (method)
+- `Inter.__init__` — `tests/banc_ticket_recrutement.py`:240  (method)
 - `Inter.__init__` — `tests/test_questionnaire.py`:179  (method)
+- `InterK.__init__` — `tests/test_tickets_interdits.py`:54  (method)
 - `Interaction.__init__` — `tests/test_qui_peut_quoi.py`:199  (method)
 - `Interaction.__init__` — `tests/test_revue_admin.py`:96  (method)
-- `Invalide.__init__` — `affiches.py`:176  (method)
+- `Invalide.__init__` — `affiches.py`:185  (method)
 - `Journal.__init__` — `tests/test_tickets_rellseas.py`:73  (method)
-- `LangSelectButton.__init__` — `bot.py`:32794  (method)
-- `LinkConfigPanelV2.__init__` — `bot.py`:18030  (method)
+- `LangSelectButton.__init__` — `bot.py`:33006  (method)
+- `LinkConfigPanelV2.__init__` — `bot.py`:18201  (method)
 - `Local.__init__` — `tests/test_candidature_site.py`:55  (method)
 - `Local.__init__` — `tests/test_longevite.py`:432  (method)
 - `Local.__init__` — `tests/test_site_equipage.py`:49  (method)
 - `Local.__init__` — `tests/test_site_v2_port.py`:88  (method)
-- `LogLevelPanelV2.__init__` — `bot.py`:16681  (method)
-- `LogsCategoriesPanelV2.__init__` — `bot.py`:16871  (method)
-- `LogsCategoriesSelect.__init__` — `bot.py`:27390  (method)
-- `LogsEventRoutingPanelV2.__init__` — `bot.py`:16775  (method)
-- `LogsEventsPanelV2.__init__` — `bot.py`:16961  (method)
-- `LogsExclusionsPanelV2.__init__` — `bot.py`:17093  (method)
-- `LogsPanelV2.__init__` — `bot.py`:16189  (method)
-- `LogsRoutingPanelV2.__init__` — `bot.py`:16558  (method)
-- `MainPanelV2.__init__` — `bot.py`:12231  (method)
-- `ManualAdapter.__init__` — `social_media.py`:317  (method)
-- `Membre.__init__` — `tests/banc_ticket_recrutement.py`:170  (method)
+- `LogLevelPanelV2.__init__` — `bot.py`:16852  (method)
+- `LogsCategoriesPanelV2.__init__` — `bot.py`:17042  (method)
+- `LogsCategoriesSelect.__init__` — `bot.py`:27596  (method)
+- `LogsEventRoutingPanelV2.__init__` — `bot.py`:16946  (method)
+- `LogsEventsPanelV2.__init__` — `bot.py`:17132  (method)
+- `LogsExclusionsPanelV2.__init__` — `bot.py`:17264  (method)
+- `LogsPanelV2.__init__` — `bot.py`:16360  (method)
+- `LogsRoutingPanelV2.__init__` — `bot.py`:16729  (method)
+- `MainPanelV2.__init__` — `bot.py`:12403  (method)
+- `ManualAdapter.__init__` — `social_media.py`:338  (method)
+- `Membre.__init__` — `tests/banc_ticket_recrutement.py`:171  (method)
 - `Membre.__init__` — `tests/conftest_discord.py`:149  (method)
 - `Membre.__init__` — `tests/faux_serveur.py`:265  (method)
 - `Membre.__init__` — `tests/test_casier.py`:140  (method)
@@ -541,9 +559,9 @@
 - `MenuDecision.__init__` — `suggestions.py`:546  (method)
 - `Message.__init__` — `tests/conftest_discord.py`:44  (method)
 - `Message.__init__` — `tests/faux_serveur.py`:171  (method)
-- `Message.__init__` — `tests/test_faq_tickets.py`:70  (method)
+- `Message.__init__` — `tests/test_reponses_auto.py`:28  (method)
 - `Message.__init__` — `tests/test_salutations.py`:37  (method)
-- `ModerationPanelV2.__init__` — `bot.py`:19252  (method)
+- `ModerationPanelV2.__init__` — `bot.py`:19423  (method)
 - `Monde.__init__` — `outils/banc_annees.py`:130  (method)
 - `Monde.__init__` — `outils/site_maquette.py`:266  (method)
 - `Monde.__init__` — `tests/faux_serveur.py`:278  (method)
@@ -556,8 +574,8 @@
 - `Msg.__init__` — `tests/test_menage.py`:30  (method)
 - `Msg.__init__` — `tests/test_sondages.py`:75  (method)
 - `MsgVieux.__init__` — `tests/test_revue_reste.py`:318  (method)
-- `NewPanelModal.__init__` — `bot.py`:21029  (method)
-- `NumberConfigModal.__init__` — `bot.py`:18201  (method)
+- `NewPanelModal.__init__` — `bot.py`:21200  (method)
+- `NumberConfigModal.__init__` — `bot.py`:18372  (method)
 - `Obj.__init__` — `tests/conftest_discord.py`:24  (method)
 - `Obj.__init__` — `tests/test_actus_seules.py`:20  (method)
 - `Obj.__init__` — `tests/test_autos.py`:18  (method)
@@ -569,22 +587,22 @@
 - `Obj.__init__` — `tests/test_tickets_inactifs_combat.py`:29  (method)
 - `Obj.__init__` — `tests/test_tickets_rellseas.py`:35  (method)
 - `Obj.__init__` — `tests/test_transcripts_nommes.py`:31  (method)
-- `PaginatedImmuneRemoveView.__init__` — `bot.py`:19736  (method)
-- `PanelAppearanceModalSimple.__init__` — `bot.py`:21352  (method)
-- `PanelBlacklistView.__init__` — `bot.py`:21424  (method)
-- `PanelEditViewV2.__init__` — `bot.py`:21096  (method)
-- `PanelQsView.__init__` — `bot.py`:21563  (method)
+- `PaginatedImmuneRemoveView.__init__` — `bot.py`:19907  (method)
+- `PanelAppearanceModalSimple.__init__` — `bot.py`:21523  (method)
+- `PanelBlacklistView.__init__` — `bot.py`:21595  (method)
+- `PanelEditViewV2.__init__` — `bot.py`:21267  (method)
+- `PanelQsView.__init__` — `bot.py`:21741  (method)
 - `Partiel.__init__` — `tests/conftest_discord.py`:33  (method)
 - `Partiel.__init__` — `tests/faux_serveur.py`:13  (method)
 - `Passager.__init__` — `tests/test_persistants.py`:26  (method)
 - `Persistant.__init__` — `tests/test_persistants.py`:17  (method)
 - `Piece.__init__` — `tests/test_zones.py`:490  (method)
 - `PostArchive.__init__` — `tests/test_revue_reste.py`:618  (method)
-- `ProtDetailV2.__init__` — `bot.py`:17300  (method)
-- `ProtPanelV2.__init__` — `bot.py`:17237  (method)
-- `RSSHubAdapter.__init__` — `social_media.py`:649  (method)
-- `RadieAppelButton.__init__` — `bot.py`:2679  (method)
-- `RadieDecisionButton.__init__` — `bot.py`:2817  (method)
+- `ProtDetailV2.__init__` — `bot.py`:17471  (method)
+- `ProtPanelV2.__init__` — `bot.py`:17408  (method)
+- `RSSHubAdapter.__init__` — `social_media.py`:670  (method)
+- `RadieAppelButton.__init__` — `bot.py`:2683  (method)
+- `RadieDecisionButton.__init__` — `bot.py`:2821  (method)
 - `RaidAlertButton.__init__` — `raid_detector.py`:608  (method)
 - `Rang.__init__` — `tests/test_revue_reste.py`:511  (method)
 - `Refus.__init__` — `bannieres.py`:46  (method)
@@ -595,15 +613,16 @@
 - `Reponse.__init__` — `tests/test_qui_peut_quoi.py`:172  (method)
 - `Reponse.__init__` — `tests/test_revue_admin.py`:70  (method)
 - `Reponse.__init__` — `tests/test_sondages.py`:23  (method)
+- `Reponse.__init__` — `tests/test_tickets_interdits.py`:215  (method)
 - `ReponseV2.__init__` — `tests/faux_serveur.py`:367  (method)
 - `Requete.__init__` — `tests/test_publications.py`:90  (method)
 - `Requete.__init__` — `tests/test_revue_site.py`:73  (method)
 - `Requete.__init__` — `tests/test_tableau.py`:52  (method)
 - `Reseau.__init__` — `outils/icones_rellseas.py`:725  (method)
-- `RgpdPanelV2.__init__` — `bot.py`:12102  (method)
+- `RgpdPanelV2.__init__` — `bot.py`:12274  (method)
 - `RobloxPanelV2.__init__` — `roblox_panneau.py`:426  (method)
-- `RobloxPingButton.__init__` — `bot.py`:32836  (method)
-- `Role.__init__` — `tests/banc_ticket_recrutement.py`:155  (method)
+- `RobloxPingButton.__init__` — `bot.py`:33048  (method)
+- `Role.__init__` — `tests/banc_ticket_recrutement.py`:156  (method)
 - `Role.__init__` — `tests/conftest_discord.py`:87  (method)
 - `Role.__init__` — `tests/faux_serveur.py`:256  (method)
 - `Role.__init__` — `tests/test_config_salons.py`:17  (method)
@@ -612,7 +631,7 @@
 - `Role.__init__` — `tests/test_revue_moderation.py`:98  (method)
 - `Role.__init__` — `tests/test_site_v2_serveur.py`:54  (method)
 - `Role.__init__` — `tests/test_tableau.py`:39  (method)
-- `Role.__init__` — `tests/test_textes.py`:289  (method)
+- `Role.__init__` — `tests/test_textes.py`:290  (method)
 - `Salon.__init__` — `tests/conftest_discord.py`:60  (method)
 - `Salon.__init__` — `tests/test_annonces_diffusion.py`:11  (method)
 - `Salon.__init__` — `tests/test_clan.py`:95  (method)
@@ -627,10 +646,10 @@
 - `SalonB.__init__` — `tests/test_boosts.py`:45  (method)
 - `SalonFlux.__init__` — `tests/test_revue_reste.py`:329  (method)
 - `SanctionDynamicButton.__init__` — `staff_sanction.py`:205  (method)
-- `SecReportView.__init__` — `bot.py`:3675  (method)
-- `SecurityChannelsPanelV2.__init__` — `bot.py`:16404  (method)
-- `SendPanelPaginatedView.__init__` — `bot.py`:21628  (method)
-- `Serveur.__init__` — `tests/banc_ticket_recrutement.py`:211  (method)
+- `SecReportView.__init__` — `bot.py`:3679  (method)
+- `SecurityChannelsPanelV2.__init__` — `bot.py`:16575  (method)
+- `SendPanelPaginatedView.__init__` — `bot.py`:21806  (method)
+- `Serveur.__init__` — `tests/banc_ticket_recrutement.py`:212  (method)
 - `Serveur.__init__` — `tests/test_boosts.py`:70  (method)
 - `Serveur.__init__` — `tests/test_bouclier.py`:15  (method)
 - `Serveur.__init__` — `tests/test_direct.py`:44  (method)
@@ -638,72 +657,72 @@
 - `Serveur.__init__` — `tests/test_qui_peut_quoi.py`:151  (method)
 - `Serveur.__init__` — `tests/test_revue_moderation.py`:161  (method)
 - `Serveur.__init__` — `tests/test_site_v2_serveur.py`:82  (method)
-- `SetMaxModal.__init__` — `bot.py`:21542  (method)
+- `SetMaxModal.__init__` — `bot.py`:21720  (method)
 - `Site.__init__` — `tests/test_revue_site.py`:86  (method)
 - `Site.__init__` — `tests/test_site_v2_serveur.py`:121  (method)
-- `Site.__init__` — `tests/test_textes.py`:306  (method)
+- `Site.__init__` — `tests/test_textes.py`:307  (method)
 - `SocialAddPanel.__init__` — `admin_panels_v2.py`:280  (method)
 - `SocialEditPanel.__init__` — `admin_panels_v2.py`:443  (method)
-- `SocialMediaManager.__init__` — `social_media.py`:1121  (method)
+- `SocialMediaManager.__init__` — `social_media.py`:1133  (method)
 - `Sondage.__init__` — `tests/test_sondages.py`:28  (method)
 - `SondagesPanelV2.__init__` — `sondages.py`:606  (method)
 - `StubDB.__init__` — `tests/conftest.py`:50  (method)
 - `SuggestionsPanelV2.__init__` — `suggestions.py`:801  (method)
 - `Suivi.__init__` — `tests/test_qui_peut_quoi.py`:191  (method)
-- `SuspectScanPanel.__init__` — `bot.py`:19012  (method)
-- `SuspectScanPanelV2.__init__` — `bot.py`:18884  (method)
+- `SuspectScanPanel.__init__` — `bot.py`:19183  (method)
+- `SuspectScanPanelV2.__init__` — `bot.py`:19055  (method)
 - `Texte.__init__` — `tests/faux_serveur.py`:189  (method)
-- `Ticket.__init__` — `tests/test_metiers.py`:948  (method)
-- `TicketCloseModal.__init__` — `bot.py`:10336  (method)
-- `TicketCloseReasonSelect.__init__` — `bot.py`:10991  (method)
-- `TicketCloseReasonView.__init__` — `bot.py`:10982  (method)
-- `TicketConfirmCreateView.__init__` — `bot.py`:8990  (method)
-- `TicketControlView.__init__` — `bot.py`:10365  (method)
-- `TicketCreateDynamic.__init__` — `bot.py`:9138  (method)
-- `TicketFeedbackButton.__init__` — `bot.py`:12906  (method)
-- `TicketHubGererDynamic.__init__` — `bot.py`:9257  (method)
-- `TicketHubOpenDynamic.__init__` — `bot.py`:9411  (method)
-- `TicketHubTypeDynamic.__init__` — `bot.py`:9464  (method)
-- `TicketHubTypeView.__init__` — `bot.py`:9516  (method)
-- `TicketMainPanelV2.__init__` — `bot.py`:20859  (method)
-- `TicketNoteModal.__init__` — `bot.py`:10927  (method)
-- `TicketPrioritySelect.__init__` — `bot.py`:10867  (method)
-- `TicketPriorityView.__init__` — `bot.py`:10859  (method)
-- `TicketQuestionnaireModal.__init__` — `bot.py`:8956  (method)
-- `TicketToggleDynamic.__init__` — `bot.py`:9635  (method)
-- `TransferTicketSelect.__init__` — `bot.py`:10769  (method)
-- `TransferTicketView.__init__` — `bot.py`:10761  (method)
-- `TwitchAdapter.__init__` — `social_media.py`:341  (method)
-- `UnwarnSelect.__init__` — `bot.py`:28033  (method)
-- `UnwarnSelectView.__init__` — `bot.py`:28028  (method)
-- `V2GenericChannelPicker.__init__` — `bot.py`:20412  (method)
-- `V2GenericRolePicker.__init__` — `bot.py`:20536  (method)
+- `Ticket.__init__` — `tests/test_metiers.py`:950  (method)
+- `TicketCloseModal.__init__` — `bot.py`:10485  (method)
+- `TicketCloseReasonSelect.__init__` — `bot.py`:11143  (method)
+- `TicketCloseReasonView.__init__` — `bot.py`:11134  (method)
+- `TicketConfirmCreateView.__init__` — `bot.py`:9136  (method)
+- `TicketControlView.__init__` — `bot.py`:10514  (method)
+- `TicketCreateDynamic.__init__` — `bot.py`:9287  (method)
+- `TicketFeedbackButton.__init__` — `bot.py`:13078  (method)
+- `TicketHubGererDynamic.__init__` — `bot.py`:9406  (method)
+- `TicketHubOpenDynamic.__init__` — `bot.py`:9560  (method)
+- `TicketHubTypeDynamic.__init__` — `bot.py`:9613  (method)
+- `TicketHubTypeView.__init__` — `bot.py`:9665  (method)
+- `TicketMainPanelV2.__init__` — `bot.py`:21030  (method)
+- `TicketNoteModal.__init__` — `bot.py`:11079  (method)
+- `TicketPrioritySelect.__init__` — `bot.py`:11019  (method)
+- `TicketPriorityView.__init__` — `bot.py`:11011  (method)
+- `TicketQuestionnaireModal.__init__` — `bot.py`:9102  (method)
+- `TicketToggleDynamic.__init__` — `bot.py`:9784  (method)
+- `TransferTicketSelect.__init__` — `bot.py`:10921  (method)
+- `TransferTicketView.__init__` — `bot.py`:10913  (method)
+- `TwitchAdapter.__init__` — `social_media.py`:362  (method)
+- `UnwarnSelect.__init__` — `bot.py`:28239  (method)
+- `UnwarnSelectView.__init__` — `bot.py`:28234  (method)
+- `V2GenericChannelPicker.__init__` — `bot.py`:20583  (method)
+- `V2GenericRolePicker.__init__` — `bot.py`:20707  (method)
 - `Vocal.__init__` — `tests/faux_serveur.py`:230  (method)
 - `VueApercu.__init__` — `annonces.py`:576  (method)
-- `VueCadeau.__init__` — `cadeaux.py`:2021  (method)
-- `VueCertifier.__init__` — `entraide.py`:1203  (method)
-- `VueCloturer.__init__` — `entraide.py`:1250  (method)
+- `VueCadeau.__init__` — `cadeaux.py`:2077  (method)
+- `VueCertifier.__init__` — `entraide.py`:1216  (method)
+- `VueCloturer.__init__` — `entraide.py`:1263  (method)
 - `VueComposer.__init__` — `annonces.py`:476  (method)
-- `VueTypesTickets.__init__` — `bot.py`:9283  (method)
-- `WelcomeMessageModalSimple.__init__` — `bot.py`:21389  (method)
-- `YouTubeRSSAdapter.__init__` — `social_media.py`:850  (method)
+- `VueTypesTickets.__init__` — `bot.py`:9432  (method)
+- `WelcomeMessageModalSimple.__init__` — `bot.py`:21560  (method)
+- `YouTubeRSSAdapter.__init__` — `social_media.py`:862  (method)
 - `_Adaptateur.__init__` — `tests/test_social_sans_gel.py`:94  (method)
-- `_AntiRaidActionPickerV2.__init__` — `bot.py`:12766  (method)
-- `_AntiRaidThresholdsModal.__init__` — `bot.py`:12744  (method)
+- `_AntiRaidActionPickerV2.__init__` — `bot.py`:12938  (method)
+- `_AntiRaidThresholdsModal.__init__` — `bot.py`:12916  (method)
 - `_Auteur.__init__` — `tests/test_conversation_tickets.py`:42  (method)
-- `_BadwordsAddListModal.__init__` — `bot.py`:17845  (method)
-- `_BadwordsRemoveListModal.__init__` — `bot.py`:17890  (method)
-- `_BadwordsSanctionActionView.__init__` — `bot.py`:17955  (method)
-- `_BadwordsThresholdsModal.__init__` — `bot.py`:17926  (method)
+- `_BadwordsAddListModal.__init__` — `bot.py`:18016  (method)
+- `_BadwordsRemoveListModal.__init__` — `bot.py`:18061  (method)
+- `_BadwordsSanctionActionView.__init__` — `bot.py`:18126  (method)
+- `_BadwordsThresholdsModal.__init__` — `bot.py`:18097  (method)
 - `_Banc.__init__` — `tests/test_config_lost_update.py`:77  (method)
 - `_Bruit.__init__` — `outils/dessins_site.py`:2180  (method)
-- `_CasierManageView.__init__` — `bot.py`:28788  (method)
+- `_CasierManageView.__init__` — `bot.py`:28994  (method)
 - `_Curseur.__init__` — `tests/test_activite_observation.py`:54  (method)
 - `_Curseur.__init__` — `tests/test_recours_v2.py`:133  (method)
-- `_DBConnection.__init__` — `bot.py`:546  (method)
-- `_ErreursInteractions.__init__` — `bot.py`:15055  (method)
+- `_DBConnection.__init__` — `bot.py`:550  (method)
+- `_ErreursInteractions.__init__` — `bot.py`:15226  (method)
 - `_Espion.__init__` — `tests/test_longevite.py`:88  (method)
-- `_Etape.__init__` — `bot.py`:21916  (method)
+- `_Etape.__init__` — `bot.py`:22094  (method)
 - `_FauxArbre.__init__` — `tests/test_commandes_en_double.py`:151  (method)
 - `_FauxBot.__init__` — `tests/test_commandes_en_double.py`:175  (method)
 - `_FauxDB.__init__` — `tests/test_activite_observation.py`:71  (method)
@@ -726,6 +745,7 @@
 - `_Guilde.__init__` — `tests/test_revue_tickets.py`:115  (method)
 - `_Images.__init__` — `outils/icones_rellseas.py`:909  (method)
 - `_Invalide.__init__` — `textes.py`:66  (method)
+- `_Invalide.__init__` — `tickets_interdits.py`:84  (method)
 - `_Lecteur.__init__` — `transcript_store.py`:151  (method)
 - `_Membre.__init__` — `tests/test_activite.py`:58  (method)
 - `_Membre.__init__` — `tests/test_activite_demontage.py`:81  (method)
@@ -735,23 +755,24 @@
 - `_Onboarding.__init__` — `tests/test_visibilite_serveur.py`:39  (method)
 - `_OwnerView.__init__` — `admin_panels_v2.py`:77  (method)
 - `_Perms.__init__` — `tests/test_activite_demontage.py`:25  (method)
-- `_Personnes.__init__` — `tableau.py`:807  (method)
-- `_Prise.__init__` — `tableau.py`:3523  (method)
+- `_Personnes.__init__` — `tableau.py`:812  (method)
+- `_Prise.__init__` — `tableau.py`:3549  (method)
 - `_Proxy.__init__` — `tests/test_revue_cadeaux.py`:99  (method)
-- `_RadieAppelModal.__init__` — `bot.py`:2650  (method)
-- `_Refus.__init__` — `tableau.py`:614  (method)
+- `_RadieAppelModal.__init__` — `bot.py`:2654  (method)
+- `_Refus.__init__` — `tableau.py`:619  (method)
 - `_Rep.__init__` — `tests/test_forum_refus.py`:65  (method)
+- `_Rep.__init__` — `tests/test_gif_texte.py`:21  (method)
 - `_Rep.__init__` — `tests/test_youtube_chaine.py`:95  (method)
 - `_Reponse.__init__` — `tests/test_candidature_site.py`:535  (method)
 - `_Reponse.__init__` — `tests/test_site_equipage.py`:598  (method)
-- `_ResumeurPasserelle.__init__` — `bot.py`:33582  (method)
-- `_RgpdPurgeModal.__init__` — `bot.py`:11990  (method)
+- `_ResumeurPasserelle.__init__` — `bot.py`:33794  (method)
+- `_RgpdPurgeModal.__init__` — `bot.py`:12162  (method)
 - `_Role.__init__` — `tests/test_activite.py`:53  (method)
 - `_Role.__init__` — `tests/test_activite_demontage.py`:30  (method)
 - `_Role.__init__` — `tests/test_logs_site.py`:433  (method)
 - `_Role.__init__` — `tests/test_revue_tickets.py`:106  (method)
 - `_Role.__init__` — `tests/test_visibilite_serveur.py`:21  (method)
-- `_Salle.__init__` — `tableau.py`:3547  (method)
+- `_Salle.__init__` — `tableau.py`:3573  (method)
 - `_Salon.__init__` — `tests/test_activite_demontage.py`:62  (method)
 - `_Salon.__init__` — `tests/test_bouclier.py`:79  (method)
 - `_Salon.__init__` — `tests/test_conversation_tickets.py`:69  (method)
@@ -759,16 +780,17 @@
 - `_Salon.__init__` — `tests/test_recours_v2.py`:91  (method)
 - `_Salon.__init__` — `tests/test_tickets_v2.py`:78  (method)
 - `_Salon.__init__` — `tests/test_visibilite_serveur.py`:29  (method)
-- `_Serveur.__init__` — `tableau.py`:3061  (method)
+- `_Serveur.__init__` — `tableau.py`:3087  (method)
 - `_Sess.__init__` — `tests/test_forum_refus.py`:79  (method)
+- `_Session.__init__` — `tests/test_gif_texte.py`:35  (method)
 - `_Session.__init__` — `tests/test_youtube_chaine.py`:111  (method)
 - `_SocialHandleModal.__init__` — `admin_panels_v2.py`:379  (method)
 - `_Socle.__init__` — `tests/test_activite_observation.py`:33  (method)
-- `_StaffSanctionModal.__init__` — `bot.py`:28515  (method)
+- `_StaffSanctionModal.__init__` — `bot.py`:28721  (method)
 - `_StubCursor.__init__` — `tests/conftest.py`:24  (method)
 - `_Surcharge.__init__` — `tests/test_activite_demontage.py`:54  (method)
 - `_Texte.__init__` — `tests/test_sante_salons.py`:28  (method)
-- `_Verrou.__init__` — `tableau.py`:3512  (method)
+- `_Verrou.__init__` — `tableau.py`:3538  (method)
 - `_Vocal.__init__` — `tests/test_sante_salons.py`:36  (method)
 - `Rien.__iter__` — `tests/test_revue_moderation.py`:80  (method)
 - `FauxMoi.__le__` — `tests/test_installation_auto.py`:278  (method)
@@ -777,7 +799,7 @@
 - `Role.__le__` — `tests/test_revue_moderation.py`:107  (method)
 - `FauxRole.__lt__` — `tests/test_off_radiation.py`:63  (method)
 - `FauxRole.__lt__` — `tests/test_rellseas.py`:147  (method)
-- `Role.__lt__` — `tests/banc_ticket_recrutement.py`:165  (method)
+- `Role.__lt__` — `tests/banc_ticket_recrutement.py`:166  (method)
 - `Role.__lt__` — `tests/test_metiers.py`:87  (method)
 - `Role.__lt__` — `tests/test_qui_peut_quoi.py`:91  (method)
 - `Role.__lt__` — `tests/test_revue_moderation.py`:104  (method)
@@ -786,201 +808,213 @@
 - `_Espace.__missing__` — `tests/test_revue_moderation.py`:87  (method)
 - `Forme.__or__` — `outils/dessins_site.py`:418  (method)
 - `Role.__repr__` — `tests/test_metiers.py`:93  (method)
-- `Membre.__str__` — `tests/banc_ticket_recrutement.py`:204  (method)
+- `Membre.__str__` — `tests/banc_ticket_recrutement.py`:205  (method)
 - `Membre.__str__` — `tests/test_clan.py`:82  (method)
 - `Membre.__str__` — `tests/test_site_moderation.py`:43  (method)
 - `_Radie.__str__` — `tests/test_recours_v2.py`:169  (method)
 - `Forme.__sub__` — `outils/dessins_site.py`:421  (method)
 - `_a_garder` — `nettoyage.py`:125  (def)
-- `_a_la_tete` — `bot.py`:6384  (def)
+- `_a_la_tete` — `bot.py`:6530  (def)
 - `_absent` — `tests/test_boosts.py`:23  (def)
 - `_absent` — `tests/test_revue_reste.py`:64  (def)
 - `_absolue` — `roblox_news_contenu.py`:285  (def)
-- `_access_gate_reason` — `bot.py`:8137  (async def)
+- `_access_gate_reason` — `bot.py`:8283  (async def)
 - `_account_age_days` — `compromised_detector.py`:135  (def)
-- `_accueil_direction` — `site_equipage.py`:1252  (async def)
-- `_accueil_recrutement` — `bot.py`:6513  (async def)
+- `_accueil_direction` — `site_equipage.py`:1278  (async def)
+- `_accueil_recrutement` — `bot.py`:6659  (async def)
 - `_accueillir` — `annonces.py`:891  (async def)
-- `_acquitter` — `cadeaux.py`:1015  (async def)
-- `_acquitter` — `questionnaire.py`:2485  (async def)
-- `_action` — `questionnaire.py`:5933  (def)
+- `_acquitter` — `cadeaux.py`:1070  (async def)
+- `_acquitter` — `questionnaire.py`:2521  (async def)
+- `_action` — `questionnaire.py`:6179  (def)
+- `_action` — `tests/test_hierarchie.py`:57  (def)
 - `_action` — `tests/test_vitrine_equipes.py`:564  (def)
-- `_action_alerte_geree` — `bot.py`:6910  (async def)
-- `_action_candidature` — `bot.py`:6628  (async def)
-- `_action_casier_effacer` — `bot.py`:6991  (async def)
-- `_action_casier_restaurer` — `bot.py`:7034  (async def)
-- `_action_casier_serveur` — `bot.py`:7011  (async def)
-- `_action_clan_ajouter` — `bot.py`:6684  (async def)
-- `_action_clan_prevenir` — `bot.py`:6710  (async def)
-- `_action_clan_rappel_annuler` — `bot.py`:6770  (async def)
-- `_action_clan_retirer` — `bot.py`:6779  (async def)
-- `_action_clan_retirer_lot` — `bot.py`:6787  (async def)
-- `_action_debannir` — `bot.py`:7047  (async def)
-- `_action_fiche_retirer` — `bot.py`:6928  (async def)
-- `_action_hors_tete` — `tableau.py`:732  (async def)
-- `_action_moderer` — `bot.py`:6820  (async def)
-- `_action_question` — `bot.py`:6895  (async def)
-- `_action_sanction_retirer` — `bot.py`:6959  (async def)
-- `_action_sondage_retirer` — `bot.py`:7124  (async def)
-- `_action_suggestion_repondre` — `bot.py`:7110  (async def)
-- `_action_suggestion_retirer` — `bot.py`:7120  (async def)
-- `_action_ticket_fermer` — `bot.py`:6614  (async def)
+- `_action_alerte_geree` — `bot.py`:7056  (async def)
+- `_action_candidature` — `bot.py`:6774  (async def)
+- `_action_casier_effacer` — `bot.py`:7137  (async def)
+- `_action_casier_restaurer` — `bot.py`:7180  (async def)
+- `_action_casier_serveur` — `bot.py`:7157  (async def)
+- `_action_clan_ajouter` — `bot.py`:6830  (async def)
+- `_action_clan_prevenir` — `bot.py`:6856  (async def)
+- `_action_clan_rappel_annuler` — `bot.py`:6916  (async def)
+- `_action_clan_retirer` — `bot.py`:6925  (async def)
+- `_action_clan_retirer_lot` — `bot.py`:6933  (async def)
+- `_action_debannir` — `bot.py`:7193  (async def)
+- `_action_fiche_retirer` — `bot.py`:7074  (async def)
+- `_action_hors_tete` — `tableau.py`:737  (async def)
+- `_action_moderer` — `bot.py`:6966  (async def)
+- `_action_question` — `bot.py`:7041  (async def)
+- `_action_sanction_retirer` — `bot.py`:7105  (async def)
+- `_action_sondage_retirer` — `bot.py`:7270  (async def)
+- `_action_suggestion_repondre` — `bot.py`:7256  (async def)
+- `_action_suggestion_retirer` — `bot.py`:7266  (async def)
+- `_action_ticket_fermer` — `bot.py`:6760  (async def)
 - `_actions_du_bot` — `tests/test_site_v2_port.py`:41  (def)
-- `_activite_boot` — `bot.py`:21930  (async def)
-- `_activite_suivi` — `bot.py`:31547  (async def)
-- `_actualites_direction` — `site_equipage.py`:580  (async def)
-- `_actus_en_annonces` — `bot.py`:14195  (async def)
+- `_activite` — `questionnaire.py`:4940  (async def)
+- `_activite_boot` — `bot.py`:22108  (async def)
+- `_activite_suivi` — `bot.py`:31759  (async def)
+- `_actualites_direction` — `site_equipage.py`:585  (async def)
+- `_actus_en_annonces` — `bot.py`:14366  (async def)
 - `_Adaptateur` — `tests/test_social_sans_gel.py`:91  (class)
-- `_admis` — `tests/test_acces_site.py`:420  (def)
-- `_adresse_cdn` — `affiches.py`:1012  (def)
-- `_affiche` — `affiches.py`:618  (async def)
-- `_affiche_du_membre` — `affiches.py`:623  (async def)
-- `_affiche_publique` — `site_equipage.py`:388  (def)
-- `_afficher_panneau` — `bot.py`:12070  (async def)
+- `_admis` — `tests/test_acces_site.py`:442  (def)
+- `_adresse_a_quelqu_un` — `reponses_auto.py`:360  (def)
+- `_adresse_cdn` — `affiches.py`:1038  (def)
+- `_affiche` — `affiches.py`:627  (async def)
+- `_affiche_du_membre` — `affiches.py`:632  (async def)
+- `_affiche_publique` — `site_equipage.py`:389  (def)
+- `_afficher_panneau` — `bot.py`:12242  (async def)
 - `Monde._affiches` — `outils/site_maquette.py`:796  (method)
-- `_affiches` — `affiches.py`:608  (async def)
+- `_affiches` — `affiches.py`:617  (async def)
 - `_affiches` — `outils/dessins_site.py`:1182  (def)
-- `_affiches_actives` — `site_equipage.py`:410  (async def)
-- `_affiches_demo` — `outils/site_local.py`:1016  (async def)
-- `_age_gate_nsfw` — `bot.py`:24103  (async def)
-- `_age_s` — `bot.py`:15764  (def)
+- `_affiches_actives` — `site_equipage.py`:415  (async def)
+- `_affiches_demo` — `outils/site_local.py`:1060  (async def)
+- `_age_gate_nsfw` — `bot.py`:24305  (async def)
+- `_age_s` — `bot.py`:15935  (def)
 - `RellseasGestionV2._agir` — `rellseas_panneau.py`:920  (method)
 - `_aire` — `outils/dessins_site.py`:2792  (def)
 - `_ajoutees` — `securite_site.py`:296  (def)
 - `_ajouter` — `outils/dessins_site.py`:1581  (def)
-- `_ajuster` — `questionnaire.py`:2017  (def)
-- `_ajuster` — `site_vitrine.py`:560  (def)
+- `_ajuster` — `questionnaire.py`:2053  (def)
+- `_ajuster` — `site_vitrine.py`:657  (def)
 - `_alert_owner_integrity` — `db_backup.py`:55  (def)
-- `_alerte_forte_site` — `bot.py`:7286  (async def)
-- `_alerte_sauvegarde` — `bot.py`:15653  (async def)
-- `_alerte_securite_site` — `bot.py`:7267  (async def)
-- `_alertes` — `tableau.py`:1208  (async def)
-- `_amnistie_attente` — `bot.py`:7105  (async def)
-- `_amovible` — `metiers.py`:353  (def)
-- `_analyse_hote` — `bot.py`:11442  (def)
-- `_anciens_salons` — `bot.py`:7364  (async def)
-- `_anciens_salons_clan` — `bot.py`:15619  (def)
+- `_alerte_forte_site` — `bot.py`:7432  (async def)
+- `_alerte_sauvegarde` — `bot.py`:15824  (async def)
+- `_alerte_securite_site` — `bot.py`:7413  (async def)
+- `_alertes` — `tableau.py`:1213  (async def)
+- `_alt_alerte_permise` — `bot.py`:11954  (def)
+- `_amnistie_attente` — `bot.py`:7251  (async def)
+- `_amovible` — `metiers.py`:396  (def)
+- `_analyse_hote` — `bot.py`:11594  (def)
+- `_anciens_salons` — `bot.py`:7510  (async def)
+- `_anciens_salons_clan` — `bot.py`:15790  (def)
 - `_ancre` — `outils/dessins_site.py`:822  (def)
 - `_anneau` — `outils/dessins_site.py`:1558  (def)
 - `_anneau_rect` — `outils/dessins_site.py`:2893  (def)
 - `_annonce` — `tests/test_annonces_modifiables.py`:330  (def)
 - `_annonce` — `tests/test_social_sans_gel.py`:104  (def)
-- `_annoncer` — `cadeaux.py`:1466  (async def)
-- `_annoncer` — `entraide.py`:1011  (async def)
+- `_annoncer` — `cadeaux.py`:1521  (async def)
+- `_annoncer` — `entraide.py`:1024  (async def)
 - `_annoncer_arrivees` — `annonces.py`:870  (async def)
 - `_annoncer_sans_casser` — `websub_youtube.py`:179  (async def)
-- `_annoncer_video_youtube` — `bot.py`:30101  (async def)
-- `_annoncer_websub` — `bot.py`:30187  (async def)
+- `_annoncer_video_youtube` — `bot.py`:30313  (async def)
+- `_annoncer_websub` — `bot.py`:30399  (async def)
 - `_annonces` — `outils/dessins_site.py`:1389  (def)
-- `_annonces` — `tableau.py`:1266  (async def)
-- `_annonces_journal` — `bot.py`:15239  (async def)
+- `_annonces` — `tableau.py`:1271  (async def)
+- `_annonces_journal` — `bot.py`:15410  (async def)
 - `_annonces_pretes` — `tests/test_zones.py`:502  (def)
-- `_announce_sanction_public` — `bot.py`:4653  (async def)
-- `_anns_path` — `social_media.py`:1072  (def)
-- `ConfirmerAnciensSalons._annuler` — `bot.py`:7643  (method)
-- `ConfirmerArchives._annuler` — `bot.py`:14939  (method)
-- `ConfirmerIsolementV2._annuler` — `bot.py`:18743  (method)
+- `_announce_sanction_public` — `bot.py`:4655  (async def)
+- `_anns_path` — `social_media.py`:1084  (def)
+- `ConfirmerAnciensSalons._annuler` — `bot.py`:7789  (method)
+- `ConfirmerArchives._annuler` — `bot.py`:15110  (method)
+- `ConfirmerIsolementV2._annuler` — `bot.py`:18914  (method)
 - `_annuler` — `outils/dessins_site.py`:1588  (def)
-- `_antinuke_check` — `bot.py`:25243  (async def)
-- `_antinuke_respond` — `bot.py`:25289  (async def)
-- `_AntiRaidActionPickerV2` — `bot.py`:12765  (class)
-- `_AntiRaidThresholdsModal` — `bot.py`:12739  (class)
+- `_antinuke_check` — `bot.py`:25444  (async def)
+- `_antinuke_respond` — `bot.py`:25490  (async def)
+- `_AntiRaidActionPickerV2` — `bot.py`:12937  (class)
+- `_AntiRaidThresholdsModal` — `bot.py`:12911  (class)
 - `_apercu` — `outils/dessins_site.py`:1341  (def)
-- `_apercu` — `questionnaire.py`:3335  (async def)
+- `_apercu` — `questionnaire.py`:3371  (async def)
 - `_apercu_actualites` — `longevite.py`:475  (async def)
 - `_apercu_audit` — `longevite.py`:556  (async def)
-- `_apercu_candidatures` — `tableau.py`:3196  (async def)
-- `_apercu_candidatures_acceptees` — `tableau.py`:3204  (async def)
+- `_apercu_candidatures` — `tableau.py`:3222  (async def)
+- `_apercu_candidatures_acceptees` — `tableau.py`:3230  (async def)
 - `_apercu_empreintes` — `longevite.py`:534  (async def)
 - `_apercu_entraide` — `longevite.py`:461  (async def)
 - `_apercu_equipes` — `longevite.py`:634  (async def)
 - `_apercu_idees` — `longevite.py`:436  (async def)
 - `_apercu_invitations` — `longevite.py`:547  (async def)
-- `_apercu_journal` — `tableau.py`:3176  (async def)
-- `_apercu_journal_messages` — `tableau.py`:3171  (async def)
-- `_apercu_medias` — `tableau.py`:3208  (async def)
-- `_apercu_ops` — `tableau.py`:3217  (async def)
+- `_apercu_journal` — `tableau.py`:3202  (async def)
+- `_apercu_journal_messages` — `tableau.py`:3197  (async def)
+- `_apercu_medias` — `tableau.py`:3234  (async def)
+- `_apercu_ops` — `tableau.py`:3243  (async def)
 - `_apercu_orphelins` — `longevite.py`:726  (async def)
 - `_apercu_portraits` — `longevite.py`:503  (async def)
 - `_apercu_questions` — `longevite.py`:405  (async def)
-- `_apercu_sessions` — `tableau.py`:3221  (async def)
+- `_apercu_sessions` — `tableau.py`:3247  (async def)
 - `_apercu_sondages` — `longevite.py`:413  (async def)
 - `_apercu_tickets` — `longevite.py`:373  (async def)
-- `_apercu_transcripts` — `tableau.py`:3180  (async def)
-- `_api_retablie` — `bot.py`:20136  (def)
-- `_api_warning_state_file_path` — `bot.py`:19986  (def)
-- `_appareil` — `tableau.py`:556  (def)
+- `_apercu_transcripts` — `tableau.py`:3206  (async def)
+- `_api_retablie` — `bot.py`:20307  (def)
+- `_api_warning_state_file_path` — `bot.py`:20157  (def)
+- `_appareil` — `tableau.py`:561  (def)
 - `_appeler` — `evenements.py`:368  (async def)
 - `_appeler_setup` — `outils/site_local.py`:222  (async def)
 - `_appels` — `tests/test_rellseas.py`:41  (def)
 - `_applique_depuis` — `recidivism.py`:366  (async def)
-- `VueTypesTickets._appliquer` — `bot.py`:9340  (method)
+- `VueTypesTickets._appliquer` — `bot.py`:9489  (method)
+- `_appliquer` — `tickets_interdits.py`:330  (async def)
 - `_appliquer_modification` — `evenements.py`:1983  (def)
-- `_appliquer_op` — `tableau.py`:2482  (async def)
-- `_apply_night_slowmode` — `bot.py`:8205  (async def)
-- `_apres_casier` — `bot.py`:6939  (async def)
-- `_apres_ecriture` — `site_equipage.py`:1256  (def)
+- `_appliquer_op` — `tableau.py`:2505  (async def)
+- `_appliquer_roles` — `hierarchie.py`:691  (async def)
+- `_apply_night_slowmode` — `bot.py`:8351  (async def)
+- `_apres_casier` — `bot.py`:7085  (async def)
+- `_apres_ecriture` — `hierarchie.py`:719  (def)
+- `_apres_ecriture` — `site_equipage.py`:1282  (def)
 - `_apres_envoi` — `candidature_site.py`:1258  (async def)
 - `_arbre` — `tests/test_tickets_fils.py`:266  (def)
 - `_arc` — `outils/dessins_site.py`:151  (def)
 - `_archiver` — `zones.py`:627  (async def)
-- `_archiver_fil` — `bot.py`:15305  (async def)
+- `_archiver_fil` — `bot.py`:15476  (async def)
 - `_archives_d_avant` — `tests/test_zones.py`:292  (def)
-- `_arm_global_rl_backoff` — `bot.py`:32180  (def)
-- `_arret_propre` — `bot.py`:15158  (async def)
+- `_arm_global_rl_backoff` — `bot.py`:32392  (def)
+- `_arret_propre` — `bot.py`:15329  (async def)
 - `_arrivant` — `tests/test_revue_cadeaux.py`:557  (def)
-- `_assembler` — `questionnaire.py`:1794  (def)
+- `_assembler` — `questionnaire.py`:1830  (def)
+- `_Asset` — `tests/test_vitrine_portraits.py`:29  (class)
 - `_asset_dir` — `transcript_store.py`:67  (def)
 - `_asset_handler` — `health_server.py`:202  (async def)
-- `_assurer` — `questionnaire.py`:1406  (async def)
-- `_assurer_depart` — `site_equipage.py`:473  (async def)
-- `_Asyncio` — `tests/banc_ticket_recrutement.py`:74  (class)
+- `_assurer` — `questionnaire.py`:1442  (async def)
+- `_assurer_depart` — `hierarchie.py`:254  (async def)
+- `_assurer_depart` — `site_equipage.py`:478  (async def)
+- `_Asyncio` — `tests/banc_ticket_recrutement.py`:75  (class)
 - `_atom` — `tests/test_publications.py`:99  (def)
 - `_atom` — `tests/test_youtube_chaine.py`:162  (def)
 - `_attendre` — `recrutements.py`:551  (async def)
 - `_attendre` — `tests/test_direct.py`:127  (async def)
 - `_attendues` — `outils/icones_rellseas.py`:919  (def)
-- `_attente` — `faq.py`:193  (def)
 - `_attention` — `outils/dessins_site.py`:1752  (def)
-- `_attributs` — `affiches.py`:650  (def)
+- `_attribuer` — `tests/test_hierarchie.py`:43  (def)
+- `_attribuer_au_recrutement` — `metiers.py`:1271  (async def)
+- `_attributs` — `affiches.py`:666  (def)
 - `_attrs` — `outils/dessins_site.py`:631  (def)
-- `_au_dessus_de_la_direction` — `bot.py`:8530  (def)
-- `_au_journal` — `bot.py`:6403  (async def)
-- `_au_journal` — `questionnaire.py`:1221  (async def)
-- `_audit_actor` — `bot.py`:23780  (async def)
+- `_au_clan` — `hierarchie.py`:408  (def)
+- `_au_dessus_de_la_direction` — `bot.py`:8676  (def)
+- `_au_journal` — `bot.py`:6549  (async def)
+- `_au_journal` — `questionnaire.py`:1257  (async def)
+- `_audit_actor` — `bot.py`:23982  (async def)
 - `_aujourdhui` — `activite.py`:138  (def)
 - `_Auteur` — `tests/test_conversation_tickets.py`:41  (class)
-- `_automatique` — `questionnaire.py`:1727  (def)
-- `_automod_invitations` — `bot.py`:14459  (async def)
+- `_automatique` — `questionnaire.py`:1763  (def)
+- `_automod_invitations` — `bot.py`:14630  (async def)
 - `_autorisation_mention` — `roblox_panneau.py`:91  (def)
-- `_autorise_radiation` — `bot.py`:2421  (async def)
+- `_autorise_radiation` — `bot.py`:2425  (async def)
 - `_avatar` — `boosts.py`:41  (def)
 - `_avatar` — `suggestions.py`:299  (def)
-- `_avatar_cache_set` — `bot.py`:1406  (def)
-- `_avatar_roblox` — `affiches.py`:631  (def)
+- `_avatar_cache_set` — `bot.py`:1410  (def)
+- `_avatar_discord_age` — `site_vitrine.py`:174  (def)
+- `_avatar_roblox` — `affiches.py`:640  (def)
 - `_avec_horloge` — `tests/test_social_sans_gel.py`:24  (def)
-- `_avec_journal` — `questionnaire.py`:6025  (def)
-- `_avec_serveur` — `tableau.py`:3121  (def)
-- `YouTubeRSSAdapter._avertir_du_jour` — `social_media.py`:909  (method)
-- `_avertir_une_fois_par_jour` — `bot.py`:29787  (def)
-- `_avertissement_staff` — `bot.py`:27830  (async def)
+- `_avec_journal` — `questionnaire.py`:6271  (def)
+- `_avec_serveur` — `tableau.py`:3147  (def)
+- `YouTubeRSSAdapter._avertir_du_jour` — `social_media.py`:921  (method)
+- `_avertir_une_fois_par_jour` — `bot.py`:29999  (def)
+- `_avertissement_staff` — `bot.py`:28036  (async def)
 - `_avis` — `evenements.py`:1452  (async def)
-- `_avis` — `metiers.py`:991  (async def)
-- `_avis` — `questionnaire.py`:2491  (async def)
-- `_avis` — `site_vitrine.py`:603  (def)
-- `_b64` — `tableau.py`:418  (def)
+- `_avis` — `metiers.py`:1101  (async def)
+- `_avis` — `questionnaire.py`:2527  (async def)
+- `_avis` — `site_vitrine.py`:700  (def)
+- `_b64` — `tableau.py`:423  (def)
 - `_b64` — `tests/test_site_v2_serveur.py`:216  (def)
-- `RgpdPanelV2._back` — `bot.py`:12170  (method)
-- `SendPanelPaginatedView._back` — `bot.py`:21739  (method)
-- `_BadwordsSanctionActionView._back` — `bot.py`:18019  (method)
-- `_badword_strike` — `bot.py`:4725  (async def)
-- `_BadwordsAddListModal` — `bot.py`:17835  (class)
-- `_BadwordsRemoveListModal` — `bot.py`:17880  (class)
-- `_BadwordsSanctionActionView` — `bot.py`:17952  (class)
-- `_BadwordsThresholdsModal` — `bot.py`:17906  (class)
-- `_bail` — `tableau.py`:3709  (def)
+- `RgpdPanelV2._back` — `bot.py`:12342  (method)
+- `SendPanelPaginatedView._back` — `bot.py`:21917  (method)
+- `_BadwordsSanctionActionView._back` — `bot.py`:18190  (method)
+- `_badword_strike` — `bot.py`:4727  (async def)
+- `_BadwordsAddListModal` — `bot.py`:18006  (class)
+- `_BadwordsRemoveListModal` — `bot.py`:18051  (class)
+- `_BadwordsSanctionActionView` — `bot.py`:18123  (class)
+- `_BadwordsThresholdsModal` — `bot.py`:18077  (class)
+- `_bail` — `tableau.py`:3735  (def)
 - `_balayer` — `longevite.py`:652  (def)
-- `_balayer` — `tableau.py`:3808  (async def)
+- `_balayer` — `tableau.py`:3834  (async def)
 - `_Banc` — `tests/test_config_lost_update.py`:70  (class)
 - `_banc_casier` — `tests/test_longevite.py`:647  (def)
 - `_banc_claim` — `tests/test_revue_tickets.py`:804  (def)
@@ -988,12 +1022,12 @@
 - `_banc_journal` — `tests/test_longevite.py`:519  (def)
 - `_banc_log` — `tests/test_revue_tickets.py`:325  (def)
 - `_banc_tickets` — `tests/test_longevite.py`:587  (def)
-- `_banniere` — `questionnaire.py`:2670  (def)
+- `_banniere` — `questionnaire.py`:2706  (def)
 - `_banque` — `outils/site_maquette.py`:2669  (def)
 - `_bas` — `outils/dessins_site.py`:1620  (def)
 - `BoutonNotif._basculer` — `notifs.py`:103  (method)
 - `RellseasGestionV2._basculer` — `rellseas_panneau.py`:881  (method)
-- `VueTypesTickets._basculer` — `bot.py`:9325  (method)
+- `VueTypesTickets._basculer` — `bot.py`:9474  (method)
 - `_base` — `outils/site_local.py`:211  (def)
 - `_base` — `tests/test_clan.py`:35  (def)
 - `_base` — `tests/test_conversation_tickets.py`:111  (def)
@@ -1007,376 +1041,383 @@
 - `_base` — `tests/test_revue_site.py`:57  (def)
 - `_base` — `tests/test_revue_tickets.py`:68  (def)
 - `_base` — `tests/test_site_v2_serveur.py`:107  (def)
-- `_base` — `tests/test_textes.py`:64  (def)
+- `_base` — `tests/test_textes.py`:65  (def)
 - `_base` — `tests/test_tickets_dossier.py`:39  (def)
 - `_base_espionnee` — `tests/test_longevite.py`:99  (def)
 - `_base_modifiee` — `tests/test_revue_cadeaux.py`:116  (def)
 - `_base_purge` — `tests/test_recrutement_ticket.py`:885  (async def)
-- `_battre_sentinelle` — `bot.py`:13248  (async def)
-- `_before` — `data_cleanup.py`:285  (async def)
+- `_battre_sentinelle` — `bot.py`:13420  (async def)
+- `_before` — `data_cleanup.py`:287  (async def)
 - `_before` — `recidivism.py`:552  (async def)
 - `_before_anomaly` — `observability.py`:832  (async def)
 - `_before_daily` — `observability.py`:798  (async def)
 - `_before_lockdown_expiry` — `raid_detector.py`:583  (async def)
 - `_before_loop` — `db_backup.py`:244  (async def)
-- `_before_weekly_security_report` — `bot.py`:3830  (async def)
+- `_before_weekly_security_report` — `bot.py`:3834  (async def)
 - `_berry` — `outils/dessins_site.py`:1862  (def)
-- `_berry` — `site_vitrine.py`:581  (def)
+- `_berry` — `site_vitrine.py`:678  (def)
 - `_bezier` — `outils/dessins_site.py`:191  (def)
 - `_bilan` — `rellseas_panneau.py`:325  (def)
-- `_bilan_courant` — `questionnaire.py`:2975  (async def)
-- `_bilan_sante_serveur` — `bot.py`:13529  (async def)
+- `_bilan_courant` — `questionnaire.py`:3011  (async def)
+- `_bilan_sante_serveur` — `bot.py`:13701  (async def)
 - `_billet` — `tests/test_news_file_et_traduction.py`:92  (def)
 - `_billet` — `tests/test_roblox_actualites.py`:86  (def)
-- `_bloc` — `site_equipage.py`:444  (async def)
+- `_bloc` — `site_equipage.py`:449  (async def)
 - `_bloc_liens` — `evenements.py`:982  (def)
-- `_bloc_liens` — `questionnaire.py`:2033  (def)
-- `_blocs` — `questionnaire.py`:5214  (def)
+- `_bloc_liens` — `questionnaire.py`:2069  (def)
+- `_blocs` — `questionnaire.py`:5460  (def)
 - `_blocs` — `roblox_news_contenu.py`:154  (def)
-- `_blocs` — `site_equipage.py`:437  (async def)
+- `_blocs` — `site_equipage.py`:442  (async def)
 - `_blocs_groupe` — `evenements.py`:1288  (def)
 - `_body` — `admin_panels_v2.py`:57  (def)
 - `Forme._boite` — `outils/dessins_site.py`:437  (method)
-- `_bonjour` — `tableau.py`:3665  (def)
-- `_booleen` — `affiches.py`:218  (def)
-- `_booleen` — `questionnaire.py`:1123  (def)
-- `_boosts_au_demarrage` — `bot.py`:15637  (async def)
+- `_bonjour` — `tableau.py`:3691  (def)
+- `_booleen` — `affiches.py`:227  (def)
+- `_booleen` — `questionnaire.py`:1159  (def)
+- `_boosts_au_demarrage` — `bot.py`:15808  (async def)
 - `_bord_dechire` — `outils/dessins_site.py`:2601  (def)
-- `_borne` — `data_cleanup.py`:166  (def)
-- `_borner` — `cadeaux.py`:2231  (def)
+- `_borne` — `data_cleanup.py`:168  (def)
+- `_borner` — `cadeaux.py`:2287  (def)
 - `_bornes` — `outils/patch_nameerrors_purge.py`:92  (def)
 - `_bornes_utc` — `observability.py`:189  (def)
 - `_bot` — `tests/test_config_secours.py`:19  (def)
 - `_boucle` — `tests/test_news_file_et_traduction.py`:62  (def)
 - `_boucle` — `tests/test_roblox_actualites.py`:303  (def)
 - `_bouclier` — `tests/test_bouclier.py`:68  (def)
-- `_bouclier_ecrire` — `bot.py`:3309  (async def)
-- `_bouclier_lire` — `bot.py`:3297  (async def)
+- `_bouclier_ecrire` — `bot.py`:3313  (async def)
+- `_bouclier_lire` — `bot.py`:3301  (async def)
 - `_boussole` — `outils/dessins_site.py`:841  (def)
-- `_bouton` — `questionnaire.py`:2100  (def)
+- `_bouton` — `questionnaire.py`:2136  (def)
 - `_bouton` — `tests/test_revue_cadeaux.py`:186  (def)
 - `_bouton_discord` — `evenements.py`:1037  (def)
 - `_bouton_ping` — `roblox_panneau.py`:61  (def)
 - `_boutons` — `tests/test_tickets_dossier.py`:106  (def)
-- `_boutons_de` — `outils/site_local.py`:687  (def)
+- `_boutons_de` — `outils/site_local.py`:707  (def)
 - `_boutons_liens` — `tests/test_annonces_modifiables.py`:187  (def)
 - `_boutons_reponse` — `evenements.py`:1114  (def)
-- `_brancher` — `tableau.py`:3641  (def)
+- `_brancher` — `tableau.py`:3667  (def)
 - `_brancher` — `tests/test_rellseas.py`:264  (def)
 - `_brancher` — `zones.py`:425  (async def)
-- `_brouillon_neuf` — `cadeaux.py`:2173  (def)
+- `_brouillon_neuf` — `cadeaux.py`:2229  (def)
 - `_brouillons` — `candidature_site.py`:574  (async def)
 - `_Bruit` — `outils/dessins_site.py`:2177  (class)
 - `_brut` — `textes.py`:171  (def)
-- `AltScanResultsPanelV2._build` — `bot.py`:18623  (method)
-- `EditPanelSelectViewV2._build` — `bot.py`:21058  (method)
-- `MainPanelV2._build` — `bot.py`:12243  (method)
-- `SendPanelPaginatedView._build` — `bot.py`:21646  (method)
-- `SuspectScanPanelV2._build` — `bot.py`:18902  (method)
-- `V2GenericChannelPicker._build` — `bot.py`:20463  (method)
-- `V2GenericRolePicker._build` — `bot.py`:20581  (method)
-- `_build_casier_panel` — `bot.py`:28751  (async def)
+- `AltScanResultsPanelV2._build` — `bot.py`:18794  (method)
+- `EditPanelSelectViewV2._build` — `bot.py`:21229  (method)
+- `MainPanelV2._build` — `bot.py`:12415  (method)
+- `SendPanelPaginatedView._build` — `bot.py`:21824  (method)
+- `SuspectScanPanelV2._build` — `bot.py`:19073  (method)
+- `V2GenericChannelPicker._build` — `bot.py`:20634  (method)
+- `V2GenericRolePicker._build` — `bot.py`:20752  (method)
+- `_build_casier_panel` — `bot.py`:28957  (async def)
 - `_build_layout` — `mod_dashboard.py`:227  (def)
 - `_build_panel_view` — `staff_sanction.py`:452  (def)
 - `_build_snapshot` — `owner_export.py`:49  (async def)
-- `_build_ticket_hub_view` — `bot.py`:9194  (async def)
-- `_build_ticket_panel_view` — `bot.py`:9524  (async def)
-- `_burst_timeout` — `bot.py`:5634  (async def)
+- `_build_ticket_hub_view` — `bot.py`:9343  (async def)
+- `_build_ticket_panel_view` — `bot.py`:9673  (async def)
+- `_burst_timeout` — `bot.py`:5699  (async def)
 - `_buste` — `outils/dessins_site.py`:1244  (def)
-- `_c` — `tests/test_cadeaux.py`:66  (def)
-- `_cadeaux_autorise` — `bot.py`:15168  (async def)
-- `_cadeaux_effacement` — `bot.py`:14144  (async def)
-- `_cadeaux_effacement_masse` — `bot.py`:14151  (async def)
-- `_cadeaux_journal` — `bot.py`:15177  (async def)
-- `_cadeaux_message` — `bot.py`:14130  (async def)
-- `_cadeaux_vocal` — `bot.py`:14137  (async def)
+- `_c` — `tests/test_cadeaux.py`:67  (def)
+- `_cadeaux_autorise` — `bot.py`:15339  (async def)
+- `_cadeaux_effacement` — `bot.py`:14315  (async def)
+- `_cadeaux_effacement_masse` — `bot.py`:14322  (async def)
+- `_cadeaux_journal` — `bot.py`:15348  (async def)
+- `_cadeaux_message` — `bot.py`:14301  (async def)
+- `_cadeaux_vocal` — `bot.py`:14308  (async def)
 - `_cadenas` — `outils/dessins_site.py`:1002  (def)
 - `_cadence` — `candidature_site.py`:1082  (def)
-- `_cadence_direct` — `tableau.py`:3827  (def)
+- `_cadence` — `reponses_auto.py`:399  (async def)
+- `_cadence_direct` — `tableau.py`:3853  (def)
 - `_cadence_libre` — `tests/test_vitrine_equipes.py`:60  (def)
-- `_cadences_libres` — `tests/test_acces_site.py`:238  (def)
+- `_cadences_libres` — `tests/test_acces_site.py`:259  (def)
 - `_calendrier` — `outils/dessins_site.py`:1198  (def)
-- `ClearAllConfirmView._cancel` — `bot.py`:27698  (method)
-- `TicketConfirmCreateView._cancel` — `bot.py`:9018  (method)
+- `ClearAllConfirmView._cancel` — `bot.py`:27904  (method)
+- `TicketConfirmCreateView._cancel` — `bot.py`:9164  (method)
 - `_cand` — `outils/site_maquette.py`:2827  (def)
-- `_candidat_autorise` — `tableau.py`:743  (async def)
+- `_candidat_autorise` — `tableau.py`:748  (async def)
 - `_candidature` — `health_server.py`:261  (async def)
-- `_candidature_demo` — `outils/site_local.py`:919  (async def)
+- `_candidature_demo` — `outils/site_local.py`:963  (async def)
 - `Monde._candidatures` — `outils/site_maquette.py`:594  (method)
 - `_candidatures` — `outils/dessins_site.py`:1169  (def)
-- `_candidatures_par_membre` — `questionnaire.py`:4552  (async def)
-- `_candidatures_refusees` — `tableau.py`:3103  (async def)
+- `_candidatures_par_membre` — `questionnaire.py`:4599  (async def)
+- `_candidatures_refusees` — `tableau.py`:3129  (async def)
 - `_canon` — `outils/dessins_site.py`:943  (def)
 - `_capitaine` — `equipages.py`:474  (async def)
 - `_capitainerie` — `outils/dessins_site.py`:1297  (def)
-- `_capture_loop_death_cause` — `bot.py`:15965  (def)
+- `_capture_loop_death_cause` — `bot.py`:16136  (def)
 - `_carte` — `outils/dessins_site.py`:1098  (def)
 - `_carte` — `tests/test_webhook_doublon.py`:93  (def)
-- `_carte_alerte_decidee` — `bot.py`:7211  (async def)
-- `_carte_de` — `tests/test_textes.py`:492  (def)
+- `_carte_alerte_decidee` — `bot.py`:7357  (async def)
+- `_carte_de` — `tests/test_textes.py`:493  (def)
 - `_carte_dossier` — `tests/test_recours_v2.py`:69  (def)
-- `_carte_equipe` — `bot.py`:8613  (def)
-- `_carte_recours_decidee` — `bot.py`:2945  (async def)
-- `_carte_site` — `evenements.py`:2581  (def)
-- `_carte_ticket` — `bot.py`:8944  (def)
-- `_carte_vigilance` — `bot.py`:7181  (def)
+- `_carte_equipe` — `bot.py`:8759  (def)
+- `_carte_protection_permise` — `bot.py`:4867  (def)
+- `_carte_recours_decidee` — `bot.py`:2949  (async def)
+- `_carte_site` — `evenements.py`:2632  (def)
+- `_carte_ticket` — `bot.py`:9090  (def)
+- `_carte_vigilance` — `bot.py`:7327  (def)
 - `_cartes_annonce` — `evenements.py`:1226  (def)
 - `_cartes_evenement` — `evenements.py`:1186  (def)
 - `_cartes_liste` — `evenements.py`:1330  (def)
-- `_cartes_v2` — `bot.py`:9686  (def)
-- `_cases` — `tests/test_acces_site.py`:378  (def)
+- `_cartes_v2` — `bot.py`:9835  (def)
+- `_cases` — `tests/test_acces_site.py`:400  (def)
 - `Monde._casier` — `outils/site_maquette.py`:426  (method)
 - `_casier` — `longevite.py`:382  (def)
-- `_casier` — `tableau.py`:1221  (async def)
-- `_CasierManageView` — `bot.py`:28784  (class)
+- `_casier` — `tableau.py`:1226  (async def)
+- `_CasierManageView` — `bot.py`:28990  (class)
 - `_cat` — `evenements.py`:664  (def)
+- `_cat` — `tests/test_sujets_interdits.py`:21  (def)
 - `Monde._catalogue` — `outils/site_maquette.py`:741  (method)
-- `_catalogue` — `affiches.py`:311  (async def)
+- `_catalogue` — `affiches.py`:320  (async def)
 - `_catalogue` — `outils/dessins_site.py`:1135  (def)
 - `_categorie` — `boosts.py`:130  (def)
 - `_categorie_archives` — `zones.py`:612  (async def)
 - `_categorie_de` — `roblox_news.py`:328  (def)
-- `_categorie_tickets` — `bot.py`:8382  (async def)
+- `_categorie_tickets` — `bot.py`:8528  (async def)
 - `_catmull` — `outils/dessins_site.py`:1463  (def)
-- `AntiRaidPanelV2._cb_action` — `bot.py`:12718  (method)
+- `AntiRaidPanelV2._cb_action` — `bot.py`:12890  (method)
 - `RellseasGestionV2._cb_activite` — `rellseas_panneau.py`:988  (method)
-- `BadwordsConfigPanelV2._cb_add` — `bot.py`:17774  (method)
+- `BadwordsConfigPanelV2._cb_add` — `bot.py`:17945  (method)
 - `SocialMediaPanelV2._cb_add` — `admin_panels_v2.py`:267  (method)
-- `LinkConfigPanelV2._cb_add_ch` — `bot.py`:18094  (method)
-- `ImmunePanelV2._cb_add_chan` — `bot.py`:19559  (method)
-- `LinkConfigPanelV2._cb_add_dom` — `bot.py`:18076  (method)
-- `ImmunePanelV2._cb_add_role` — `bot.py`:19463  (method)
-- `ImmunePanelV2._cb_add_user` — `bot.py`:19509  (method)
-- `PanelBlacklistView._cb_ajout` — `bot.py`:21519  (method)
-- `ImageConfigPanelV2._cb_allow_all` — `bot.py`:17641  (method)
+- `LinkConfigPanelV2._cb_add_ch` — `bot.py`:18265  (method)
+- `ImmunePanelV2._cb_add_chan` — `bot.py`:19730  (method)
+- `LinkConfigPanelV2._cb_add_dom` — `bot.py`:18247  (method)
+- `ImmunePanelV2._cb_add_role` — `bot.py`:19634  (method)
+- `ImmunePanelV2._cb_add_user` — `bot.py`:19680  (method)
+- `PanelBlacklistView._cb_ajout` — `bot.py`:21690  (method)
+- `ImageConfigPanelV2._cb_allow_all` — `bot.py`:17812  (method)
 - `VueApercu._cb_annuler` — `annonces.py`:649  (method)
-- `VueCadeau._cb_annuler` — `cadeaux.py`:2144  (method)
-- `VueCloturer._cb_annuler` — `entraide.py`:1296  (method)
-- `PanelEditViewV2._cb_apparence` — `bot.py`:21266  (method)
-- `VueCloturer._cb_autre` — `entraide.py`:1301  (method)
-- `VueCloturer._cb_avec` — `entraide.py`:1285  (method)
-- `ActionConfigPanelV2._cb_back` — `bot.py`:18403  (method)
-- `AltConfigPanelV2._cb_back` — `bot.py`:18567  (method)
-- `AltDetectionsPanelV2._cb_back` — `bot.py`:18876  (method)
-- `AltScanResultsPanelV2._cb_back` — `bot.py`:18706  (method)
-- `AntiRaidPanelV2._cb_back` — `bot.py`:12734  (method)
-- `BadwordsConfigPanelV2._cb_back` — `bot.py`:17825  (method)
-- `EditPanelSelectViewV2._cb_back` — `bot.py`:21088  (method)
-- `ImageConfigPanelV2._cb_back` — `bot.py`:17649  (method)
-- `ImmunePanelV2._cb_back` — `bot.py`:19622  (method)
-- `ImmuneRemoveViewV2._cb_back` — `bot.py`:19717  (method)
-- `LinkConfigPanelV2._cb_back` — `bot.py`:18131  (method)
-- `LogLevelPanelV2._cb_back` — `bot.py`:16766  (method)
-- `LogsCategoriesPanelV2._cb_back` — `bot.py`:16945  (method)
-- `LogsEventRoutingPanelV2._cb_back` — `bot.py`:16863  (method)
-- `LogsEventsPanelV2._cb_back` — `bot.py`:17077  (method)
-- `LogsExclusionsPanelV2._cb_back` — `bot.py`:17216  (method)
-- `LogsPanelV2._cb_back` — `bot.py`:16374  (method)
-- `LogsRoutingPanelV2._cb_back` — `bot.py`:16659  (method)
-- `ModerationPanelV2._cb_back` — `bot.py`:19377  (method)
-- `PanelEditViewV2._cb_back` — `bot.py`:21334  (method)
-- `ProtDetailV2._cb_back` — `bot.py`:17565  (method)
-- `ProtPanelV2._cb_back` — `bot.py`:17291  (method)
-- `SecurityChannelsPanelV2._cb_back` — `bot.py`:16542  (method)
+- `VueCadeau._cb_annuler` — `cadeaux.py`:2200  (method)
+- `VueCloturer._cb_annuler` — `entraide.py`:1309  (method)
+- `PanelEditViewV2._cb_apparence` — `bot.py`:21437  (method)
+- `VueCloturer._cb_autre` — `entraide.py`:1314  (method)
+- `VueCloturer._cb_avec` — `entraide.py`:1298  (method)
+- `ActionConfigPanelV2._cb_back` — `bot.py`:18574  (method)
+- `AltConfigPanelV2._cb_back` — `bot.py`:18738  (method)
+- `AltDetectionsPanelV2._cb_back` — `bot.py`:19047  (method)
+- `AltScanResultsPanelV2._cb_back` — `bot.py`:18877  (method)
+- `AntiRaidPanelV2._cb_back` — `bot.py`:12906  (method)
+- `BadwordsConfigPanelV2._cb_back` — `bot.py`:17996  (method)
+- `EditPanelSelectViewV2._cb_back` — `bot.py`:21259  (method)
+- `ImageConfigPanelV2._cb_back` — `bot.py`:17820  (method)
+- `ImmunePanelV2._cb_back` — `bot.py`:19793  (method)
+- `ImmuneRemoveViewV2._cb_back` — `bot.py`:19888  (method)
+- `LinkConfigPanelV2._cb_back` — `bot.py`:18302  (method)
+- `LogLevelPanelV2._cb_back` — `bot.py`:16937  (method)
+- `LogsCategoriesPanelV2._cb_back` — `bot.py`:17116  (method)
+- `LogsEventRoutingPanelV2._cb_back` — `bot.py`:17034  (method)
+- `LogsEventsPanelV2._cb_back` — `bot.py`:17248  (method)
+- `LogsExclusionsPanelV2._cb_back` — `bot.py`:17387  (method)
+- `LogsPanelV2._cb_back` — `bot.py`:16545  (method)
+- `LogsRoutingPanelV2._cb_back` — `bot.py`:16830  (method)
+- `ModerationPanelV2._cb_back` — `bot.py`:19548  (method)
+- `PanelEditViewV2._cb_back` — `bot.py`:21505  (method)
+- `ProtDetailV2._cb_back` — `bot.py`:17736  (method)
+- `ProtPanelV2._cb_back` — `bot.py`:17462  (method)
+- `SecurityChannelsPanelV2._cb_back` — `bot.py`:16713  (method)
 - `SocialMediaPanelV2._cb_back` — `admin_panels_v2.py`:273  (method)
-- `TicketMainPanelV2._cb_back` — `bot.py`:21014  (method)
-- `_AntiRaidActionPickerV2._cb_back` — `bot.py`:12817  (method)
-- `AltScanResultsPanelV2._cb_ban80` — `bot.py`:18700  (method)
+- `TicketMainPanelV2._cb_back` — `bot.py`:21185  (method)
+- `_AntiRaidActionPickerV2._cb_back` — `bot.py`:12989  (method)
+- `AltScanResultsPanelV2._cb_ban80` — `bot.py`:18871  (method)
 - `SondagesPanelV2._cb_basculer` — `sondages.py`:664  (method)
 - `SuggestionsPanelV2._cb_basculer` — `suggestions.py`:865  (method)
-- `PanelEditViewV2._cb_blacklist` — `bot.py`:21280  (method)
-- `TicketMainPanelV2._cb_blacklist` — `bot.py`:20985  (method)
-- `ImageConfigPanelV2._cb_block_all` — `bot.py`:17645  (method)
-- `LogsEventRoutingPanelV2._cb_cat` — `bot.py`:16830  (method)
-- `PanelEditViewV2._cb_cat` — `bot.py`:21210  (method)
-- `LogsPanelV2._cb_categories` — `bot.py`:16334  (method)
-- `ImmuneRemoveViewV2._cb_chan` — `bot.py`:19709  (method)
-- `VueCadeau._cb_chance` — `cadeaux.py`:2111  (method)
-- `LogsEventsPanelV2._cb_change_cat` — `bot.py`:17073  (method)
-- `LogsExclusionsPanelV2._cb_change_cat` — `bot.py`:17192  (method)
-- `LogsExclusionsPanelV2._cb_change_event` — `bot.py`:17212  (method)
+- `PanelEditViewV2._cb_blacklist` — `bot.py`:21451  (method)
+- `TicketMainPanelV2._cb_blacklist` — `bot.py`:21156  (method)
+- `ImageConfigPanelV2._cb_block_all` — `bot.py`:17816  (method)
+- `LogsEventRoutingPanelV2._cb_cat` — `bot.py`:17001  (method)
+- `PanelEditViewV2._cb_cat` — `bot.py`:21381  (method)
+- `LogsPanelV2._cb_categories` — `bot.py`:16505  (method)
+- `ImmuneRemoveViewV2._cb_chan` — `bot.py`:19880  (method)
+- `VueCadeau._cb_chance` — `cadeaux.py`:2167  (method)
+- `LogsEventsPanelV2._cb_change_cat` — `bot.py`:17244  (method)
+- `LogsExclusionsPanelV2._cb_change_cat` — `bot.py`:17363  (method)
+- `LogsExclusionsPanelV2._cb_change_event` — `bot.py`:17383  (method)
 - `RellseasGestionV2._cb_chercher` — `rellseas_panneau.py`:891  (method)
-- `AltDetectionsPanelV2._cb_clear` — `bot.py`:18860  (method)
-- `BadwordsConfigPanelV2._cb_clear` — `bot.py`:17784  (method)
-- `ImmunePanelV2._cb_clear` — `bot.py`:19610  (method)
-- `LinkConfigPanelV2._cb_clear_ch` — `bot.py`:18127  (method)
-- `LinkConfigPanelV2._cb_clear_wl` — `bot.py`:18090  (method)
-- `SuspectScanPanelV2._cb_close` — `bot.py`:19005  (method)
-- `VueCadeau._cb_conditions` — `cadeaux.py`:2117  (method)
-- `AltConfigPanelV2._cb_conf` — `bot.py`:18537  (method)
-- `ProtDetailV2._cb_config` — `bot.py`:17500  (method)
+- `AltDetectionsPanelV2._cb_clear` — `bot.py`:19031  (method)
+- `BadwordsConfigPanelV2._cb_clear` — `bot.py`:17955  (method)
+- `ImmunePanelV2._cb_clear` — `bot.py`:19781  (method)
+- `LinkConfigPanelV2._cb_clear_ch` — `bot.py`:18298  (method)
+- `LinkConfigPanelV2._cb_clear_wl` — `bot.py`:18261  (method)
+- `SuspectScanPanelV2._cb_close` — `bot.py`:19176  (method)
+- `VueCadeau._cb_conditions` — `cadeaux.py`:2173  (method)
+- `AltConfigPanelV2._cb_conf` — `bot.py`:18708  (method)
+- `ProtDetailV2._cb_config` — `bot.py`:17671  (method)
 - `SondagesPanelV2._cb_creer` — `sondages.py`:678  (method)
 - `SuggestionsPanelV2._cb_creer` — `suggestions.py`:871  (method)
-- `AltConfigPanelV2._cb_cycle_action` — `bot.py`:18519  (method)
-- `EntraidePanelV2._cb_delai` — `entraide.py`:2042  (method)
-- `PanelEditViewV2._cb_delete` — `bot.py`:21322  (method)
-- `LogsPanelV2._cb_disable` — `bot.py`:16362  (method)
+- `AltConfigPanelV2._cb_cycle_action` — `bot.py`:18690  (method)
+- `EntraidePanelV2._cb_delai` — `entraide.py`:2055  (method)
+- `PanelEditViewV2._cb_delete` — `bot.py`:21493  (method)
+- `LogsPanelV2._cb_disable` — `bot.py`:16533  (method)
 - `RellseasGestionV2._cb_donner` — `rellseas_panneau.py`:982  (method)
-- `ActionConfigPanelV2._cb_duration` — `bot.py`:18400  (method)
-- `TicketMainPanelV2._cb_edit` — `bot.py`:21001  (method)
-- `LogsEventRoutingPanelV2._cb_event` — `bot.py`:16837  (method)
-- `LogsRoutingPanelV2._cb_event_routing` — `bot.py`:16625  (method)
-- `LogsPanelV2._cb_events` — `bot.py`:16352  (method)
-- `VueCadeau._cb_exclus` — `cadeaux.py`:2105  (method)
-- `LogsPanelV2._cb_exclusions` — `bot.py`:16357  (method)
+- `ActionConfigPanelV2._cb_duration` — `bot.py`:18571  (method)
+- `TicketMainPanelV2._cb_edit` — `bot.py`:21172  (method)
+- `LogsEventRoutingPanelV2._cb_event` — `bot.py`:17008  (method)
+- `LogsRoutingPanelV2._cb_event_routing` — `bot.py`:16796  (method)
+- `LogsPanelV2._cb_events` — `bot.py`:16523  (method)
+- `VueCadeau._cb_exclus` — `cadeaux.py`:2161  (method)
+- `LogsPanelV2._cb_exclusions` — `bot.py`:16528  (method)
 - `VueApercu._cb_fil` — `annonces.py`:638  (method)
-- `EntraidePanelV2._cb_garder` — `entraide.py`:2060  (method)
-- `TicketMainPanelV2._cb_hub` — `bot.py`:20939  (method)
-- `EntraidePanelV2._cb_installer` — `entraide.py`:2065  (method)
-- `AltScanResultsPanelV2._cb_kick70` — `bot.py`:18694  (method)
-- `SuspectScanPanelV2._cb_kick_all` — `bot.py`:18998  (method)
-- `SuspectScanPanelV2._cb_kick_bots` — `bot.py`:18993  (method)
-- `SuspectScanPanelV2._cb_kick_crit` — `bot.py`:18987  (method)
-- `VueCadeau._cb_lancer` — `cadeaux.py`:2149  (method)
-- `AccueilLangueView._cb_langue` — `bot.py`:32890  (method)
-- `LogsRoutingPanelV2._cb_level` — `bot.py`:16629  (method)
+- `EntraidePanelV2._cb_garder` — `entraide.py`:2073  (method)
+- `TicketMainPanelV2._cb_hub` — `bot.py`:21110  (method)
+- `EntraidePanelV2._cb_installer` — `entraide.py`:2078  (method)
+- `AltScanResultsPanelV2._cb_kick70` — `bot.py`:18865  (method)
+- `SuspectScanPanelV2._cb_kick_all` — `bot.py`:19169  (method)
+- `SuspectScanPanelV2._cb_kick_bots` — `bot.py`:19164  (method)
+- `SuspectScanPanelV2._cb_kick_crit` — `bot.py`:19158  (method)
+- `VueCadeau._cb_lancer` — `cadeaux.py`:2205  (method)
+- `AccueilLangueView._cb_langue` — `bot.py`:33102  (method)
+- `LogsRoutingPanelV2._cb_level` — `bot.py`:16800  (method)
 - `RellseasGestionV2._cb_liste` — `rellseas_panneau.py`:1024  (method)
-- `ProtDetailV2._cb_log` — `bot.py`:17541  (method)
-- `AntiRaidPanelV2._cb_log_channel` — `bot.py`:12725  (method)
-- `VueCadeau._cb_logique` — `cadeaux.py`:2122  (method)
-- `TicketMainPanelV2._cb_logs` — `bot.py`:20972  (method)
-- `VueCadeau._cb_lot` — `cadeaux.py`:2133  (method)
+- `ProtDetailV2._cb_log` — `bot.py`:17712  (method)
+- `AntiRaidPanelV2._cb_log_channel` — `bot.py`:12897  (method)
+- `VueCadeau._cb_logique` — `cadeaux.py`:2178  (method)
+- `TicketMainPanelV2._cb_logs` — `bot.py`:21143  (method)
+- `VueCadeau._cb_lot` — `cadeaux.py`:2189  (method)
 - `SocialMediaPanelV2._cb_manage` — `admin_panels_v2.py`:270  (method)
-- `PanelEditViewV2._cb_max` — `bot.py`:21260  (method)
+- `PanelEditViewV2._cb_max` — `bot.py`:21431  (method)
 - `RellseasGestionV2._cb_membres` — `rellseas_panneau.py`:863  (method)
 - `VueApercu._cb_mention` — `annonces.py`:631  (method)
-- `VueCadeau._cb_mention` — `cadeaux.py`:2138  (method)
+- `VueCadeau._cb_mention` — `cadeaux.py`:2194  (method)
 - `VueApercu._cb_modifier` — `annonces.py`:644  (method)
-- `VueCadeau._cb_mult` — `cadeaux.py`:2128  (method)
-- `TicketMainPanelV2._cb_new` — `bot.py`:20998  (method)
-- `AltDetectionsPanelV2._cb_next` — `bot.py`:18854  (method)
-- `AltScanResultsPanelV2._cb_next` — `bot.py`:18688  (method)
-- `SuspectScanPanelV2._cb_next` — `bot.py`:18975  (method)
-- `VueCertifier._cb_non` — `entraide.py`:1241  (method)
-- `VueCertifier._cb_ok` — `entraide.py`:1229  (method)
-- `EntraidePanelV2._cb_panneaux` — `entraide.py`:2091  (method)
-- `LogsRoutingPanelV2._cb_pick` — `bot.py`:16633  (method)
-- `LogsEventsPanelV2._cb_pick_cat` — `bot.py`:17044  (method)
-- `LogsExclusionsPanelV2._cb_pick_cat` — `bot.py`:17188  (method)
-- `LogLevelPanelV2._cb_pick_channel` — `bot.py`:16722  (method)
-- `LogsExclusionsPanelV2._cb_pick_event` — `bot.py`:17196  (method)
-- `LogsEventsPanelV2._cb_pick_events` — `bot.py`:17052  (method)
-- `LogsExclusionsPanelV2._cb_pick_roles` — `bot.py`:17200  (method)
-- `EntraidePanelV2._cb_ping` — `entraide.py`:2052  (method)
-- `AltDetectionsPanelV2._cb_prev` — `bot.py`:18849  (method)
-- `AltScanResultsPanelV2._cb_prev` — `bot.py`:18683  (method)
-- `SuspectScanPanelV2._cb_prev` — `bot.py`:18970  (method)
+- `VueCadeau._cb_mult` — `cadeaux.py`:2184  (method)
+- `TicketMainPanelV2._cb_new` — `bot.py`:21169  (method)
+- `AltDetectionsPanelV2._cb_next` — `bot.py`:19025  (method)
+- `AltScanResultsPanelV2._cb_next` — `bot.py`:18859  (method)
+- `SuspectScanPanelV2._cb_next` — `bot.py`:19146  (method)
+- `VueCertifier._cb_non` — `entraide.py`:1254  (method)
+- `VueCertifier._cb_ok` — `entraide.py`:1242  (method)
+- `EntraidePanelV2._cb_panneaux` — `entraide.py`:2104  (method)
+- `LogsRoutingPanelV2._cb_pick` — `bot.py`:16804  (method)
+- `LogsEventsPanelV2._cb_pick_cat` — `bot.py`:17215  (method)
+- `LogsExclusionsPanelV2._cb_pick_cat` — `bot.py`:17359  (method)
+- `LogLevelPanelV2._cb_pick_channel` — `bot.py`:16893  (method)
+- `LogsExclusionsPanelV2._cb_pick_event` — `bot.py`:17367  (method)
+- `LogsEventsPanelV2._cb_pick_events` — `bot.py`:17223  (method)
+- `LogsExclusionsPanelV2._cb_pick_roles` — `bot.py`:17371  (method)
+- `EntraidePanelV2._cb_ping` — `entraide.py`:2065  (method)
+- `AltDetectionsPanelV2._cb_prev` — `bot.py`:19020  (method)
+- `AltScanResultsPanelV2._cb_prev` — `bot.py`:18854  (method)
+- `SuspectScanPanelV2._cb_prev` — `bot.py`:19141  (method)
 - `VueApercu._cb_publier` — `annonces.py`:654  (method)
-- `PanelEditViewV2._cb_qs` — `bot.py`:21254  (method)
-- `VueCertifier._cb_qui` — `entraide.py`:1225  (method)
-- `MainPanelV2._cb_refresh` — `bot.py`:12446  (method)
-- `TicketMainPanelV2._cb_refresh` — `bot.py`:21010  (method)
-- `VueCloturer._cb_regle` — `entraide.py`:1289  (method)
+- `PanelEditViewV2._cb_qs` — `bot.py`:21425  (method)
+- `VueCertifier._cb_qui` — `entraide.py`:1238  (method)
+- `MainPanelV2._cb_refresh` — `bot.py`:12618  (method)
+- `TicketMainPanelV2._cb_refresh` — `bot.py`:21181  (method)
+- `VueCloturer._cb_regle` — `entraide.py`:1302  (method)
 - `RobloxPanelV2._cb_relever` — `roblox_panneau.py`:529  (method)
-- `BadwordsConfigPanelV2._cb_remove` — `bot.py`:17779  (method)
-- `ImmunePanelV2._cb_remove` — `bot.py`:19606  (method)
+- `BadwordsConfigPanelV2._cb_remove` — `bot.py`:17950  (method)
+- `ImmunePanelV2._cb_remove` — `bot.py`:19777  (method)
 - `SuggestionsPanelV2._cb_reposer` — `suggestions.py`:881  (method)
-- `SuspectScanPanelV2._cb_rescan` — `bot.py`:18981  (method)
+- `SuspectScanPanelV2._cb_rescan` — `bot.py`:19152  (method)
 - `RellseasGestionV2._cb_resultat` — `rellseas_panneau.py`:873  (method)
 - `RellseasGestionV2._cb_retirer` — `rellseas_panneau.py`:985  (method)
-- `EntraidePanelV2._cb_retour` — `entraide.py`:2097  (method)
+- `EntraidePanelV2._cb_retour` — `entraide.py`:2110  (method)
 - `RellseasPanelV2._cb_retour` — `rellseas_panneau.py`:301  (method)
 - `RobloxPanelV2._cb_retour` — `roblox_panneau.py`:550  (method)
 - `SondagesPanelV2._cb_retour` — `sondages.py`:688  (method)
 - `SuggestionsPanelV2._cb_retour` — `suggestions.py`:887  (method)
-- `PanelBlacklistView._cb_retrait` — `bot.py`:21533  (method)
-- `EntraidePanelV2._cb_role` — `entraide.py`:2028  (method)
-- `ImmuneRemoveViewV2._cb_role` — `bot.py`:19692  (method)
+- `PanelBlacklistView._cb_retrait` — `bot.py`:21707  (method)
+- `EntraidePanelV2._cb_role` — `entraide.py`:2041  (method)
+- `ImmuneRemoveViewV2._cb_role` — `bot.py`:19863  (method)
 - `RellseasPanelV2._cb_roles` — `rellseas_panneau.py`:267  (method)
-- `VueCadeau._cb_roles` — `cadeaux.py`:2099  (method)
-- `LogsPanelV2._cb_routing` — `bot.py`:16338  (method)
+- `VueCadeau._cb_roles` — `cadeaux.py`:2155  (method)
+- `LogsPanelV2._cb_routing` — `bot.py`:16509  (method)
 - `RellseasGestionV2._cb_salon` — `rellseas_panneau.py`:877  (method)
 - `RobloxPanelV2._cb_salon` — `roblox_panneau.py`:501  (method)
 - `SondagesPanelV2._cb_salon` — `sondages.py`:651  (method)
 - `SuggestionsPanelV2._cb_salon` — `suggestions.py`:848  (method)
 - `VueComposer._cb_salon` — `annonces.py`:494  (method)
-- `ProtDetailV2._cb_sanction` — `bot.py`:17522  (method)
-- `BadwordsConfigPanelV2._cb_sanction_action` — `bot.py`:17819  (method)
-- `AltConfigPanelV2._cb_scan` — `bot.py`:18540  (method)
-- `AntiRaidPanelV2._cb_scan` — `bot.py`:12680  (method)
-- `LogsPanelV2._cb_security_channels` — `bot.py`:16369  (method)
-- `ProtPanelV2._cb_sel` — `bot.py`:17285  (method)
-- `EditPanelSelectViewV2._cb_select` — `bot.py`:21083  (method)
-- `ImageConfigPanelV2._cb_select` — `bot.py`:17637  (method)
-- `LogsCategoriesPanelV2._cb_select` — `bot.py`:16937  (method)
-- `PanelEditViewV2._cb_send` — `bot.py`:21286  (method)
-- `LogsPanelV2._cb_set_channel` — `bot.py`:16319  (method)
-- `ModerationPanelV2._cb_set_clear` — `bot.py`:19370  (method)
-- `ModerationPanelV2._cb_set_direction` — `bot.py`:19373  (method)
-- `ModerationPanelV2._cb_set_inf` — `bot.py`:19367  (method)
-- `ModerationPanelV2._cb_set_logs` — `bot.py`:19358  (method)
-- `ModerationPanelV2._cb_set_mute` — `bot.py`:19364  (method)
-- `ModerationPanelV2._cb_set_warn` — `bot.py`:19361  (method)
-- `PanelEditViewV2._cb_staff` — `bot.py`:21232  (method)
-- `TicketMainPanelV2._cb_staff` — `bot.py`:20960  (method)
+- `ProtDetailV2._cb_sanction` — `bot.py`:17693  (method)
+- `BadwordsConfigPanelV2._cb_sanction_action` — `bot.py`:17990  (method)
+- `AltConfigPanelV2._cb_scan` — `bot.py`:18711  (method)
+- `AntiRaidPanelV2._cb_scan` — `bot.py`:12852  (method)
+- `LogsPanelV2._cb_security_channels` — `bot.py`:16540  (method)
+- `ProtPanelV2._cb_sel` — `bot.py`:17456  (method)
+- `EditPanelSelectViewV2._cb_select` — `bot.py`:21254  (method)
+- `ImageConfigPanelV2._cb_select` — `bot.py`:17808  (method)
+- `LogsCategoriesPanelV2._cb_select` — `bot.py`:17108  (method)
+- `PanelEditViewV2._cb_send` — `bot.py`:21457  (method)
+- `LogsPanelV2._cb_set_channel` — `bot.py`:16490  (method)
+- `ModerationPanelV2._cb_set_clear` — `bot.py`:19541  (method)
+- `ModerationPanelV2._cb_set_direction` — `bot.py`:19544  (method)
+- `ModerationPanelV2._cb_set_inf` — `bot.py`:19538  (method)
+- `ModerationPanelV2._cb_set_logs` — `bot.py`:19529  (method)
+- `ModerationPanelV2._cb_set_mute` — `bot.py`:19535  (method)
+- `ModerationPanelV2._cb_set_warn` — `bot.py`:19532  (method)
+- `PanelEditViewV2._cb_staff` — `bot.py`:21403  (method)
+- `TicketMainPanelV2._cb_staff` — `bot.py`:21131  (method)
 - `RellseasGestionV2._cb_tableau` — `rellseas_panneau.py`:1046  (method)
-- `AntiRaidPanelV2._cb_thresholds` — `bot.py`:12707  (method)
-- `BadwordsConfigPanelV2._cb_thresholds` — `bot.py`:17806  (method)
+- `AntiRaidPanelV2._cb_thresholds` — `bot.py`:12879  (method)
+- `BadwordsConfigPanelV2._cb_thresholds` — `bot.py`:17977  (method)
 - `RellseasPanelV2._cb_tickets` — `rellseas_panneau.py`:284  (method)
-- `AltConfigPanelV2._cb_toggle` — `bot.py`:18514  (method)
-- `AntiRaidPanelV2._cb_toggle` — `bot.py`:12699  (method)
-- `LogLevelPanelV2._cb_toggle` — `bot.py`:16753  (method)
-- `ProtDetailV2._cb_toggle` — `bot.py`:17494  (method)
-- `AltConfigPanelV2._cb_toggle_auto` — `bot.py`:18530  (method)
+- `AltConfigPanelV2._cb_toggle` — `bot.py`:18685  (method)
+- `AntiRaidPanelV2._cb_toggle` — `bot.py`:12871  (method)
+- `LogLevelPanelV2._cb_toggle` — `bot.py`:16924  (method)
+- `ProtDetailV2._cb_toggle` — `bot.py`:17665  (method)
+- `AltConfigPanelV2._cb_toggle_auto` — `bot.py`:18701  (method)
 - `RobloxPanelV2._cb_toggle_news` — `roblox_panneau.py`:509  (method)
-- `LogsPanelV2._cb_toggle_webhook` — `bot.py`:16343  (method)
-- `ImmuneRemoveViewV2._cb_user` — `bot.py`:19701  (method)
+- `LogsPanelV2._cb_toggle_webhook` — `bot.py`:16514  (method)
+- `ImmuneRemoveViewV2._cb_user` — `bot.py`:19872  (method)
 - `RellseasGestionV2._cb_vider` — `rellseas_panneau.py`:894  (method)
-- `AltConfigPanelV2._cb_view` — `bot.py`:18560  (method)
-- `PanelEditViewV2._cb_welcome` — `bot.py`:21273  (method)
-- `BadwordsConfigPanelV2._cb_wl_add` — `bot.py`:17790  (method)
-- `BadwordsConfigPanelV2._cb_wl_clear` — `bot.py`:17800  (method)
-- `BadwordsConfigPanelV2._cb_wl_remove` — `bot.py`:17795  (method)
-- `EntraidePanelV2._cb_zone` — `entraide.py`:2023  (method)
+- `AltConfigPanelV2._cb_view` — `bot.py`:18731  (method)
+- `PanelEditViewV2._cb_welcome` — `bot.py`:21444  (method)
+- `BadwordsConfigPanelV2._cb_wl_add` — `bot.py`:17961  (method)
+- `BadwordsConfigPanelV2._cb_wl_clear` — `bot.py`:17971  (method)
+- `BadwordsConfigPanelV2._cb_wl_remove` — `bot.py`:17966  (method)
+- `EntraidePanelV2._cb_zone` — `entraide.py`:2036  (method)
 - `_centre` — `outils/icones_rellseas.py`:1081  (def)
 - `_cfg` — `tests/test_activite.py`:211  (def)
 - `_cfg_path` — `unified_logger.py`:191  (def)
-- `_chaines` — `tests/test_acces_site.py`:593  (def)
+- `_chaines` — `tests/test_acces_site.py`:615  (def)
 - `_chaines` — `tests/test_candidat_ses_cases.py`:428  (def)
 - `_chaines` — `tests/test_vitrine_equipes.py`:46  (def)
 - `_chaines_de` — `outils/verif_boucles.py`:99  (def)
-- `_chaines_youtube_suivies` — `bot.py`:30178  (async def)
-- `_champ_fiche` — `questionnaire.py`:1553  (def)
-- `_champ_id` — `tableau.py`:4111  (def)
+- `_chaines_youtube_suivies` — `bot.py`:30390  (async def)
+- `_champ_fiche` — `questionnaire.py`:1589  (def)
+- `_champ_id` — `tableau.py`:4137  (def)
 - `_champs_natifs` — `evenements.py`:1626  (def)
-- `_changements` — `affiches.py`:708  (def)
-- `_changer_page` — `tableau.py`:3688  (def)
-- `_charge_par` — `tests/test_acces_site.py`:307  (def)
+- `_changements` — `affiches.py`:724  (def)
+- `_changer_page` — `tableau.py`:3714  (def)
+- `_charge_par` — `tests/test_acces_site.py`:328  (def)
 - `_charge_par` — `tests/test_securite_site.py`:100  (def)
-- `_charger` — `questions.py`:111  (async def)
+- `_charger` — `hierarchie.py`:299  (async def)
+- `_charger` — `questions.py`:140  (async def)
+- `_charger` — `sujets_interdits.py`:389  (def)
 - `_charger` — `tests/test_qui_peut_quoi.py`:63  (def)
 - `_charger` — `tests/test_revue_admin.py`:49  (def)
 - `_charger_sous_verrou` — `ocr_scan.py`:63  (def)
-- `_charger_textes` — `questionnaire.py`:2676  (async def)
+- `_charger_textes` — `questionnaire.py`:2712  (async def)
 - `_charges_dans` — `outils/verif_portees.py`:109  (def)
-- `RgpdPanelV2._check` — `bot.py`:12143  (method)
-- `_check_alt_account` — `bot.py`:33300  (async def)
-- `_check_auto_slow_mode` — `bot.py`:33400  (async def)
+- `RgpdPanelV2._check` — `bot.py`:12315  (method)
+- `_check_alt_account` — `bot.py`:33512  (async def)
+- `_check_auto_slow_mode` — `bot.py`:33612  (async def)
 - `_check_avatar` — `impersonation_detector.py`:325  (async def)
-- `_check_compromised_account` — `bot.py`:25680  (async def)
+- `_check_compromised_account` — `bot.py`:25881  (async def)
 - `_check_name` — `impersonation_detector.py`:262  (async def)
-- `_check_staff_sanction_rate` — `bot.py`:4370  (async def)
-- `_chef_candidature` — `questionnaire.py`:4270  (async def)
-- `_chef_demo` — `outils/site_local.py`:990  (async def)
+- `_check_staff_sanction_rate` — `bot.py`:4372  (async def)
+- `_chef_candidature` — `questionnaire.py`:4317  (async def)
+- `_chef_demo` — `outils/site_local.py`:1034  (async def)
 - `_chemin` — `tests/test_site_v2_port.py`:261  (def)
 - `_chemin_du_lundi` — `roblox_news_contenu.py`:657  (def)
-- `_chemin_media` — `tableau.py`:2736  (def)
-- `_chemin_statique` — `tableau.py`:2045  (def)
-- `_chemins_ids` — `bot.py`:15564  (def)
+- `_chemin_media` — `tableau.py`:2759  (def)
+- `_chemin_statique` — `tableau.py`:2050  (def)
+- `_chemins_ids` — `bot.py`:15735  (def)
+- `_cherche` — `sujets_interdits.py`:474  (def)
 - `_ChercheModal` — `rellseas_panneau.py`:502  (class)
 - `_chevron` — `outils/dessins_site.py`:1552  (def)
-- `_chiffres` — `questionnaire.py`:1098  (def)
-- `ConfirmerAnciensSalons._choisir` — `bot.py`:7639  (method)
-- `ConfirmerArchives._choisir` — `bot.py`:14935  (method)
-- `VueTypesTickets._choisir` — `bot.py`:9330  (method)
+- `_chiffres` — `questionnaire.py`:1134  (def)
+- `ConfirmerAnciensSalons._choisir` — `bot.py`:7785  (method)
+- `ConfirmerArchives._choisir` — `bot.py`:15106  (method)
+- `VueTypesTickets._choisir` — `bot.py`:9479  (method)
 - `_choisir` — `tests/test_revue_admin.py`:295  (def)
 - `_cible` — `outils/site_maquette.py`:1508  (def)
-- `_cible_site` — `bot.py`:6640  (async def)
+- `_cible_site` — `bot.py`:6786  (async def)
+- `_cibles` — `tickets_interdits.py`:371  (def)
 - `Monde._clan` — `outils/site_maquette.py`:331  (method)
-- `_clan` — `tableau.py`:846  (async def)
+- `_clan` — `tableau.py`:851  (async def)
 - `_clan_et_vocaux` — `tests/test_zones.py`:77  (def)
-- `_clan_ids` — `site_vitrine.py`:334  (def)
-- `_clan_role` — `questionnaire.py`:3886  (async def)
+- `_clan_ids` — `site_vitrine.py`:431  (def)
+- `_clan_role` — `questionnaire.py`:3933  (async def)
 - `_classe` — `mots_interdits.py`:75  (def)
 - `_classe` — `tests/test_bouton_langue.py`:41  (def)
 - `_classe` — `tests/test_config_lost_update.py`:49  (def)
@@ -1386,246 +1427,256 @@
 - `_classes` — `tests/test_tickets_sous_menus.py`:21  (def)
 - `_classify_close_reason` — `tickets_enhance.py`:641  (def)
 - `Role._cle` — `tests/test_metiers.py`:84  (method)
-- `_cle` — `affiches.py`:228  (def)
+- `_cle` — `affiches.py`:237  (def)
 - `_cle` — `mots_interdits.py`:59  (def)
 - `_cle` — `outils/dessins_site.py`:986  (def)
-- `_cle` — `questionnaire.py`:995  (def)
+- `_cle` — `questionnaire.py`:1031  (def)
 - `_cle` — `rellseas_panneau.py`:386  (def)
 - `_cle` — `textes.py`:383  (def)
-- `_cle_de_suivi` — `bot.py`:14224  (def)
+- `_cle_de_suivi` — `bot.py`:14395  (def)
 - `_cle_id` — `health_server.py`:92  (def)
-- `_cle_ou_nom` — `affiches.py`:234  (def)
-- `_cle_tri` — `site_equipage.py`:414  (def)
-- `_cle_verrou` — `site_equipage.py`:1509  (def)
-- `_clean_handle` — `social_media.py`:466  (def)
-- `_clean_yt_handle` — `social_media.py`:486  (def)
-- `SocialMediaManager._cleanup_loop` — `social_media.py`:1567  (method)
-- `_cleanup_old_db_wait` — `bot.py`:20847  (async def)
-- `_clear_audit_log` — `bot.py`:27617  (async def)
-- `_cles_appelees` — `tests/test_textes.py`:915  (def)
+- `_cle_ou_nom` — `affiches.py`:243  (def)
+- `_cle_tri` — `site_equipage.py`:419  (def)
+- `_cle_verrou` — `hierarchie.py`:1185  (def)
+- `_cle_verrou` — `site_equipage.py`:1535  (def)
+- `_clean_handle` — `social_media.py`:487  (def)
+- `_clean_yt_handle` — `social_media.py`:507  (def)
+- `SocialMediaManager._cleanup_loop` — `social_media.py`:1579  (method)
+- `_cleanup_old_db_wait` — `bot.py`:21018  (async def)
+- `_clear_audit_log` — `bot.py`:27823  (async def)
+- `_cles_appelees` — `tests/test_textes.py`:916  (def)
 - `_cles_avec_image` — `outils/icones_rellseas.py`:1211  (def)
 - `_cles_du_generateur` — `tests/test_habillage.py`:28  (def)
 - `_clic` — `tests/test_revue_cadeaux.py`:410  (def)
 - `_cliquer` — `tests/test_questionnaire.py`:224  (async def)
 - `_cloche` — `outils/dessins_site.py`:873  (def)
-- `_clore` — `cadeaux.py`:1502  (async def)
-- `_clore` — `questions.py`:122  (async def)
-- `_clore_sur_discord` — `entraide.py`:770  (async def)
-- `MainPanelV2._close` — `bot.py`:12457  (method)
+- `_clore` — `cadeaux.py`:1557  (async def)
+- `_clore` — `questions.py`:151  (async def)
+- `_clore_sur_discord` — `entraide.py`:783  (async def)
+- `MainPanelV2._close` — `bot.py`:12629  (method)
 - `_coche` — `outils/dessins_site.py`:1539  (def)
 - `_coffre` — `outils/dessins_site.py`:962  (def)
 - `_collapse_homoglyphs` — `impersonation_detector.py`:145  (def)
-- `MainPanelV2._collect_etat` — `bot.py`:12297  (method)
+- `MainPanelV2._collect_etat` — `bot.py`:12469  (method)
 - `_collect_staff_audit` — `mod_dashboard.py`:187  (async def)
 - `_collect_stats` — `mod_dashboard.py`:70  (async def)
 - `_colonnes_envois` — `candidature_site.py`:398  (async def)
-- `_columns` — `gdpr.py`:215  (async def)
+- `_columns` — `gdpr.py`:223  (async def)
 - `_commande` — `tests/test_signalements.py`:19  (def)
-- `_comparer` — `questionnaire.py`:900  (def)
+- `_commande` — `tests/test_tickets_interdits.py`:200  (def)
+- `_comparer` — `questionnaire.py`:936  (def)
 - `_compile` — `offtopic_filter.py`:30  (def)
-- `_compile_abbr` — `insult_filter.py`:191  (def)
-- `_compile_pair` — `insult_filter.py`:229  (def)
+- `_compile_abbr` — `insult_filter.py`:298  (def)
+- `_compile_pair` — `insult_filter.py`:336  (def)
 - `_composants` — `tests/test_candidature_site.py`:220  (def)
 - `_composants` — `tests/test_recours_v2.py`:51  (def)
 - `_composer` — `outils/dessins_site.py`:613  (def)
-- `_compromised_riposte` — `bot.py`:25344  (async def)
+- `_composition` — `hierarchie.py`:494  (def)
+- `_compromised_riposte` — `bot.py`:25545  (async def)
 - `_compte` — `tests/test_recrutement_ticket.py`:954  (async def)
-- `_compte_rendu_radiation` — `bot.py`:2501  (def)
+- `_compte_rendu_radiation` — `bot.py`:2505  (def)
 - `_compter` — `longevite.py`:77  (async def)
-- `_compter` — `tableau.py`:2803  (async def)
+- `_compter` — `tableau.py`:2829  (async def)
 - `_compter` — `tests/test_navigation_site.py`:210  (async def)
 - `_compter` — `tests/test_panneaux_interaction.py`:173  (def)
 - `_compter` — `tests/test_roblox_news_contenu.py`:237  (def)
-- `_compter_archives` — `tableau.py`:3083  (async def)
-- `_compter_candidatures` — `tableau.py`:3117  (async def)
-- `_compter_corbeille` — `affiches.py`:1456  (async def)
+- `_compter_archives` — `tableau.py`:3109  (async def)
+- `_compter_candidatures` — `tableau.py`:3143  (async def)
+- `_compter_corbeille` — `affiches.py`:1515  (async def)
 - `_compter_empreintes` — `longevite.py`:538  (async def)
 - `_compter_entraide` — `longevite.py`:465  (async def)
 - `_compter_equipes` — `longevite.py`:639  (async def)
-- `_compter_historique` — `affiches.py`:1471  (async def)
-- `_compter_journal` — `tableau.py`:3078  (async def)
-- `_compter_journal_messages` — `tableau.py`:3070  (async def)
-- `_compter_medias` — `tableau.py`:3158  (async def)
-- `_compter_ops` — `tableau.py`:3166  (async def)
+- `_compter_historique` — `affiches.py`:1530  (async def)
+- `_compter_journal` — `tableau.py`:3104  (async def)
+- `_compter_journal_messages` — `tableau.py`:3096  (async def)
+- `_compter_medias` — `tableau.py`:3184  (async def)
+- `_compter_ops` — `tableau.py`:3192  (async def)
 - `_compter_portraits` — `longevite.py`:507  (async def)
-- `_compter_serie` — `bot.py`:350  (def)
-- `_compter_sessions` — `tableau.py`:3235  (async def)
+- `_compter_serie` — `bot.py`:354  (def)
+- `_compter_sessions` — `tableau.py`:3261  (async def)
 - `_compter_tickets` — `longevite.py`:377  (async def)
-- `_compter_transcripts` — `tableau.py`:3094  (async def)
+- `_compter_transcripts` — `tableau.py`:3120  (async def)
 - `_comptes` — `evenements.py`:504  (async def)
-- `_compute_tree_hash` — `bot.py`:20059  (def)
-- `_concernes_purge` — `questionnaire.py`:4657  (async def)
+- `_compute_tree_hash` — `bot.py`:20230  (def)
+- `_concernes_purge` — `questionnaire.py`:4704  (async def)
 - `_conf` — `recidivism.py`:129  (async def)
 - `_conf` — `tests/test_tickets_fils.py`:341  (def)
-- `_confier_roles` — `bot.py`:3107  (async def)
-- `_configurer_salons` — `bot.py`:14347  (async def)
-- `_configurer_salons_v2` — `bot.py`:14397  (async def)
-- `ClearAllConfirmView._confirm` — `bot.py`:27677  (method)
-- `TicketConfirmCreateView._confirm` — `bot.py`:9001  (method)
+- `_confier_roles` — `bot.py`:3111  (async def)
+- `_configurer_salons` — `bot.py`:14518  (async def)
+- `_configurer_salons_v2` — `bot.py`:14568  (async def)
+- `ClearAllConfirmView._confirm` — `bot.py`:27883  (method)
+- `TicketConfirmCreateView._confirm` — `bot.py`:9147  (method)
 - `_confirmation` — `tests/test_approuver_bot.py`:112  (def)
-- `ConfirmerIsolementV2._confirmer` — `bot.py`:18747  (method)
-- `_conflit` — `questionnaire.py`:1690  (def)
+- `ConfirmerIsolementV2._confirmer` — `bot.py`:18918  (method)
+- `_conflit` — `questionnaire.py`:1726  (def)
 - `_connus_recents` — `roblox_news.py`:393  (async def)
 - `_consigner` — `unified_logger.py`:338  (async def)
 - `_console` — `journal.py`:94  (def)
 - `_constante` — `tests/test_forum_refus.py`:206  (def)
 - `_constante` — `tests/test_qui_peut_quoi.py`:56  (def)
-- `_construire` — `site_vitrine.py`:173  (async def)
+- `_construire` — `site_vitrine.py`:237  (async def)
 - `_construire` — `tests/test_tickets_panneau_unifie.py`:245  (def)
 - `_container` — `admin_panels_v2.py`:44  (def)
 - `_contexte_frais` — `candidature_site.py`:530  (async def)
-- `_contexte_ticket` — `bot.py`:8414  (async def)
+- `_contexte_ticket` — `bot.py`:8560  (async def)
 - `_contextes` — `vocaux.py`:51  (def)
 - `_controle` — `evenements.py`:921  (def)
 - `_controler` — `outils/patch_retirer_community.py`:64  (def)
-- `_conversation_seule` — `bot.py`:9981  (async def)
-- `_conversation_ticket` — `bot.py`:9972  (async def)
+- `_conversation_seule` — `bot.py`:10130  (async def)
+- `_conversation_ticket` — `bot.py`:10121  (async def)
 - `_cooldown_for` — `recidivism.py`:191  (def)
-- `_copie_etiquette` — `entraide.py`:1804  (def)
+- `_copie_etiquette` — `entraide.py`:1817  (def)
 - `_copier` — `outils/dessins_site.py`:1213  (def)
+- `_copier_avatars` — `site_vitrine.py`:185  (async def)
 - `_corps` — `outils/site_maquette.py`:1483  (async def)
 - `_corps` — `tests/test_rellseas_persistance.py`:134  (def)
 - `_corps` — `tests/test_site_equipage.py`:151  (def)
+- `_corps` — `tickets_interdits.py`:445  (def)
 - `_corps_de_la_page` — `tests/test_site_v2_port.py`:49  (def)
-- `_correction_lue` — `questionnaire.py`:2912  (def)
-- `_corrections` — `questionnaire.py`:2922  (async def)
+- `_correction_lue` — `questionnaire.py`:2948  (def)
+- `_corrections` — `questionnaire.py`:2958  (async def)
 - `_correspondances` — `zones.py`:509  (def)
-- `_couleur` — `affiches.py`:277  (def)
+- `_couleur` — `affiches.py`:286  (def)
 - `_couleur` — `evenements.py`:729  (def)
 - `_couleur` — `outils/dessins_site.py`:531  (def)
 - `_couleur` — `roblox_pings.py`:174  (def)
-- `_couleur_role` — `affiches.py`:1149  (def)
+- `_couleur_role` — `affiches.py`:1208  (def)
 - `_couper` — `outils/patch_retirer_community.py`:36  (def)
-- `_couper` — `questionnaire.py`:2002  (def)
-- `_couper` — `tableau.py`:3588  (def)
-- `_court` — `affiches.py`:702  (def)
-- `_couvrir` — `site_vitrine.py`:550  (def)
+- `_couper` — `questionnaire.py`:2038  (def)
+- `_couper` — `tableau.py`:3614  (def)
+- `_court` — `affiches.py`:718  (def)
+- `_court` — `hierarchie.py`:455  (def)
+- `_couvrir` — `site_vitrine.py`:647  (def)
 - `_crane` — `outils/dessins_site.py`:1896  (def)
 - `_create_alert` — `raid_detector.py`:361  (async def)
-- `_create_ticket_corps` — `bot.py`:8790  (async def)
-- `_crediter` — `cadeaux.py`:409  (def)
+- `_create_ticket_corps` — `bot.py`:8936  (async def)
+- `_crediter` — `cadeaux.py`:464  (def)
 - `_creer_natif` — `evenements.py`:1650  (async def)
-- `_creer_role` — `metiers.py`:525  (async def)
+- `_creer_role` — `metiers.py`:635  (async def)
 - `_croiser` — `evenements.py`:911  (def)
 - `_croix` — `outils/dessins_site.py`:1547  (def)
-- `_csv` — `tableau.py`:1522  (def)
+- `_csv` — `tableau.py`:1527  (def)
 - `_csv_file` — `owner_export.py`:111  (def)
-- `_cumulative_insult_sanction` — `bot.py`:6151  (async def)
-- `_cumulative_offense_sanction` — `bot.py`:6156  (async def)
+- `_cumulative_insult_sanction` — `bot.py`:6297  (async def)
+- `_cumulative_offense_sanction` — `bot.py`:6302  (async def)
 - `_Curseur` — `tests/test_activite_observation.py`:53  (class)
 - `_Curseur` — `tests/test_recours_v2.py`:132  (class)
 - `_custom_ids` — `tests/test_roblox_pings.py`:334  (def)
 - `_custom_ids_de_classe` — `outils/verif_boutons_persistants.py`:105  (def)
-- `_custom_ids_du_message` — `bot.py`:13430  (def)
+- `_custom_ids_du_message` — `bot.py`:13602  (def)
 - `_d` — `tests/test_entraide.py`:94  (def)
-- `_d4_migrate_blob_to_tables` — `bot.py`:1345  (async def)
+- `_d4_migrate_blob_to_tables` — `bot.py`:1349  (async def)
 - `_d_seg` — `outils/dessins_site.py`:663  (def)
 - `_dans` — `zones.py`:719  (def)
-- `_dans_entraide` — `bot.py`:14063  (def)
+- `_dans_entraide` — `bot.py`:14236  (def)
 - `_date` — `outils/icones_rellseas.py`:1274  (def)
-- `_date` — `outils/site_local.py`:754  (def)
+- `_date` — `outils/site_local.py`:774  (def)
 - `_date` — `tests/test_casier.py`:36  (def)
 - `_date_rfc2822` — `roblox_news.py`:525  (def)
-- `_dates_de_depart` — `bot.py`:7063  (async def)
+- `_dates_de_depart` — `bot.py`:7209  (async def)
 - `_Db` — `tests/test_recours_v2.py`:151  (class)
-- `_db_optimizer_wait` — `bot.py`:33115  (async def)
+- `_db_optimizer_wait` — `bot.py`:33327  (async def)
 - `_db_set` — `recidivism.py`:83  (async def)
 - `_db_set` — `tests/test_revue_tickets.py`:694  (def)
-- `_DBConnection` — `bot.py`:544  (class)
-- `_debrancher` — `tableau.py`:3786  (def)
-- `_decider_avec` — `questionnaire.py`:3556  (async def)
-- `_decision` — `tests/test_metiers.py`:955  (def)
-- `_decision_recrutement` — `bot.py`:6447  (async def)
+- `_DBConnection` — `bot.py`:548  (class)
+- `_debat_construit` — `sujets_interdits.py`:148  (def)
+- `_debrancher` — `tableau.py`:3812  (def)
+- `_decider_avec` — `questionnaire.py`:3591  (async def)
+- `_decision` — `tests/test_metiers.py`:957  (def)
+- `_decision_recrutement` — `bot.py`:6593  (async def)
 - `_declarer` — `evenements.py`:148  (def)
-- `_declarer_site` — `textes.py`:630  (def)
+- `_declarer_site` — `textes.py`:631  (def)
 - `_deconnexion` — `outils/dessins_site.py`:1693  (def)
+- `_decor` — `tickets_interdits.py`:249  (def)
 - `_decorateurs` — `tests/test_installation_auto.py`:44  (def)
 - `_decorator` — `generate_index.py`:52  (def)
 - `_decorees` — `outils/verif_boucles.py`:73  (def)
 - `_dedans` — `outils/dessins_site.py`:2796  (def)
-- `_deep_strip` — `gdpr.py`:432  (def)
+- `_deep_strip` — `gdpr.py`:440  (def)
 - `_deepl` — `roblox_news_contenu.py`:440  (async def)
 - `_defauts` — `evenements.py`:428  (def)
-- `_defauts` — `questionnaire.py`:1485  (def)
-- `Inter._defer` — `tests/banc_ticket_recrutement.py`:257  (method)
-- `_defer_welcome_during_raid` — `bot.py`:12565  (def)
-- `_definitions` — `tableau.py`:2230  (def)
+- `_defauts` — `questionnaire.py`:1521  (def)
+- `Inter._defer` — `tests/banc_ticket_recrutement.py`:258  (method)
+- `_defer_welcome_during_raid` — `bot.py`:12737  (def)
+- `_definitions` — `tableau.py`:2235  (def)
 - `_degrade` — `outils/visuels.py`:156  (def)
-- `_deja_dans_le_salon` — `bot.py`:30036  (async def)
-- `_deja_poste` — `bot.py`:20231  (async def)
-- `_delai` — `questionnaire.py`:1514  (def)
-- `_delta_page` — `tableau.py`:3653  (def)
-- `_demande` — `tableau.py`:3885  (def)
-- `_demande_ouverte` — `entraide.py`:961  (async def)
+- `_deja_dans_le_salon` — `bot.py`:30248  (async def)
+- `_deja_note` — `reponses_auto.py`:393  (async def)
+- `_deja_poste` — `bot.py`:20402  (async def)
+- `_delai` — `questionnaire.py`:1550  (def)
+- `_delta_page` — `tableau.py`:3679  (def)
+- `_demande` — `tableau.py`:3911  (def)
+- `_demande_ouverte` — `entraide.py`:974  (async def)
 - `_demarrees` — `outils/verif_boucles.py`:88  (def)
-- `_demarrer_vocaux` — `cadeaux.py`:429  (def)
+- `_demarrer_vocaux` — `cadeaux.py`:484  (def)
 - `_demenager` — `zones.py`:556  (async def)
-- `_demenager_clan` — `bot.py`:14976  (async def)
+- `_demenager_clan` — `bot.py`:15147  (async def)
 - `_demonter` — `tests/test_activite_demontage.py`:182  (def)
-- `_demonter_activite` — `bot.py`:13639  (async def)
-- `_deobfuscate_for_insult` — `bot.py`:5172  (def)
-- `_depuis_ephemere` — `cadeaux.py`:1009  (def)
+- `_demonter_activite` — `bot.py`:13811  (async def)
+- `_deobfuscate_for_insult` — `bot.py`:5199  (def)
+- `_depuis_ephemere` — `cadeaux.py`:1064  (def)
 - `_dernier` — `tests/test_rellseas.py`:260  (def)
 - `_dernier_id` — `tests/test_candidature_site.py`:242  (def)
 - `CheminDuBot._dernier_ticket` — `outils/site_local_recrutement.py`:65  (method)
 - `_derniere` — `rellseas_panneau.py`:1109  (def)
 - `_desactives` — `tests/test_revue_cadeaux.py`:129  (def)
-- `_description_entree` — `bot.py`:30052  (def)
+- `_description_entree` — `bot.py`:30264  (def)
 - `_designe` — `activite_demontage.py`:124  (def)
 - `_destination` — `evenements.py`:573  (def)
 - `_details` — `entraide.py`:183  (def)
-- `_details_websub` — `bot.py`:30078  (async def)
+- `_details_websub` — `bot.py`:30290  (async def)
 - `_detect_pseudo_twins` — `raid_detector.py`:252  (def)
 - `_diff_str` — `observability.py`:527  (def)
-- `_difficulte` — `questionnaire.py`:1024  (def)
+- `_difficulte` — `questionnaire.py`:1060  (def)
 - `_diffuser` — `roblox_panneau.py`:115  (async def)
-- `_diffuser` — `tableau.py`:3578  (def)
+- `_diffuser` — `tableau.py`:3604  (def)
 - `_dire` — `sondages.py`:305  (async def)
+- `_dire` — `tests/test_reponses_auto.py`:94  (def)
 - `_dire` — `vocaux.py`:156  (async def)
-- `_direction_ou_plus` — `bot.py`:6391  (def)
+- `_direction_ou_plus` — `bot.py`:6537  (def)
 - `_discord` — `outils/dessins_site.py`:1879  (def)
-- `_distance_osa` — `bot.py`:11373  (def)
+- `_distance_osa` — `bot.py`:11525  (def)
 - `_divider` — `admin_panels_v2.py`:61  (def)
-- `_dm_sanction` — `bot.py`:4593  (async def)
+- `_dm_sanction` — `bot.py`:4595  (async def)
 - `_do_backup_sync` — `db_backup.py`:86  (def)
-- `_do_clear` — `bot.py`:27602  (async def)
+- `_do_clear` — `bot.py`:27808  (async def)
 - `_domain_of` — `token_grabber.py`:205  (def)
 - `_domaine_autorise` — `roblox_news_contenu.py`:277  (def)
-- `_domaine_de_confiance` — `bot.py`:11241  (def)
-- `_domaine_enregistrable` — `bot.py`:11393  (def)
-- `_domaines_pieges_cites` — `bot.py`:11470  (def)
+- `_domaine_de_confiance` — `bot.py`:11393  (def)
+- `_domaine_enregistrable` — `bot.py`:11545  (def)
+- `_domaines_pieges_cites` — `bot.py`:11622  (def)
 - `_donnees` — `tests/test_vitrine_equipes.py`:40  (def)
-- `_donnees_affiche` — `questionnaire.py`:2711  (async def)
-- `_dossier_agir` — `bot.py`:20680  (async def)
-- `_dossier_recrutement` — `bot.py`:7742  (async def)
-- `_dossier_traite` — `bot.py`:20721  (async def)
-- `_dossier_vue` — `bot.py`:20669  (def)
+- `_donnees_affiche` — `questionnaire.py`:2747  (async def)
+- `_dossier_agir` — `bot.py`:20851  (async def)
+- `_dossier_recrutement` — `bot.py`:7888  (async def)
+- `_dossier_traite` — `bot.py`:20892  (async def)
+- `_dossier_vue` — `bot.py`:20840  (def)
 - `_dossiers_lus` — `longevite.py`:810  (def)
-- `_douze_mois` — `site_equipage.py`:320  (def)
-- `_doxxing_check` — `bot.py`:6010  (async def)
+- `_douze_mois` — `site_equipage.py`:321  (def)
+- `_doxxing_check` — `bot.py`:6156  (async def)
 - `_drapeau` — `outils/dessins_site.py`:907  (def)
 - `_droit` — `tests/test_off_radiation.py`:628  (def)
-- `_droit_ticket` — `bot.py`:8558  (async def)
+- `_droit_ticket` — `bot.py`:8704  (async def)
 - `_droite` — `outils/dessins_site.py`:1610  (def)
 - `_droits` — `evenements.py`:610  (def)
 - `_droits` — `tests/test_salons_v2.py`:58  (def)
 - `_droits_commu` — `zones.py`:402  (def)
-- `_droits_salons` — `tableau.py`:1284  (async def)
+- `_droits_salons` — `tableau.py`:1289  (async def)
 - `_du_bot` — `nettoyage.py`:85  (def)
 - `_du_clan` — `candidature_site.py`:478  (async def)
 - `_du_clan` — `evenements.py`:1480  (async def)
-- `_du_clan` — `metiers.py`:316  (def)
+- `_du_clan` — `metiers.py`:359  (def)
 - `_duree_txt` — `evenements.py`:1079  (def)
 - `_ecarte` — `unified_logger.py`:325  (async def)
-- `_echapper` — `entraide.py`:587  (def)
+- `_echapper` — `entraide.py`:600  (def)
 - `_echapper` — `equipages.py`:237  (def)
-- `_echec` — `bot.py`:8619  (def)
+- `_echec` — `bot.py`:8765  (def)
 - `_eclaireur` — `tests/test_forum_refus.py`:230  (def)
-- `_eclaireur_actu_wait` — `bot.py`:15866  (async def)
-- `PanelBlacklistView._ecrire` — `bot.py`:21435  (method)
+- `_eclaireur_actu_wait` — `bot.py`:16037  (async def)
+- `PanelBlacklistView._ecrire` — `bot.py`:21606  (method)
 - `_Banc._ecrire` — `tests/test_config_lost_update.py`:97  (method)
 - `_ecrire` — `annonces.py`:200  (async def)
-- `_ecrire` — `cadeaux.py`:270  (async def)
+- `_ecrire` — `cadeaux.py`:278  (async def)
 - `_ecrire` — `entraide.py`:463  (async def)
 - `_ecrire` — `equipages.py`:176  (async def)
 - `_ecrire` — `evenements.py`:485  (async def)
@@ -1633,139 +1684,143 @@
 - `_ecrire` — `outils/icones_rellseas.py`:1131  (def)
 - `_ecrire` — `tests/test_cadeaux_v3.py`:63  (def)
 - `_ecrire` — `tests/test_revue_cadeaux.py`:75  (def)
+- `_ecrire` — `tickets_interdits.py`:480  (async def)
 - `_ecrire` — `unified_logger.py`:223  (def)
-- `_ecrire_atomique` — `tableau.py`:2631  (def)
+- `_ecrire_atomique` — `tableau.py`:2654  (def)
 - `_ecrire_atomique` — `tracking_layer.py`:125  (def)
-- `_ecrire_direct` — `tableau.py`:3939  (async def)
-- `_ecrire_json_bloquant` — `social_media.py`:1097  (def)
-- `_ecrire_liste_noire_cfg` — `questionnaire.py`:3683  (async def)
-- `_ecrire_puis_attendre` — `tests/test_textes.py`:581  (def)
+- `_ecrire_direct` — `tableau.py`:3965  (async def)
+- `_ecrire_json_bloquant` — `social_media.py`:1109  (def)
+- `_ecrire_liste_noire_cfg` — `questionnaire.py`:3730  (async def)
+- `_ecrire_listes` — `tickets_interdits.py`:308  (async def)
+- `_ecrire_puis_attendre` — `tests/test_textes.py`:582  (def)
+- `_ecrire_rang` — `hierarchie.py`:728  (async def)
 - `_ecrire_texte` — `outils/site_maquette.py`:2931  (def)
-- `_ecrit_depuis` — `tableau.py`:3718  (def)
-- `_ecrits_n` — `tableau.py`:3713  (def)
+- `_ecrit_depuis` — `tableau.py`:3744  (def)
+- `_ecrits_n` — `tableau.py`:3739  (def)
 - `_ecriture_brouillon` — `candidature_site.py`:1204  (async def)
 - `_ecriture_envoyer` — `candidature_site.py`:1274  (async def)
 - `_ecriture_envoyer_etape` — `candidature_site.py`:1316  (async def)
 - `_ecriture_presence` — `candidature_site.py`:1237  (async def)
 - `_ecriture_saisie` — `candidature_site.py`:1184  (async def)
-- `_ecritures` — `tests/test_acces_site.py`:659  (def)
-- `Inter._editer` — `tests/banc_ticket_recrutement.py`:260  (method)
-- `_editer` — `questionnaire.py`:2984  (async def)
-- `_editer_carte_staff` — `questionnaire.py`:2997  (async def)
-- `_editer_cartes` — `questionnaire.py`:3009  (async def)
+- `_ecritures` — `tests/test_acces_site.py`:681  (def)
+- `Inter._editer` — `tests/banc_ticket_recrutement.py`:261  (method)
+- `_editer` — `questionnaire.py`:3020  (async def)
+- `_editer_carte_staff` — `questionnaire.py`:3033  (async def)
+- `_editer_cartes` — `questionnaire.py`:3045  (async def)
 - `_effacer` — `boosts.py`:168  (async def)
-- `_effacer` — `entraide.py`:1386  (async def)
-- `_effacer_carte` — `entraide.py`:1414  (async def)
+- `_effacer` — `entraide.py`:1399  (async def)
+- `_effacer_carte` — `entraide.py`:1427  (async def)
 - `_effacer_mots` — `equipages.py`:643  (async def)
-- `_effacer_plus_tard` — `cadeaux.py`:1075  (def)
+- `_effacer_plus_tard` — `cadeaux.py`:1130  (def)
 - `_effacer_plus_tard` — `candidature_site.py`:817  (def)
 - `_effacer_plus_tard` — `evenements.py`:1435  (def)
-- `_effacer_plus_tard` — `metiers.py`:974  (def)
-- `_effacer_plus_tard` — `questionnaire.py`:2469  (def)
-- `_effacer_plus_tard` — `site_equipage.py`:1578  (def)
+- `_effacer_plus_tard` — `metiers.py`:1084  (def)
+- `_effacer_plus_tard` — `questionnaire.py`:2505  (def)
+- `_effacer_plus_tard` — `site_equipage.py`:1604  (def)
 - `_effacer_portrait` — `longevite.py`:485  (def)
 - `_effacer_transcript` — `longevite.py`:332  (def)
-- `_effacer_transcripts` — `questionnaire.py`:4633  (def)
-- `_elaguer` — `cadeaux.py`:391  (def)
-- `_elaguer` — `tableau.py`:713  (def)
-- `_email_perso` — `bot.py`:6004  (def)
+- `_effacer_transcripts` — `questionnaire.py`:4680  (def)
+- `_elaguer` — `cadeaux.py`:404  (def)
+- `_elaguer` — `tableau.py`:718  (def)
+- `_elaguer_rafales` — `cadeaux.py`:426  (def)
+- `_email_perso` — `bot.py`:6150  (def)
 - `_emissions_persistantes` — `outils/verif_boutons_persistants.py`:140  (def)
 - `_emit` — `diag.py`:67  (def)
-- `_emoji` — `metiers.py`:419  (def)
+- `_emoji` — `metiers.py`:462  (def)
 - `_emoji_app` — `evenements.py`:989  (def)
-- `_emoji_jeu` — `affiches.py`:1398  (def)
+- `_emoji_jeu` — `affiches.py`:1457  (def)
 - `_emoji_jeu` — `evenements.py`:683  (def)
-- `_emoji_option` — `metiers.py`:937  (def)
+- `_emoji_option` — `metiers.py`:1047  (def)
 - `_empaqueter` — `evenements.py`:1305  (def)
-- `_empreinte` — `affiches.py`:285  (def)
+- `_empreinte` — `affiches.py`:294  (def)
 - `_empreinte` — `journal.py`:59  (def)
-- `_empreinte` — `questionnaire.py`:1322  (def)
-- `_empreinte` — `tableau.py`:482  (def)
-- `_empreinte` — `tests/test_acces_site.py`:636  (def)
+- `_empreinte` — `questionnaire.py`:1358  (def)
+- `_empreinte` — `tableau.py`:487  (def)
+- `_empreinte` — `tests/test_acces_site.py`:658  (def)
 - `_empreinte_base` — `tests/test_candidature_site.py`:287  (def)
 - `_empreinte_base` — `tests/test_site_equipage.py`:174  (def)
 - `_empreinte_calme` — `tests/test_candidat_ses_cases.py`:80  (def)
-- `_empreinte_donnees` — `tableau.py`:1753  (def)
+- `_empreinte_donnees` — `tableau.py`:1758  (def)
 - `_empreintes_parties` — `longevite.py`:512  (async def)
 - `_en_ligne` — `evenements.py`:1957  (def)
 - `_en_ligne` — `outils/dessins_site.py`:1737  (def)
 - `_en_meme_temps` — `tests/test_candidat_ses_cases.py`:244  (def)
-- `_enfiler_billets` — `bot.py`:13283  (async def)
+- `_enfiler_billets` — `bot.py`:13455  (async def)
 - `_enregistrees` — `outils/verif_boutons_persistants.py`:85  (def)
 - `_enregistres` — `tests/test_tickets_panneau_unifie.py`:72  (def)
 - `_ensure` — `transcript_store.py`:53  (def)
-- `_ensure_entraide_ratings_table` — `bot.py`:12976  (async def)
-- `SocialMediaManager._ensure_loaded` — `social_media.py`:1230  (method)
-- `_ensure_quarantine_role` — `bot.py`:3876  (async def)
+- `_ensure_entraide_ratings_table` — `bot.py`:13148  (async def)
+- `SocialMediaManager._ensure_loaded` — `social_media.py`:1242  (method)
+- `_ensure_quarantine_role` — `bot.py`:3880  (async def)
 - `_ensure_role` — `recidivism.py`:199  (async def)
 - `_ensure_tables` — `observability.py`:88  (async def)
 - `_ensure_tables` — `tickets_enhance.py`:92  (async def)
-- `_ensure_ticket_feedback_table` — `bot.py`:12890  (async def)
-- `TwitchAdapter._ensure_token` — `social_media.py`:367  (method)
-- `_entete_etape` — `questionnaire.py`:2090  (def)
+- `_ensure_ticket_feedback_table` — `bot.py`:13062  (async def)
+- `TwitchAdapter._ensure_token` — `social_media.py`:388  (method)
+- `_entete_etape` — `questionnaire.py`:2126  (def)
 - `_entetes_securite` — `health_server.py`:302  (async def)
 - `_entier` — `activite_demontage.py`:76  (def)
-- `_entier` — `affiches.py`:202  (def)
+- `_entier` — `affiches.py`:211  (def)
 - `_entier` — `candidature_site.py`:381  (def)
 - `_entier` — `evenements.py`:719  (def)
 - `_entier` — `longevite.py`:104  (def)
 - `_entier` — `outils/site_maquette.py`:1501  (def)
-- `_entier` — `questionnaire.py`:1110  (def)
-- `_entraide` — `tableau.py`:1247  (async def)
+- `_entier` — `questionnaire.py`:1146  (def)
+- `_entraide` — `tableau.py`:1252  (async def)
 - `Monde._entraide_annonces` — `outils/site_maquette.py`:704  (method)
-- `_entraide_effacement` — `bot.py`:14082  (async def)
-- `_entraide_effacement_masse` — `bot.py`:14089  (async def)
-- `_entraide_journal` — `bot.py`:15451  (async def)
-- `_entraide_maybe_delete_empty_voice` — `bot.py`:32497  (async def)
-- `_entraide_message` — `bot.py`:14075  (async def)
-- `_entraide_staff` — `bot.py`:15446  (async def)
-- `_entraide_task_attente` — `bot.py`:15316  (async def)
-- `_entraide_voice_category` — `bot.py`:32478  (async def)
-- `_entree` — `site_vitrine.py`:339  (async def)
+- `_entraide_effacement` — `bot.py`:14253  (async def)
+- `_entraide_effacement_masse` — `bot.py`:14260  (async def)
+- `_entraide_journal` — `bot.py`:15622  (async def)
+- `_entraide_maybe_delete_empty_voice` — `bot.py`:32709  (async def)
+- `_entraide_message` — `bot.py`:14246  (async def)
+- `_entraide_staff` — `bot.py`:15617  (async def)
+- `_entraide_task_attente` — `bot.py`:15487  (async def)
+- `_entraide_voice_category` — `bot.py`:32690  (async def)
+- `_entree` — `site_vitrine.py`:436  (async def)
 - `_entree` — `tests/test_audit_pousse.py`:30  (def)
 - `_entree` — `tests/test_securite_site.py`:453  (def)
-- `_entree_casier` — `tableau.py`:1039  (def)
-- `_envoi` — `questionnaire.py`:2897  (async def)
+- `_entree_casier` — `tableau.py`:1044  (def)
+- `_envoi` — `questionnaire.py`:2933  (async def)
 - `_envoi` — `tests/test_webhook_doublon.py`:62  (def)
 - `_envoi_chef` — `tests/test_candidature_site.py`:859  (def)
-- `_envoi_dict` — `questionnaire.py`:2887  (def)
-- `_envoi_site` — `questionnaire.py`:5690  (async def)
+- `_envoi_dict` — `questionnaire.py`:2923  (def)
+- `_envoi_site` — `questionnaire.py`:5936  (async def)
 - `_envoi_v2` — `tests/test_webhook_doublon.py`:108  (def)
-- `_envois_complets` — `questionnaire.py`:2928  (async def)
-- `_envois_du_ticket` — `questionnaire.py`:2902  (async def)
+- `_envois_complets` — `questionnaire.py`:2964  (async def)
+- `_envois_du_ticket` — `questionnaire.py`:2938  (async def)
 - `Env._envoyer` — `tests/test_recrutements.py`:66  (method)
 - `_envoyer` — `outils/site_maquette.py`:2816  (def)
 - `_envoyer` — `roblox_panneau.py`:135  (async def)
-- `_envoyer_a` — `tableau.py`:3567  (def)
+- `_envoyer_a` — `tableau.py`:3593  (def)
 - `_envoyer_cartes` — `evenements.py`:1750  (async def)
 - `_envoyer_etape` — `candidature_site.py`:1326  (async def)
-- `_envoyer_recours_radie` — `bot.py`:2973  (async def)
+- `_envoyer_recours_radie` — `bot.py`:2977  (async def)
 - `_envoyer_tout` — `candidature_site.py`:1285  (async def)
-- `_epargne_vigilance` — `bot.py`:7168  (async def)
+- `_epargne_vigilance` — `bot.py`:7314  (async def)
 - `_epingle` — `outils/dessins_site.py`:1920  (def)
 - `_epure` — `health_server.py`:97  (def)
 - `_equipage` — `evenements.py`:690  (async def)
 - `_equipage` — `outils/dessins_site.py`:1279  (def)
 - `_equipage` — `tests/test_evenements.py`:735  (def)
 - `_equipage` — `tests/test_securite_site.py`:39  (def)
-- `_equipage_demo` — `outils/site_local.py`:1168  (async def)
-- `_equipe_a_voir` — `bot.py`:8595  (def)
-- `_equipe_direction` — `bot.py`:8517  (def)
-- `_equipe_disponible` — `bot.py`:8576  (def)
-- `_equipe_du_type` — `bot.py`:8544  (def)
-- `_equipes` — `site_equipage.py`:829  (async def)
+- `_equipage_demo` — `outils/site_local.py`:1225  (async def)
+- `_equipe_a_voir` — `bot.py`:8741  (def)
+- `_equipe_direction` — `bot.py`:8663  (def)
+- `_equipe_disponible` — `bot.py`:8722  (def)
+- `_equipe_du_type` — `bot.py`:8690  (def)
+- `_equipes` — `site_equipage.py`:840  (async def)
 - `_equipes` — `tests/test_vitrine_equipes.py`:354  (def)
 - `_equipes_a_liberer` — `longevite.py`:598  (async def)
-- `_equipes_demo` — `outils/site_local.py`:1248  (async def)
+- `_equipes_demo` — `outils/site_local.py`:1305  (async def)
 - `_erreur` — `outils/dessins_site.py`:1777  (def)
-- `_erreur` — `questionnaire.py`:1152  (def)
-- `_erreur` — `tests/test_acces_site.py`:287  (def)
-- `_ErreursInteractions` — `bot.py`:15050  (class)
-- `_escalade_warns` — `bot.py`:27775  (async def)
-- `_escape_md` — `bot.py`:33534  (def)
-- `BancTicket._espace` — `tests/banc_ticket_recrutement.py`:419  (method)
+- `_erreur` — `questionnaire.py`:1188  (def)
+- `_erreur` — `tests/test_acces_site.py`:308  (def)
+- `_ErreursInteractions` — `bot.py`:15221  (class)
+- `_escalade_warns` — `bot.py`:27981  (async def)
+- `_escape_md` — `bot.py`:33746  (def)
+- `BancTicket._espace` — `tests/banc_ticket_recrutement.py`:421  (method)
 - `_Espace` — `tests/test_revue_moderation.py`:84  (class)
-- `_espace` — `site_vitrine.py`:571  (def)
+- `_espace` — `site_vitrine.py`:668  (def)
 - `_espace` — `tests/test_arret_chien_de_garde.py`:23  (def)
 - `_espace` — `tests/test_off_radiation.py`:153  (def)
 - `_espace` — `tests/test_webhook_doublon.py`:33  (def)
@@ -1776,29 +1831,29 @@
 - `_Espion` — `tests/test_longevite.py`:85  (class)
 - `_est_categorie` — `visibilite_serveur.py`:63  (def)
 - `_est_tasks_loop` — `outils/verif_boucles.py`:65  (def)
-- `_Etape` — `bot.py`:21911  (class)
-- `_etape_complete` — `questionnaire.py`:3310  (async def)
-- `_etape_gabarit` — `questionnaire.py`:1596  (def)
-- `_etapes_ids` — `questionnaire.py`:4037  (def)
-- `_etapes_recrutement` — `tableau.py`:1333  (async def)
-- `_etapes_txt` — `questionnaire.py`:2063  (def)
+- `_Etape` — `bot.py`:22089  (class)
+- `_etape_complete` — `questionnaire.py`:3346  (async def)
+- `_etape_gabarit` — `questionnaire.py`:1632  (def)
+- `_etapes_ids` — `questionnaire.py`:4084  (def)
+- `_etapes_recrutement` — `tableau.py`:1338  (async def)
+- `_etapes_txt` — `questionnaire.py`:2099  (def)
 - `_etapes_visibles` — `candidature_site.py`:1131  (def)
 - `_etat` — `vigilance.py`:76  (async def)
-- `_etat_direct` — `tableau.py`:3625  (def)
+- `_etat_direct` — `tableau.py`:3651  (def)
 - `_etat_envoi` — `tests/test_candidat_ses_cases.py`:69  (def)
-- `_etat_equipe` — `questionnaire.py`:2104  (def)
+- `_etat_equipe` — `questionnaire.py`:2140  (def)
 - `_etat_final` — `tests/test_candidature_site.py`:562  (def)
-- `_etat_public` — `bot.py`:15476  (async def)
+- `_etat_public` — `bot.py`:15647  (async def)
 - `_etiquette_activite` — `rellseas_panneau.py`:1063  (def)
 - `_etoile` — `outils/dessins_site.py`:1831  (def)
 - `_ev` — `outils/site_maquette.py`:65  (def)
 - `_ev` — `tests/test_recrutements.py`:23  (def)
-- `_evenement` — `tableau.py`:1172  (def)
+- `_evenement` — `tableau.py`:1177  (def)
 - `Monde._evenements` — `outils/site_maquette.py`:857  (method)
 - `_evenements` — `outils/dessins_site.py`:1404  (def)
-- `_evenements_demo` — `outils/site_local.py`:1072  (async def)
+- `_evenements_demo` — `outils/site_local.py`:1116  (async def)
 - `_evict_buckets` — `rate_limiter.py`:92  (def)
-- `_evict_if_big` — `bot.py`:677  (def)
+- `_evict_if_big` — `bot.py`:681  (def)
 - `_evt` — `tests/test_vigilance.py`:16  (def)
 - `_evt_cartes` — `outils/site_maquette.py`:2175  (def)
 - `_evt_refus` — `outils/site_maquette.py`:2053  (def)
@@ -1807,23 +1862,24 @@
 - `_examiner` — `vigilance.py`:116  (async def)
 - `_examiner_plus_tard` — `vigilance.py`:94  (async def)
 - `_exclamation` — `outils/dessins_site.py`:1746  (def)
-- `_exec` — `gdpr.py`:232  (async def)
-- `_executer` — `tableau.py`:2352  (async def)
+- `_exec` — `gdpr.py`:240  (async def)
+- `_executer` — `tableau.py`:2375  (async def)
 - `_executer` — `tests/test_revue_moderation.py`:42  (def)
 - `_executer` — `tests/test_tickets_fils.py`:278  (def)
 - `_executer_sql` — `tests/test_revue_tickets.py`:253  (async def)
-- `_existe` — `entraide.py`:1435  (async def)
+- `_existe` — `entraide.py`:1448  (async def)
 - `_exporter` — `outils/dessins_site.py`:1654  (def)
 - `_extract_urls` — `token_grabber.py`:194  (def)
 - `_extraire` — `tests/test_faux_positifs.py`:14  (def)
+- `_extraire` — `tests/test_sujets_interdits.py`:77  (def)
 - `_extraire_id` — `rellseas_panneau.py`:477  (def)
 - `_fabriquer_record` — `tests/test_sentinelle_instance.py`:143  (def)
 - `RellseasPanelV2._faire_cle` — `rellseas_panneau.py`:291  (method)
-- `_faire_voir_plus_tard` — `bot.py`:8701  (def)
-- `_faire_voir_ticket` — `bot.py`:8625  (async def)
-- `_faq_destinations` — `bot.py`:14990  (def)
-- `_faq_hook` — `bot.py`:14053  (async def)
-- `_faq_trouves` — `bot.py`:14727  (def)
+- `_faire_voir_plus_tard` — `bot.py`:8847  (def)
+- `_faire_voir_ticket` — `bot.py`:8771  (async def)
+- `_faq_destinations` — `bot.py`:15161  (def)
+- `_faq_hook` — `bot.py`:14225  (async def)
+- `_faq_trouves` — `bot.py`:14898  (def)
 - `_FausseReponseHTTP` — `tests/test_rellseas.py`:179  (class)
 - `_faux` — `outils/site_local.py`:60  (def)
 - `_faux_async` — `outils/site_local_port.py`:222  (async def)
@@ -1846,64 +1902,65 @@
 - `_FauxSalon` — `tests/test_rellseas_persistance.py`:283  (class)
 - `_FauxSalon` — `tests/test_roblox_actualites.py`:184  (class)
 - `_FauxUser` — `tests/test_roblox_actualites.py`:203  (class)
-- `_feeds_youtube` — `bot.py`:30151  (async def)
+- `_feeds_youtube` — `bot.py`:30363  (async def)
 - `_Lecteur._ferme` — `transcript_store.py`:263  (method)
-- `_ferme_la` — `insult_filter.py`:204  (def)
+- `_ferme_la` — `insult_filter.py`:311  (def)
 - `_fermer` — `outils/dessins_site.py`:1576  (def)
-- `_fermer_en_fond` — `bot.py`:10179  (def)
-- `_fermer_plus_tard` — `questionnaire.py`:3567  (async def)
-- `_fermer_recours` — `bot.py`:2929  (async def)
-- `_fermer_session_equipage` — `tableau.py`:777  (async def)
-- `_fermer_ticket` — `bot.py`:10196  (async def)
-- `_fermer_ticket_corps` — `bot.py`:10241  (async def)
+- `_fermer_abandon` — `questionnaire.py`:5001  (async def)
+- `_fermer_en_fond` — `bot.py`:10328  (def)
+- `_fermer_plus_tard` — `questionnaire.py`:3602  (async def)
+- `_fermer_recours` — `bot.py`:2933  (async def)
+- `_fermer_session_equipage` — `tableau.py`:782  (async def)
+- `_fermer_ticket` — `bot.py`:10345  (async def)
+- `_fermer_ticket_corps` — `bot.py`:10390  (async def)
 - `_fermeture` — `tests/test_direct.py`:152  (async def)
-- `RSSHubAdapter._fetch_items` — `social_media.py`:681  (method)
-- `YouTubeRSSAdapter._fetch_items` — `social_media.py`:984  (method)
+- `RSSHubAdapter._fetch_items` — `social_media.py`:702  (method)
+- `YouTubeRSSAdapter._fetch_items` — `social_media.py`:996  (method)
 - `_fiche` — `tests/test_activite.py`:72  (def)
 - `_fiche` — `tests/test_revue_moderation.py`:652  (def)
-- `_fiche_recue` — `bot.py`:6585  (async def)
-- `_fiche_sanction` — `bot.py`:3079  (async def)
+- `_fiche_recue` — `bot.py`:6731  (async def)
+- `_fiche_sanction` — `bot.py`:3083  (async def)
 - `_fiches` — `outils/dessins_site.py`:1154  (def)
 - `_fichiers` — `tests/test_mots_vocaux_stockage.py`:142  (def)
-- `_fichiers_site` — `tableau.py`:1973  (def)
+- `_fichiers_site` — `tableau.py`:1978  (def)
 - `VueApercu._fige` — `annonces.py`:616  (method)
-- `VueCadeau._fige` — `cadeaux.py`:2088  (method)
+- `VueCadeau._fige` — `cadeaux.py`:2144  (method)
 - `_Fil` — `tests/test_revue_tickets.py`:149  (class)
-- `_fil` — `entraide.py`:704  (async def)
+- `_fil` — `entraide.py`:717  (async def)
 - `_fil` — `equipages.py`:291  (async def)
-- `_fil_ou_rien` — `entraide.py`:719  (async def)
+- `_fil_ou_rien` — `entraide.py`:732  (async def)
 - `_fil_ou_rien` — `equipages.py`:306  (async def)
 - `_file_en_memoire` — `tests/test_roblox_actualites.py`:213  (def)
-- `_filter_blob` — `gdpr.py`:369  (async def)
+- `_filter_blob` — `gdpr.py`:377  (async def)
 - `_filtrer` — `annonces_modifiables.py`:39  (def)
 - `_filtrer` — `outils/dessins_site.py`:1643  (def)
-- `_filtrer` — `questionnaire.py`:1773  (def)
+- `_filtrer` — `questionnaire.py`:1809  (def)
 - `_filtres_liens` — `tests/test_faux_positifs.py`:41  (def)
-- `ConfirmerIsolementV2._fin` — `bot.py`:18739  (method)
-- `VueCloturer._fin` — `entraide.py`:1282  (method)
+- `ConfirmerIsolementV2._fin` — `bot.py`:18910  (method)
+- `VueCloturer._fin` — `entraide.py`:1295  (method)
 - `_fin` — `evenements.py`:1087  (def)
-- `SocialMediaManager._find_subscription` — `social_media.py`:1299  (method)
+- `SocialMediaManager._find_subscription` — `social_media.py`:1311  (method)
 - `_find_tesseract_binary` — `ocr_scan.py`:26  (def)
-- `_finir` — `tableau.py`:3780  (def)
+- `_finir` — `tableau.py`:3806  (def)
 - `_finir_si_tout_envoye` — `candidature_site.py`:1144  (async def)
-- `_flag_dangerous_profile` — `bot.py`:4104  (async def)
+- `_flag_dangerous_profile` — `bot.py`:4108  (async def)
 - `_flocon` — `tests/test_tickets_inactifs_combat.py`:33  (def)
-- `_flush_welcome_raid_recap` — `bot.py`:12519  (async def)
-- `_flux_du_studio` — `bot.py`:14216  (def)
-- `_flux_studio_rell` — `bot.py`:14253  (async def)
-- `BadwordsConfigPanelV2._fmt_list` — `bot.py`:17671  (method)
+- `_flush_welcome_raid_recap` — `bot.py`:12691  (async def)
+- `_flux_du_studio` — `bot.py`:14387  (def)
+- `_flux_studio_rell` — `bot.py`:14424  (async def)
+- `BadwordsConfigPanelV2._fmt_list` — `bot.py`:17842  (method)
 - `_fn` — `tests/test_actus_sans_interet.py`:43  (def)
 - `_fn` — `tests/test_commandes_moderation.py`:22  (def)
 - `_fn` — `tests/test_news_file_et_traduction.py`:48  (def)
 - `_fn` — `tests/test_roblox_actualites.py`:289  (def)
-- `_fnv` — `tableau.py`:3483  (def)
-- `_fold` — `insult_filter.py`:215  (def)
+- `_fnv` — `tableau.py`:3509  (def)
+- `_fold` — `insult_filter.py`:322  (def)
 - `_fonction` — `tests/test_activite_demontage.py`:398  (def)
 - `_fonction` — `tests/test_actus_seules.py`:24  (def)
 - `_fonction` — `tests/test_bouton_langue.py`:48  (def)
 - `_fonction` — `tests/test_commandes_en_double.py`:41  (def)
 - `_fonction` — `tests/test_config_lost_update.py`:59  (def)
-- `_fonction` — `tests/test_metiers.py`:1023  (def)
+- `_fonction` — `tests/test_metiers.py`:1025  (def)
 - `_fonction` — `tests/test_mots_vocaux_stockage.py`:33  (def)
 - `_fonction` — `tests/test_panneaux_interaction.py`:36  (def)
 - `_fonction` — `tests/test_rellseas.py`:34  (def)
@@ -1913,147 +1970,155 @@
 - `_fonction` — `tests/test_tickets_panneau_unifie.py`:49  (def)
 - `_fonction_bot` — `tests/test_longevite.py`:70  (def)
 - `_fonction_def` — `tests/test_tickets_fils.py`:271  (def)
+- `_fonctions` — `tests/test_alertes_sans_rafale.py`:16  (def)
 - `_fonctions` — `tests/test_faux_positifs.py`:25  (def)
 - `_fonctions` — `tests/test_verrou_raid.py`:26  (def)
 - `_fonctions_bot` — `tests/test_youtube_chaine.py`:139  (def)
 - `_fonctions_du_bot` — `outils/banc_annees.py`:1037  (def)
 - `_fonctions_module` — `outils/verif_boucles.py`:83  (def)
-- `_forget_temp_voice_room` — `bot.py`:31080  (async def)
+- `_forget_temp_voice_room` — `bot.py`:31292  (async def)
 - `_format_channel` — `unified_logger.py`:638  (def)
 - `_format_ticket_age` — `tickets_enhance.py`:872  (def)
 - `_format_user` — `unified_logger.py`:628  (def)
-- `_format_warn_id` — `bot.py`:27751  (def)
-- `_formulaire_en_echec` — `questionnaire.py`:2604  (async def)
+- `_format_warn_id` — `bot.py`:27957  (def)
+- `_formulaire_en_echec` — `questionnaire.py`:2640  (async def)
 - `_forum` — `zones.py`:352  (async def)
 - `_forum_ok` — `roblox_news.py`:310  (def)
 - `_forum_refus` — `roblox_news.py`:295  (def)
 - `_founder_ids` — `unified_logger.py`:851  (def)
 - `_free_mem_mb` — `nsfw_scan.py`:32  (def)
-- `_fusion` — `affiches.py`:1301  (def)
+- `_fusion` — `affiches.py`:1360  (def)
 - `_G` — `tests/test_recours_v2.py`:56  (class)
 - `_gabarit` — `tests/test_dossier_suspect.py`:15  (def)
 - `_gabarit_du_bouton` — `tests/test_roblox_pings.py`:50  (def)
 - `_gabarits` — `tests/test_tickets_panneau_unifie.py`:56  (def)
-- `_gabarits_chef` — `questionnaire.py`:4030  (async def)
+- `_gabarits_chef` — `questionnaire.py`:4077  (async def)
 - `_gabarits_dynamiques` — `outils/verif_boutons_persistants.py`:116  (def)
 - `_garder` — `candidature_site.py`:368  (def)
-- `_garder` — `questionnaire.py`:1214  (def)
-- `_garder_op` — `tableau.py`:2472  (async def)
-- `_garder_page` — `questionnaire.py`:4972  (async def)
-- `_garder_reponses` — `questionnaire.py`:5073  (async def)
-- `_garder_ticket_sans_transcript` — `bot.py`:10212  (async def)
+- `_garder` — `questionnaire.py`:1250  (def)
+- `_garder_op` — `tableau.py`:2495  (async def)
+- `_garder_page` — `questionnaire.py`:5218  (async def)
+- `_garder_reponses` — `questionnaire.py`:5319  (async def)
+- `_garder_ticket_sans_transcript` — `bot.py`:10361  (async def)
 - `_gauche` — `outils/dessins_site.py`:1605  (def)
 - `_gc_bucket` — `rate_limiter.py`:81  (def)
-- `_gdpr_retention_wait` — `bot.py`:8324  (async def)
-- `_genre_grave` — `tableau.py`:1867  (def)
-- `_gerer` — `cadeaux.py`:2268  (def)
-- `_geste` — `cadeaux.py`:2205  (async def)
-- `_geste_vocal` — `bot.py`:31982  (def)
+- `_gdpr_retention_wait` — `bot.py`:8470  (async def)
+- `_genre_grave` — `tableau.py`:1872  (def)
+- `_gens` — `hierarchie.py`:485  (def)
+- `_gerer` — `cadeaux.py`:2324  (def)
+- `_geste` — `cadeaux.py`:2261  (async def)
+- `_geste_vocal` — `bot.py`:32194  (def)
 - `_gestionnaire` — `tests/test_social_sans_gel.py`:141  (def)
-- `DBPool._get` — `bot.py`:500  (method)
+- `DBPool._get` — `bot.py`:504  (method)
 - `_get` — `outils/sonde_signaux_limited.py`:52  (async def)
 - `_get` — `tests/test_annonces_modifiables.py`:337  (async def)
-- `ActionConfigPanelV2._get_action_key` — `bot.py`:18323  (method)
-- `_get_config_lock` — `bot.py`:645  (def)
+- `ActionConfigPanelV2._get_action_key` — `bot.py`:18494  (method)
+- `_get_config_lock` — `bot.py`:649  (def)
 - `_get_db` — `tests/test_optimisation.py`:59  (def)
-- `ActionConfigPanelV2._get_default_action` — `bot.py`:18329  (method)
-- `ActionConfigPanelV2._get_default_duration` — `bot.py`:18332  (method)
-- `ActionConfigPanelV2._get_duration_key` — `bot.py`:18326  (method)
-- `_get_immunity` — `bot.py`:1866  (async def)
+- `ActionConfigPanelV2._get_default_action` — `bot.py`:18500  (method)
+- `ActionConfigPanelV2._get_default_duration` — `bot.py`:18503  (method)
+- `ActionConfigPanelV2._get_duration_key` — `bot.py`:18497  (method)
+- `_get_immunity` — `bot.py`:1870  (async def)
 - `_get_or_create_log_webhook` — `unified_logger.py`:534  (async def)
 - `_get_or_create_manager` — `admin_panels_v2.py`:107  (def)
-- `PanelEditViewV2._get_panel` — `bot.py`:21105  (method)
+- `PanelEditViewV2._get_panel` — `bot.py`:21276  (method)
 - `_get_recent_joins` — `raid_detector.py`:312  (async def)
 - `_gid` — `evenements.py`:1475  (def)
-- `_gid` — `questionnaire.py`:647  (def)
-- `_global_modal_on_error` — `bot.py`:167  (async def)
-- `_global_rl_active` — `bot.py`:32176  (def)
-- `_global_view_on_error` — `bot.py`:149  (async def)
+- `_gid` — `questionnaire.py`:677  (def)
+- `_gif_texte` — `bot.py`:5604  (def)
+- `_global_modal_on_error` — `bot.py`:171  (async def)
+- `_global_rl_active` — `bot.py`:32388  (def)
+- `_global_view_on_error` — `bot.py`:153  (async def)
 - `_google` — `roblox_news_contenu.py`:452  (async def)
 - `_grade` — `outils/dessins_site.py`:1973  (def)
 - `_graver_buste` — `outils/dessins_site.py`:1252  (def)
 - `_Groupe` — `tests/test_qui_peut_quoi.py`:860  (class)
 - `_groupes` — `evenements.py`:1248  (def)
-- `_groupes` — `questionnaire.py`:2228  (def)
+- `_groupes` — `questionnaire.py`:2264  (def)
 - `_Guild` — `tests/test_activite_demontage.py`:101  (class)
 - `_Guild` — `tests/test_visibilite_serveur.py`:43  (class)
 - `_guild` — `vigilance.py`:153  (def)
 - `_Guilde` — `tests/test_bouclier.py`:95  (class)
 - `_Guilde` — `tests/test_revue_tickets.py`:114  (class)
-- `_guilde` — `site_vitrine.py`:105  (async def)
+- `_guilde` — `site_vitrine.py`:107  (async def)
+- `_h` — `tests/test_hierarchie.py`:37  (def)
 - `_halo` — `outils/visuels.py`:164  (def)
 - `_handle_alert_action` — `raid_detector.py`:638  (async def)
-- `_handle_antiraid_join` — `bot.py`:24509  (async def)
-- `_handle_boost_started` — `bot.py`:24010  (async def)
-- `_handle_boost_stopped` — `bot.py`:24025  (async def)
-- `_handle_goodbye` — `bot.py`:23723  (async def)
+- `_handle_antiraid_join` — `bot.py`:24708  (async def)
+- `_handle_boost_started` — `bot.py`:24212  (async def)
+- `_handle_boost_stopped` — `bot.py`:24227  (async def)
+- `_handle_goodbye` — `bot.py`:23925  (async def)
 - `_handle_hit` — `honeypot.py`:170  (async def)
-- `_handle_reaction_role` — `bot.py`:29529  (async def)
-- `_handle_rogue_bot` — `bot.py`:24034  (async def)
+- `_handle_reaction_role` — `bot.py`:29741  (async def)
+- `_handle_rogue_bot` — `bot.py`:24236  (async def)
 - `_handle_sanction_click` — `staff_sanction.py`:232  (async def)
-- `_handle_welcome` — `bot.py`:24761  (async def)
+- `_handle_welcome` — `bot.py`:24960  (async def)
 - `_handler` — `tests/test_audit_pousse.py`:19  (def)
-- `_harass_respond` — `bot.py`:6119  (async def)
+- `_harass_respond` — `bot.py`:6265  (async def)
 - `_has_discord_invite` — `compromised_detector.py`:85  (def)
-- `_has_guild` — `gdpr.py`:228  (def)
+- `_has_guild` — `gdpr.py`:236  (def)
 - `_has_mass_mention` — `compromised_detector.py`:122  (def)
 - `_has_phishing_url` — `compromised_detector.py`:98  (def)
 - `_has_recent_alert` — `raid_detector.py`:344  (async def)
-- `_has_risky_perms` — `bot.py`:25332  (def)
+- `_has_risky_perms` — `bot.py`:25533  (def)
 - `_has_shortened_url` — `compromised_detector.py`:114  (def)
 - `_has_suspicious_username` — `compromised_detector.py`:127  (def)
 - `_has_urgency_language` — `compromised_detector.py`:106  (def)
 - `_haut` — `outils/dessins_site.py`:1615  (def)
-- `_haut_du_bot` — `metiers.py`:349  (def)
+- `_haut_du_bot` — `hierarchie.py`:242  (def)
+- `_haut_du_bot` — `metiers.py`:392  (def)
 - `_health_handler` — `health_server.py`:53  (async def)
-- `_heure_courte` — `bot.py`:7174  (def)
-- `_heure_paris` — `bot.py`:7726  (def)
+- `_heure_courte` — `bot.py`:7320  (def)
+- `_heure_paris` — `bot.py`:7872  (def)
+- `_hierarchie_demo` — `outils/site_local.py`:1212  (async def)
 - `_historique` — `outils/dessins_site.py`:1940  (def)
-- `_historique_ticket` — `bot.py`:9878  (async def)
-- `_hit` — `insult_filter.py`:291  (def)
+- `_historique` — `reponses_auto.py`:386  (async def)
+- `_historique_ticket` — `bot.py`:10027  (async def)
+- `_hit` — `insult_filter.py`:398  (def)
 - `_hooks_de_boucle` — `outils/couper_symboles.py`:59  (def)
 - `_horloge` — `outils/dessins_site.py`:2773  (def)
-- `_horodatage` — `entraide.py`:700  (def)
+- `_horodatage` — `entraide.py`:713  (def)
 - `_horodatage` — `roblox_panneau.py`:240  (def)
 - `_horodatage` — `websub_youtube.py`:114  (def)
 - `_hors_ligne` — `outils/dessins_site.py`:1742  (def)
 - `_hors_limites` — `evenements.py`:1997  (def)
 - `_host_allowed` — `trust_system.py`:108  (def)
 - `_host_in` — `trust_system.py`:103  (def)
-- `_hote` — `bot.py`:11267  (def)
-- `_hote_lisible` — `bot.py`:11350  (def)
+- `_hote` — `bot.py`:11419  (def)
+- `_hote_lisible` — `bot.py`:11502  (def)
 - `_hote_permis` — `outils/icones_rellseas.py`:682  (def)
-- `_html` — `tableau.py`:1623  (def)
-- `_html_carte_v2` — `bot.py`:9775  (def)
-- `_html_lignes_v2` — `bot.py`:9761  (def)
+- `_html` — `tableau.py`:1628  (def)
+- `_html_carte_v2` — `bot.py`:9924  (def)
+- `_html_lignes_v2` — `bot.py`:9910  (def)
 - `_html_texte` — `candidature_site.py`:934  (def)
-- `_http_json` — `affiches.py`:989  (async def)
-- `_http_octets` — `affiches.py`:1001  (async def)
+- `_http_json` — `affiches.py`:1015  (async def)
+- `_http_octets` — `affiches.py`:1027  (async def)
 - `_hubs` — `zones.py`:814  (def)
-- `_i18n_all_lang_role_names` — `bot.py`:32694  (def)
-- `_i18n_apply_lang` — `bot.py`:32757  (async def)
-- `_i18n_assign_lang_role` — `bot.py`:32702  (async def)
-- `_i18n_lang_role_name` — `bot.py`:32685  (def)
-- `_icone` — `affiches.py`:261  (def)
-- `_icone` — `questionnaire.py`:1262  (def)
+- `_i18n_all_lang_role_names` — `bot.py`:32906  (def)
+- `_i18n_apply_lang` — `bot.py`:32969  (async def)
+- `_i18n_assign_lang_role` — `bot.py`:32914  (async def)
+- `_i18n_lang_role_name` — `bot.py`:32897  (def)
+- `_icone` — `affiches.py`:270  (def)
+- `_icone` — `questionnaire.py`:1298  (def)
 - `_icone_coche` — `outils/dessins_site.py`:1571  (def)
-- `_icone_existe` — `affiches.py`:268  (async def)
-- `_icone_maison` — `metiers.py`:424  (def)
-- `_icone_servie` — `affiches.py`:362  (def)
+- `_icone_existe` — `affiches.py`:277  (async def)
+- `_icone_maison` — `metiers.py`:467  (def)
+- `_icone_servie` — `affiches.py`:371  (def)
 - `_id` — `evenements.py`:2329  (def)
-- `_ident` — `questionnaire.py`:1246  (def)
-- `_ident` — `tableau.py`:789  (def)
-- `_ident_question` — `questionnaire.py`:1130  (def)
-- `_identifiant` — `affiches.py`:242  (def)
+- `_ident` — `hierarchie.py`:735  (def)
+- `_ident` — `questionnaire.py`:1282  (def)
+- `_ident` — `tableau.py`:794  (def)
+- `_ident_question` — `questionnaire.py`:1166  (def)
+- `_identifiant` — `affiches.py`:251  (def)
 - `_identifiants` — `annonces.py`:684  (def)
 - `_identifiants` — `nettoyage.py`:105  (def)
-- `_ids` — `questionnaire.py`:1141  (def)
+- `_ids` — `questionnaire.py`:1177  (def)
 - `_ids` — `tests/test_approuver_bot.py`:53  (def)
 - `_ids` — `tests/test_revue_site.py`:170  (def)
 - `_ids` — `tests/test_suggestions.py`:58  (def)
-- `_ids_configures` — `bot.py`:13952  (def)
+- `_ids_configures` — `bot.py`:14124  (def)
 - `_ids_nommes` — `longevite.py`:117  (def)
-- `_ids_roles` — `cadeaux.py`:619  (def)
+- `_ids_roles` — `cadeaux.py`:674  (def)
 - `_il_y_a` — `tests/test_activite.py`:14  (def)
 - `_il_y_a` — `tests/test_activite_observation.py`:22  (def)
 - `_il_y_a` — `tests/test_menage.py`:25  (def)
@@ -2063,62 +2128,66 @@
 - `_image` — `evenements.py`:646  (async def)
 - `_image` — `outils/dessins_site.py`:1930  (def)
 - `_image` — `tests/test_annonces_modifiables.py`:44  (def)
-- `_image` — `tests/test_metiers.py`:412  (def)
+- `_image` — `tests/test_metiers.py`:414  (def)
 - `_image_roblox` — `outils/icones_rellseas.py`:800  (def)
-- `_image_sure` — `bot.py`:9890  (def)
+- `_image_sure` — `bot.py`:10039  (def)
 - `_Images` — `outils/icones_rellseas.py`:906  (class)
-- `_imitation_de_marque` — `bot.py`:11406  (def)
-- `_in_night_window` — `bot.py`:12836  (def)
-- `_indication` — `questionnaire.py`:930  (def)
-- `_indications` — `questionnaire.py`:5684  (def)
+- `_imbrique` — `tests/test_json_profond.py`:13  (def)
+- `_imitation_de_marque` — `bot.py`:11558  (def)
+- `_in_night_window` — `bot.py`:13008  (def)
+- `_indication` — `questionnaire.py`:966  (def)
+- `_indications` — `questionnaire.py`:5930  (def)
 - `_info` — `outils/dessins_site.py`:1761  (def)
 - `_infos` — `tests/test_annonces_modifiables.py`:342  (def)
-- `_infractions_recap` — `bot.py`:4543  (async def)
+- `_infractions_recap` — `bot.py`:4545  (async def)
 - `Rangeable._init` — `tests/faux_serveur.py`:103  (method)
-- `DBPool._init_locked` — `bot.py`:472  (method)
-- `_init_sentinelle` — `bot.py`:13230  (async def)
-- `_inscrire` — `cadeaux.py`:1141  (async def)
+- `DBPool._init_locked` — `bot.py`:476  (method)
+- `_init_sentinelle` — `bot.py`:13402  (async def)
+- `_inscrire` — `cadeaux.py`:1196  (async def)
 - `_inscrire` — `tests/test_revue_cadeaux.py`:83  (def)
-- `_inscrire_sanction` — `bot.py`:6811  (async def)
-- `_installer_arret_propre` — `bot.py`:15146  (def)
-- `_installer_clan` — `bot.py`:14959  (async def)
-- `_installer_resumeur_passerelle` — `bot.py`:33613  (def)
-- `_installer_zones` — `bot.py`:14746  (async def)
-- `_instant` — `tableau.py`:830  (def)
-- `_insulte_visee` — `bot.py`:424  (def)
+- `_inscrire_sanction` — `bot.py`:6957  (async def)
+- `_installer_arret_propre` — `bot.py`:15317  (def)
+- `_installer_clan` — `bot.py`:15130  (async def)
+- `_installer_resumeur_passerelle` — `bot.py`:33825  (def)
+- `_installer_zones` — `bot.py`:14917  (async def)
+- `_instant` — `tableau.py`:835  (def)
+- `_insulte_visee` — `bot.py`:428  (def)
 - `_inter` — `tests/test_candidature_site.py`:553  (def)
 - `_interaction` — `tests/test_signalements.py`:37  (def)
+- `_interdictions_demo` — `outils/site_local.py`:934  (async def)
 - `_interrogation` — `outils/dessins_site.py`:3249  (def)
-- `_introuvable` — `tableau.py`:2103  (def)
-- `_invalidate_immunity` — `bot.py`:1858  (def)
-- `_Invalide` — `questionnaire.py`:978  (class)
+- `_introuvable` — `tableau.py`:2108  (def)
+- `_invalidate_immunity` — `bot.py`:1862  (def)
+- `_Invalide` — `questionnaire.py`:1014  (class)
 - `_Invalide` — `textes.py`:65  (class)
-- `_invitation` — `questionnaire.py`:3028  (def)
-- `_invitations_arrivee` — `bot.py`:14109  (async def)
-- `_invitations_depart` — `bot.py`:14116  (async def)
-- `_invitations_lien` — `bot.py`:14102  (async def)
+- `_Invalide` — `tickets_interdits.py`:83  (class)
+- `_invitation` — `questionnaire.py`:3064  (def)
+- `_invitations_arrivee` — `bot.py`:14280  (async def)
+- `_invitations_depart` — `bot.py`:14287  (async def)
+- `_invitations_lien` — `bot.py`:14273  (async def)
 - `_inviter` — `candidature_site.py`:910  (async def)
-- `_ip` — `tableau.py`:631  (def)
-- `_is_benign_interaction_err` — `bot.py`:32202  (def)
-- `_is_chatty_channel` — `bot.py`:2006  (async def)
-- `_is_cjk` — `insult_filter.py`:222  (def)
+- `_ip` — `tableau.py`:636  (def)
+- `_is_benign_interaction_err` — `bot.py`:32414  (def)
+- `_is_chatty_channel` — `bot.py`:2010  (async def)
+- `_is_cjk` — `insult_filter.py`:329  (def)
 - `_is_exempt` — `rate_limiter.py`:64  (def)
 - `_is_owner` — `owner_export.py`:37  (def)
-- `_is_recent_iso` — `bot.py`:29685  (def)
-- `_is_sensitive_role` — `bot.py`:2155  (def)
+- `_is_recent_iso` — `bot.py`:29897  (def)
+- `_is_sensitive_role` — `bot.py`:2159  (def)
 - `_is_staff_member` — `impersonation_detector.py`:187  (def)
 - `_iso` — `outils/banc_annees.py`:107  (def)
 - `_isolement` — `tests/test_revue_moderation.py`:350  (def)
-- `_isolement_actif` — `bot.py`:3934  (async def)
-- `_isoler_par_securite` — `bot.py`:5658  (async def)
+- `_isolement_actif` — `bot.py`:3938  (async def)
+- `_isoler_par_securite` — `bot.py`:5723  (async def)
 - `_iter_py` — `generate_index.py`:122  (def)
-- `_iter_supervised_loops` — `bot.py`:15994  (def)
+- `_iter_supervised_loops` — `bot.py`:16165  (def)
 - `_iv_diff` — `outils/dessins_site.py`:393  (def)
 - `_iv_inter` — `outils/dessins_site.py`:380  (def)
 - `_iv_union` — `outils/dessins_site.py`:369  (def)
-- `_jeton` — `site_vitrine.py`:125  (def)
+- `_jeton` — `site_vitrine.py`:127  (def)
 - `_jetons` — `outils/dessins_site.py`:147  (def)
 - `_jetons_gardes` — `longevite.py`:322  (async def)
+- `_jeux_aide` — `reponses_auto.py`:311  (def)
 - `_join_age_days` — `compromised_detector.py`:144  (def)
 - `_jouer` — `tests/test_off_radiation.py`:202  (def)
 - `_jour` — `outils/banc_annees.py`:111  (def)
@@ -2128,156 +2197,166 @@
 - `Monde._journal` — `outils/site_maquette.py`:370  (method)
 - `RellseasGestionV2._journal` — `rellseas_panneau.py`:1050  (method)
 - `_journal` — `outils/dessins_site.py`:1110  (def)
-- `_journal` — `tableau.py`:1182  (async def)
+- `_journal` — `tableau.py`:1187  (async def)
 - `_journal` — `tests/test_candidature_site.py`:236  (def)
-- `_journal_radiation` — `bot.py`:2546  (async def)
-- `_journal_rellseas` — `bot.py`:6408  (async def)
+- `_journal` — `tests/test_hierarchie.py`:53  (def)
+- `_journal_radiation` — `bot.py`:2550  (async def)
+- `_journal_rellseas` — `bot.py`:6554  (async def)
 - `_json` — `activite_demontage.py`:83  (def)
 - `_json` — `evenements.py`:447  (def)
 - `_json` — `outils/site_maquette.py`:124  (def)
-- `_json` — `tableau.py`:1612  (def)
-- `_json` — `tests/test_metiers.py`:339  (async def)
+- `_json` — `tableau.py`:1617  (def)
+- `_json` — `tests/test_metiers.py`:341  (async def)
 - `_json` — `tests/test_site_v2_serveur.py`:205  (async def)
-- `_json` — `tests/test_textes.py`:363  (async def)
+- `_json` — `tests/test_textes.py`:364  (async def)
 - `_json_file` — `owner_export.py`:105  (def)
-- `_json_liste` — `questionnaire.py`:1071  (def)
-- `_kick_young_account` — `bot.py`:4161  (async def)
+- `_json_liste` — `questionnaire.py`:1107  (def)
+- `_juger` — `sujets_interdits.py`:499  (def)
+- `_kick_young_account` — `bot.py`:4163  (async def)
 - `_kind` — `generate_index.py`:65  (def)
 - `_kv` — `admin_panels_v2.py`:65  (def)
 - `_kw` — `outils/verif_boutons_persistants.py`:74  (def)
 - `_l` — `evenements.py`:963  (def)
-- `_lacher` — `tableau.py`:3870  (def)
+- `_lacher` — `tableau.py`:3896  (def)
 - `_lancer` — `tests/test_bouton_langue.py`:136  (def)
 - `_lancer` — `tests/test_cadeaux_v3.py`:56  (def)
 - `_lancer` — `tests/test_revue_cadeaux.py`:68  (def)
-- `_lancer_verrou_quarantaine` — `bot.py`:3870  (def)
-- `_langue_de_membre` — `bot.py`:15026  (async def)
-- `_langue_membre` — `bot.py`:15298  (async def)
+- `_lancer_verrou_quarantaine` — `bot.py`:3874  (def)
+- `_langue_de_membre` — `bot.py`:15197  (async def)
+- `_langue_membre` — `bot.py`:15469  (async def)
 - `_lanterne` — `outils/dessins_site.py`:1715  (def)
 - `_LayoutViewDuMessage` — `tests/test_approuver_bot.py`:20  (class)
 - `_le` — `tests/test_activite.py`:87  (def)
 - `_Lecteur` — `transcript_store.py`:143  (class)
-- `_lecteur_partage` — `bot.py`:5841  (def)
-- `_lecteurs_archives` — `bot.py`:14880  (def)
-- `_lecteurs_attendus` — `tests/test_acces_site.py`:324  (def)
+- `_lecteur_partage` — `bot.py`:5987  (def)
+- `_lecteurs_archives` — `bot.py`:15051  (def)
+- `_lecteurs_attendus` — `tests/test_acces_site.py`:345  (def)
 - `_lecture_questionnaire` — `candidature_site.py`:1159  (async def)
+- `_leet` — `sujets_interdits.py`:338  (def)
 - `_levee` — `tests/test_revue_moderation.py`:587  (def)
+- `_levee` — `tests/test_tickets_sous_menus.py`:47  (async def)
 - `_levenshtein` — `impersonation_detector.py`:156  (def)
-- `_lever_radiation` — `bot.py`:3152  (async def)
-- `_lever_ralentis` — `bot.py`:33379  (async def)
+- `_lever_radiation` — `bot.py`:3156  (async def)
+- `_lever_ralentis` — `bot.py`:33591  (async def)
 - `_lever_suspension` — `tests/test_site_equipage.py`:384  (async def)
-- `_lever_verrou_raid` — `bot.py`:24674  (async def)
-- `_libelle` — `tableau.py`:1035  (def)
+- `_lever_verrou_raid` — `bot.py`:24873  (async def)
+- `_libelle` — `reponses_auto.py`:540  (def)
+- `_libelle` — `tableau.py`:1040  (def)
 - `_liberer` — `longevite.py`:575  (async def)
-- `_liberer` — `tableau.py`:3694  (def)
-- `_libre` — `faq.py`:316  (def)
+- `_liberer` — `tableau.py`:3720  (def)
 - `_lien` — `evenements.py`:623  (def)
 - `_lien` — `outils/dessins_site.py`:1674  (def)
-- `_lien` — `questions.py`:226  (def)
+- `_lien` — `questions.py`:273  (def)
 - `_lien_candidat` — `candidature_site.py`:844  (async def)
-- `_lien_depuis_fichier` — `questionnaire.py`:1327  (def)
-- `_lien_discord` — `questionnaire.py`:1268  (def)
-- `_lien_site` — `questionnaire.py`:4922  (async def)
-- `_lien_web_candidat` — `questionnaire.py`:3356  (async def)
-- `_liens` — `affiches.py`:1154  (async def)
+- `_lien_depuis_fichier` — `questionnaire.py`:1363  (def)
+- `_lien_discord` — `questionnaire.py`:1304  (def)
+- `_lien_site` — `questionnaire.py`:5168  (async def)
+- `_lien_web_candidat` — `questionnaire.py`:3392  (async def)
+- `_liens` — `affiches.py`:1213  (async def)
 - `_liens` — `evenements.py`:749  (def)
-- `_liens` — `tests/test_faq_tickets.py`:219  (def)
+- `_liens` — `tests/test_faq_tickets.py`:150  (def)
 - `_liens` — `tests/test_revue_moderation.py`:211  (def)
-- `_liens_journal` — `bot.py`:15173  (async def)
-- `_liens_metiers` — `metiers.py`:446  (async def)
+- `_liens_catalogue` — `hierarchie.py`:542  (async def)
+- `_liens_journal` — `bot.py`:15344  (async def)
+- `_liens_metiers` — `metiers.py`:556  (async def)
 - `_liens_publics` — `candidature_site.py`:563  (def)
 - `_liens_vues` — `tests/test_candidature_site.py`:1163  (def)
-- `_lier` — `metiers.py`:451  (async def)
+- `_lier` — `metiers.py`:561  (async def)
 - `_lies_dans` — `outils/verif_portees.py`:47  (def)
 - `_lieu` — `outils/dessins_site.py`:1869  (def)
 - `_ligne` — `annonces.py`:131  (def)
 - `_ligne` — `boosts.py`:84  (async def)
-- `_ligne` — `cadeaux.py`:241  (def)
+- `_ligne` — `cadeaux.py`:249  (def)
 - `_ligne` — `entraide.py`:438  (def)
 - `_ligne` — `equipages.py`:153  (def)
 - `_ligne` — `evenements.py`:455  (def)
 - `_ligne` — `sondages.py`:350  (async def)
 - `_ligne` — `tests/test_tickets_fils.py`:333  (def)
-- `_ligne_affiche` — `affiches.py`:598  (def)
-- `_ligne_bloc` — `site_equipage.py`:425  (def)
+- `_ligne_affiche` — `affiches.py`:607  (def)
+- `_ligne_bloc` — `site_equipage.py`:430  (def)
 - `_ligne_en_base` — `textes.py`:346  (async def)
 - `_ligne_membre` — `evenements.py`:1276  (def)
 - `_ligne_mention` — `roblox_panneau.py`:83  (def)
-- `_ligne_statut` — `entraide.py`:617  (def)
+- `_ligne_statut` — `entraide.py`:630  (def)
 - `_lignes` — `boosts.py`:78  (async def)
 - `_lignes` — `entraide.py`:457  (async def)
 - `_lignes` — `equipages.py`:170  (async def)
 - `_lignes` — `longevite.py`:71  (async def)
-- `_lignes` — `questions.py`:220  (async def)
+- `_lignes` — `questions.py`:267  (async def)
 - `_lignes` — `recrutements.py`:172  (async def)
 - `_lignes` — `tests/test_candidat_ses_cases.py`:65  (def)
 - `_lignes_quand` — `evenements.py`:1126  (def)
-- `_lignes_tickets` — `tableau.py`:920  (async def)
+- `_lignes_tickets` — `tableau.py`:925  (async def)
 - `_limite` — `nettoyage.py`:32  (def)
 - `_limite` — `sondages.py`:269  (async def)
 - `_limite` — `suggestions.py`:364  (async def)
 - `_limites` — `annonces_modifiables.py`:50  (def)
 - `_lire` — `candidature_site.py`:352  (async def)
 - `_lire` — `outils/inventaire_evenements.py`:93  (def)
-- `_lire` — `questionnaire.py`:1156  (async def)
+- `_lire` — `questionnaire.py`:1192  (async def)
 - `_lire` — `tests/test_revue_tickets.py`:97  (def)
 - `_lire` — `unified_logger.py`:198  (def)
-- `_lire_borne` — `affiches.py`:979  (async def)
+- `_lire_affectations` — `hierarchie.py`:1018  (def)
+- `_lire_borne` — `affiches.py`:1005  (async def)
 - `_lire_bot` — `tests/test_configure_social.py`:60  (def)
 - `_lire_cfg` — `unified_logger.py`:289  (def)
-- `_lire_commandes` — `bot.py`:14736  (async def)
-- `_lire_config` — `bot.py`:1535  (async def)
-- `_lire_corps` — `tableau.py`:2287  (async def)
-- `_lire_dans` — `questionnaire.py`:1180  (async def)
-- `_lire_fichier` — `questionnaire.py`:1284  (def)
-- `_lire_json` — `tableau.py`:2313  (async def)
-- `_lire_json_bloquant` — `social_media.py`:1089  (def)
+- `_lire_commandes` — `bot.py`:14907  (async def)
+- `_lire_config` — `bot.py`:1539  (async def)
+- `_lire_corps` — `tableau.py`:2292  (async def)
+- `_lire_dans` — `questionnaire.py`:1216  (async def)
+- `_lire_etat` — `tickets_interdits.py`:263  (async def)
+- `_lire_fichier` — `questionnaire.py`:1320  (def)
+- `_lire_grades` — `hierarchie.py`:328  (async def)
+- `_lire_json` — `tableau.py`:2336  (async def)
+- `_lire_json_bloquant` — `social_media.py`:1101  (def)
 - `_lire_liens` — `invitations.py`:61  (async def)
 - `_lire_memoire` — `visuels.py`:54  (def)
 - `_lire_page_article` — `roblox_news.py`:674  (def)
-- `_lire_page_site` — `tableau.py`:2025  (def)
-- `_lire_session` — `tableau.py`:514  (async def)
-- `_lire_statique` — `tableau.py`:2071  (def)
+- `_lire_page_site` — `tableau.py`:2030  (def)
+- `_lire_session` — `tableau.py`:519  (async def)
+- `_lire_statique` — `tableau.py`:2076  (def)
 - `_lire_tolerant` — `candidature_site.py`:358  (async def)
-- `_lire_tolerant` — `questionnaire.py`:1167  (async def)
-- `PanelBlacklistView._liste` — `bot.py`:21431  (method)
-- `_liste_gagnants` — `cadeaux.py`:2224  (def)
-- `_liste_metiers` — `questionnaire.py`:3904  (async def)
-- `_liste_noire_recrutement` — `bot.py`:6551  (async def)
+- `_lire_tolerant` — `questionnaire.py`:1203  (async def)
+- `PanelBlacklistView._liste` — `bot.py`:21602  (method)
+- `_liste` — `sujets_interdits.py`:364  (def)
+- `_liste` — `tickets_interdits.py`:159  (def)
+- `_liste_gagnants` — `cadeaux.py`:2280  (def)
+- `_liste_metiers` — `questionnaire.py`:3951  (async def)
+- `_liste_noire_recrutement` — `bot.py`:6697  (async def)
 - `_liste_noms` — `evenements.py`:1152  (def)
 - `_litteral` — `outils/verif_boutons_persistants.py`:69  (def)
-- `_load` — `insult_filter.py`:260  (def)
+- `_load` — `insult_filter.py`:367  (def)
 - `_load` — `nsfw_scan.py`:44  (def)
 - `_load` — `ocr_scan.py`:53  (def)
 - `_load` — `offtopic_filter.py`:59  (def)
 - `_load` — `owner_ids.py`:29  (def)
-- `_load_api_warning_state` — `bot.py`:20110  (def)
+- `_load_api_warning_state` — `bot.py`:20281  (def)
 - `_load_guild` — `tracking_layer.py`:86  (async def)
 - `_load_staff_index` — `impersonation_detector.py`:236  (async def)
 - `_Banc._lock` — `tests/test_config_lost_update.py`:82  (method)
 - `_lock_for` — `recidivism.py`:245  (def)
-- `_lockdown_role_mentions` — `bot.py`:5692  (async def)
+- `_lockdown_role_mentions` — `bot.py`:5757  (async def)
 - `_log_and_alert` — `impersonation_detector.py`:345  (async def)
-- `_log_audited` — `bot.py`:23811  (async def)
-- `_logerr` — `bot.py`:294  (def)
-- `_logs_direction_seule` — `bot.py`:7480  (async def)
-- `_logs_sur_le_site` — `bot.py`:27283  (async def)
+- `_log_audited` — `bot.py`:24013  (async def)
+- `_logerr` — `bot.py`:298  (def)
+- `_logs_direction_seule` — `bot.py`:7626  (async def)
+- `_logs_sur_le_site` — `bot.py`:27489  (async def)
 - `_longue_vue` — `outils/dessins_site.py`:861  (def)
 - `_longueur` — `evenements.py`:1005  (def)
 - `_longueur` — `tests/test_revue_cadeaux.py`:134  (def)
-- `_loop_heartbeat` — `bot.py`:220  (async def)
+- `_loop_heartbeat` — `bot.py`:224  (async def)
 - `_lot` — `casier.py`:90  (def)
 - `_lot_casier` — `outils/site_maquette.py`:1518  (def)
 - `_lue` — `tests/test_annonces_modifiables.py`:54  (def)
 - `_maintenant` — `outils/icones_rellseas.py`:678  (def)
-- `_maintenant` — `questionnaire.py`:982  (def)
+- `_maintenant` — `questionnaire.py`:1018  (def)
 - `_maintenant` — `sondages.py`:115  (def)
 - `_maintenant` — `suggestions.py`:80  (def)
 - `_maj` — `equipages.py`:321  (async def)
 - `_maj_apres` — `annonces.py`:395  (async def)
-- `_maj_apres` — `cadeaux.py`:1406  (async def)
+- `_maj_apres` — `cadeaux.py`:1461  (async def)
 - `_maj_apres` — `evenements.py`:1570  (async def)
-- `_maj_carte` — `entraide.py`:742  (async def)
+- `_maj_carte` — `entraide.py`:755  (async def)
 - `_manipulable` — `activite_demontage.py`:167  (def)
 - `_manquent` — `candidature_site.py`:1254  (def)
 - `_markdown_en_texte` — `roblox_news_contenu.py`:743  (def)
@@ -2285,18 +2364,18 @@
 - `_marquer` — `sondages.py`:366  (async def)
 - `_masque_rempli` — `outils/dessins_site.py`:580  (def)
 - `_masquer` — `outils/dessins_site.py`:1822  (def)
-- `_matches_keyword_filter` — `bot.py`:330  (def)
+- `_matches_keyword_filter` — `bot.py`:334  (def)
 - `_maybe_notice` — `recidivism.py`:487  (async def)
 - `_md` — `outils/icones_rellseas.py`:1281  (def)
-- `_md` — `questionnaire.py`:1010  (def)
+- `_md` — `questionnaire.py`:1046  (def)
 - `_media_defaut` — `evenements.py`:635  (def)
 - `_media_host_or_ext` — `trust_system.py`:130  (def)
-- `_media_permis_equipage` — `tableau.py`:3347  (async def)
-- `_media_sortie` — `site_equipage.py`:331  (def)
-- `_media_valide` — `site_equipage.py`:513  (async def)
-- `_mediane` — `site_equipage.py`:719  (def)
-- `_mediane` — `tableau.py`:908  (def)
-- `_medias_utilises` — `tableau.py`:3130  (async def)
+- `_media_permis_equipage` — `tableau.py`:3373  (async def)
+- `_media_sortie` — `site_equipage.py`:332  (def)
+- `_media_valide` — `site_equipage.py`:518  (async def)
+- `_mediane` — `site_equipage.py`:724  (def)
+- `_mediane` — `tableau.py`:913  (def)
+- `_medias_utilises` — `tableau.py`:3156  (async def)
 - `_Membre` — `tests/test_activite.py`:57  (class)
 - `_Membre` — `tests/test_activite_demontage.py`:80  (class)
 - `_Membre` — `tests/test_activite_observation.py`:132  (class)
@@ -2306,161 +2385,171 @@
 - `_membre` — `tests/test_revue_tickets.py`:143  (def)
 - `_membre` — `tests/test_tableau.py`:43  (def)
 - `_membre` — `tests/test_tickets_dossier.py`:84  (def)
-- `_membre` — `tests/test_tickets_sous_menus.py`:39  (def)
+- `_membre` — `tests/test_tickets_sous_menus.py`:51  (def)
 - `_membre` — `tests/test_usurpation.py`:16  (def)
+- `_membre` — `tickets_interdits.py`:165  (def)
 - `_Membre2` — `tests/test_activite.py`:219  (class)
 - `_MembreMention` — `tests/test_activite.py`:67  (class)
 - `_membres` — `outils/dessins_site.py`:1270  (def)
-- `_membres_clan` — `site_equipage.py`:312  (def)
+- `_membres_clan` — `site_equipage.py`:313  (def)
 - `_membres_du_salon` — `rellseas_panneau.py`:406  (def)
 - `_membres_du_salon_frais` — `rellseas_panneau.py`:454  (async def)
-- `_membres_sanctionnes` — `bot.py`:16133  (async def)
-- `_meme` — `affiches.py`:381  (def)
-- `_meme_etag` — `tableau.py`:2098  (def)
+- `_membres_sanctionnes` — `bot.py`:16304  (async def)
+- `_meme` — `affiches.py`:390  (def)
+- `_meme_etag` — `tableau.py`:2103  (def)
 - `_memoire` — `visuels.py`:50  (def)
 - `_memoire_propre` — `tests/test_candidat_ses_cases.py`:53  (def)
 - `_memoriser` — `roblox_news.py`:113  (def)
-- `_menage_categories` — `bot.py`:15256  (async def)
+- `_menage_categories` — `bot.py`:15427  (async def)
 - `_menage_ns` — `tests/test_zones.py`:349  (def)
-- `_menage_salons_wait` — `bot.py`:13805  (async def)
-- `_menage_unique` — `bot.py`:13746  (async def)
-- `_menage_v2` — `bot.py`:14009  (async def)
+- `_menage_salons_wait` — `bot.py`:13977  (async def)
+- `_menage_unique` — `bot.py`:13918  (async def)
+- `_menage_v2` — `bot.py`:14181  (async def)
 - `_mention` — `annonces.py`:555  (def)
-- `_mention` — `entraide.py`:591  (def)
+- `_mention` — `entraide.py`:604  (def)
 - `_mention_publication` — `evenements.py`:1101  (def)
 - `_menu` — `outils/dessins_site.py`:1625  (def)
-- `_menu_logs` — `bot.py`:7388  (async def)
+- `_menu_logs` — `bot.py`:7534  (async def)
 - `_message` — `boosts.py`:175  (async def)
 - `_message` — `tableau.py`:137  (def)
 - `_message` — `tests/test_fonctions_retirees.py`:59  (def)
+- `_message` — `tests/test_gif_texte.py`:97  (def)
 - `_message` — `tests/test_recours_v2.py`:84  (def)
 - `_message` — `tests/test_revue_moderation.py`:313  (def)
 - `_message` — `tests/test_tickets_rellseas.py`:64  (def)
 - `_message` — `tests/test_zones.py`:497  (def)
 - `_message_disparu` — `evenements.py`:2015  (async def)
 - `_message_dossier` — `tests/test_revue_tickets.py`:881  (def)
-- `_message_en_donnees` — `bot.py`:9903  (def)
+- `_message_en_donnees` — `bot.py`:10052  (def)
 - `_message_recu` — `tests/test_revue_reste.py`:115  (def)
 - `_messages` — `tests/test_conversation_tickets.py`:47  (def)
 - `_messages` — `tests/test_revue_tickets.py`:952  (def)
-- `_messages_du_faux` — `outils/site_local.py`:704  (def)
-- `_messages_parcours` — `questionnaire.py`:5255  (async def)
+- `_messages_du_faux` — `outils/site_local.py`:724  (def)
+- `_messages_parcours` — `questionnaire.py`:5501  (async def)
 - `_mesure` — `activite.py`:411  (def)
-- `_metiers_attente` — `bot.py`:16177  (async def)
-- `_metiers_catalogue` — `bot.py`:6580  (async def)
-- `_metiers_de` — `questionnaire.py`:3916  (async def)
-- `_metiers_membre` — `bot.py`:16153  (async def)
-- `_migrer_panneaux_tickets` — `bot.py`:13455  (async def)
-- `_minuteur` — `cadeaux.py`:1745  (async def)
+- `_metas` — `tickets_interdits.py`:218  (async def)
+- `_metiers_attente` — `bot.py`:16348  (async def)
+- `_metiers_catalogue` — `bot.py`:6726  (async def)
+- `_metiers_de` — `questionnaire.py`:3963  (async def)
+- `_metiers_membre` — `bot.py`:16324  (async def)
+- `_migrer_panneaux_tickets` — `bot.py`:13627  (async def)
+- `_minuteur` — `cadeaux.py`:1800  (async def)
 - `_minuteur` — `evenements.py`:2273  (async def)
 - `_minuteur` — `outils/dessins_site.py`:1014  (def)
 - `_mo` — `outils/banc_annees.py`:119  (def)
 - `_mo` — `stockage.py`:155  (def)
-- `Inter._modal` — `tests/banc_ticket_recrutement.py`:253  (method)
+- `Inter._modal` — `tests/banc_ticket_recrutement.py`:254  (method)
 - `_modal_textes` — `tests/test_questionnaire.py`:202  (def)
-- `_mode` — `questionnaire.py`:3078  (def)
-- `_modele_site` — `questionnaire.py`:5161  (def)
+- `_mode` — `questionnaire.py`:3114  (def)
+- `_modele_site` — `questionnaire.py`:5407  (def)
 - `_modifier` — `outils/dessins_site.py`:3219  (def)
+- `_modifier` — `tickets_interdits.py`:378  (async def)
 - `_modifier_natif` — `evenements.py`:1675  (async def)
-- `MainPanelV2._module_select` — `bot.py`:12382  (method)
+- `MainPanelV2._module_select` — `bot.py`:12554  (method)
 - `_moins` — `outils/dessins_site.py`:1600  (def)
 - `_mois` — `outils/site_maquette.py`:145  (def)
-- `_mois` — `site_equipage.py`:316  (def)
-- `_mois_paris` — `tableau.py`:913  (def)
+- `_mois` — `site_equipage.py`:317  (def)
+- `_mois_paris` — `tableau.py`:918  (def)
 - `_monde` — `tests/test_clan.py`:112  (def)
 - `_monde_equipes` — `tests/test_revue_tickets.py`:565  (def)
 - `_monter` — `visuels.py`:138  (def)
 - `_morceaux` — `zones.py`:1008  (def)
-- `_mot_entier` — `bot.py`:4051  (def)
-- `_mot_proche` — `questionnaire.py`:891  (def)
+- `_mot_entier` — `bot.py`:4055  (def)
+- `_mot_proche` — `questionnaire.py`:927  (def)
 - `_mot_sous_la_carte` — `equipages.py`:627  (async def)
+- `_mot_wallah` — `sujets_interdits.py`:433  (def)
 - `_motif_like` — `longevite.py`:130  (def)
 - `_motifs` — `mots_interdits.py`:80  (def)
 - `_mots` — `annonces.py`:211  (def)
 - `_mots` — `config_salons.py`:133  (def)
 - `_mots` — `salutations.py`:44  (def)
-- `_mp` — `questionnaire.py`:3130  (async def)
-- `_mp_une_fois` — `bot.py`:726  (async def)
+- `_mp` — `questionnaire.py`:3166  (async def)
+- `_mp_une_fois` — `bot.py`:730  (async def)
 - `_msg` — `tests/test_cadeaux.py`:61  (def)
 - `_msg` — `tests/test_faux_positifs.py`:153  (def)
-- `_msg_has_image` — `bot.py`:5315  (def)
-- `_msg_url_slugs` — `bot.py`:5563  (def)
+- `_msg_has_image` — `bot.py`:5342  (def)
+- `_msg_url_slugs` — `bot.py`:5590  (def)
 - `_mymemory` — `roblox_news_contenu.py`:464  (async def)
 - `_n` — `outils/banc_annees.py`:115  (def)
 - `_name_of` — `owner_export.py`:44  (def)
 - `_natif` — `evenements.py`:1638  (async def)
 - `_navigation` — `tests/test_navigation_site.py`:73  (def)
 - `_navire` — `outils/dessins_site.py`:887  (def)
-- `_net` — `questionnaire.py`:986  (def)
+- `_net` — `questionnaire.py`:1022  (def)
+- `_net` — `tickets_interdits.py`:441  (def)
 - `Monde._nettoyage` — `outils/site_maquette.py`:975  (method)
 - `_nettoyage` — `outils/dessins_site.py`:1452  (def)
-- `_nettoyage_site_attente` — `bot.py`:7157  (async def)
-- `_nettoyer_corbeille` — `affiches.py`:1443  (async def)
+- `_nettoyage_site_attente` — `bot.py`:7303  (async def)
+- `_nettoyer_corbeille` — `affiches.py`:1502  (async def)
 - `_nettoyer_en_tete` — `roblox_news_contenu.py`:225  (def)
-- `_nettoyer_historique` — `affiches.py`:1462  (async def)
-- `SendPanelPaginatedView._next` — `bot.py`:21726  (method)
-- `_noeud` — `tests/banc_ticket_recrutement.py`:55  (def)
+- `_nettoyer_historique` — `affiches.py`:1521  (async def)
+- `SendPanelPaginatedView._next` — `bot.py`:21904  (method)
+- `_noeud` — `tests/banc_ticket_recrutement.py`:56  (def)
 - `_noeud` — `tests/test_commandes_en_double.py`:48  (def)
 - `_noeud` — `tests/test_navigation_site.py`:43  (def)
 - `_noeud` — `tests/test_qui_peut_quoi.py`:52  (def)
 - `_noeud` — `tests/test_revue_admin.py`:41  (def)
-- `PanelBlacklistView._nom` — `bot.py`:21442  (method)
+- `PanelBlacklistView._nom` — `bot.py`:21613  (method)
 - `_nom` — `acces_direction.py`:35  (def)
-- `_nom` — `cadeaux.py`:1193  (def)
+- `_nom` — `cadeaux.py`:1248  (def)
 - `_nom` — `recrutements.py`:499  (def)
 - `_nom` — `securite_site.py`:302  (def)
-- `_nom` — `tableau.py`:796  (def)
+- `_nom` — `tableau.py`:801  (def)
 - `_nom` — `tests/test_revue_moderation.py`:32  (def)
-- `_nom_affiche` — `site_equipage.py`:402  (def)
+- `_nom_affiche` — `site_equipage.py`:407  (def)
 - `_nom_cat` — `evenements.py`:669  (def)
 - `_nom_de` — `unified_logger.py`:321  (def)
 - `_nom_decorateur` — `outils/verif_evenements.py`:76  (def)
-- `_nom_et_id` — `bot.py`:7732  (def)
-- `_nom_fichier` — `tableau.py`:2644  (def)
+- `_nom_et_id` — `bot.py`:7878  (def)
+- `_nom_fichier` — `tableau.py`:2667  (def)
 - `_nom_image` — `evenements.py`:1608  (def)
-- `_nom_membre` — `site_equipage.py`:919  (def)
-- `_nom_panneau` — `entraide.py`:1600  (def)
-- `_nom_peut_ressembler` — `bot.py`:11744  (def)
-- `_nom_public` — `site_vitrine.py`:168  (def)
+- `_nom_membre` — `site_equipage.py`:930  (def)
+- `_nom_panneau` — `entraide.py`:1613  (def)
+- `_nom_peut_ressembler` — `bot.py`:11896  (def)
+- `_nom_public` — `site_vitrine.py`:232  (def)
 - `_nom_role` — `textes.py`:464  (def)
-- `_nombre` — `cadeaux.py`:676  (def)
-- `_nombre` — `site_vitrine.py`:330  (def)
-- `_nombre_membres` — `bot.py`:24692  (def)
-- `_noms_cartes` — `evenements.py`:2608  (def)
+- `_nom_salon` — `reponses_auto.py`:535  (def)
+- `_nombre` — `cadeaux.py`:731  (def)
+- `_nombre` — `site_vitrine.py`:427  (def)
+- `_nombre_membres` — `bot.py`:24891  (def)
+- `_nomme_un_jeu` — `reponses_auto.py`:132  (def)
+- `_noms_cartes` — `evenements.py`:2659  (def)
 - `_noms_choix` — `evenements.py`:292  (def)
-- `_noms_nettoyage` — `tableau.py`:2977  (def)
+- `_noms_nettoyage` — `tableau.py`:3003  (def)
 - `_norm` — `outils/site_maquette.py`:2564  (def)
 - `_normaliser` — `activite_demontage.py`:114  (def)
 - `_normaliser` — `evenements.py`:900  (def)
-- `_normaliser` — `questionnaire.py`:841  (def)
+- `_normaliser` — `questionnaire.py`:877  (def)
 - `_normaliser` — `roblox_news.py`:838  (def)
-- `_normaliser_liens` — `bot.py`:11483  (def)
-- `_normaliser_regle` — `tableau.py`:2207  (def)
-- `_normaliser_route` — `tableau.py`:2176  (def)
+- `_normaliser_liens` — `bot.py`:11635  (def)
+- `_normaliser_regle` — `tableau.py`:2212  (def)
+- `_normaliser_route` — `tableau.py`:2181  (def)
 - `_normaliser_rss` — `roblox_news.py`:559  (def)
 - `_normalize` — `impersonation_detector.py`:127  (def)
-- `_normalize_for_scan` — `bot.py`:5141  (def)
-- `_norme` — `metiers.py`:375  (def)
+- `_normalize_for_scan` — `bot.py`:5168  (def)
+- `_norme` — `metiers.py`:418  (def)
 - `_note` — `tests/test_bouclier.py`:107  (def)
-- `_note_attack` — `bot.py`:6066  (async def)
-- `_note_tronque` — `bot.py`:9885  (def)
+- `_note_attack` — `bot.py`:6212  (async def)
+- `_note_tronque` — `bot.py`:10034  (def)
 - `_noter` — `boosts.py`:93  (async def)
 - `_noter` — `evenements.py`:373  (async def)
-- `_noter` — `metiers.py`:256  (async def)
-- `_noter` — `questionnaire.py`:1231  (async def)
+- `_noter` — `metiers.py`:293  (async def)
+- `_noter` — `questionnaire.py`:1267  (async def)
+- `_noter` — `reponses_auto.py`:416  (async def)
+- `_noter` — `tests/test_tickets_sous_menus.py`:43  (async def)
 - `_noter` — `vocaux.py`:101  (def)
-- `_noter_ecriture` — `tableau.py`:2336  (async def)
-- `_noter_historique` — `affiches.py`:717  (async def)
-- `_noter_isolement` — `bot.py`:3905  (async def)
+- `_noter_ecriture` — `tableau.py`:2359  (async def)
+- `_noter_historique` — `affiches.py`:733  (async def)
+- `_noter_isolement` — `bot.py`:3909  (async def)
 - `_noter_lot` — `casier.py`:108  (async def)
-- `_noter_ouverture_equipage` — `tableau.py`:1682  (async def)
-- `_noter_panne` — `metiers.py`:266  (async def)
+- `_noter_ouverture_equipage` — `tableau.py`:1687  (async def)
+- `_noter_panne` — `metiers.py`:303  (async def)
 - `_noter_restants` — `activite_demontage.py`:205  (async def)
-- `_noter_retires` — `cadeaux.py`:306  (async def)
+- `_noter_retires` — `cadeaux.py`:314  (async def)
 - `_noter_retrait` — `annonces.py`:846  (async def)
 - `_noter_sante` — `roblox_news.py`:257  (async def)
-- `_noter_vue` — `tableau.py`:560  (async def)
-- `_notes` — `entraide.py`:1027  (async def)
+- `_noter_vue` — `tableau.py`:565  (async def)
+- `_notes` — `entraide.py`:1040  (async def)
 - `_notice` — `evenements.py`:1862  (async def)
 - `Monde._nouvel_evt` — `outils/site_maquette.py`:893  (method)
 - `_now` — `behavior_guard.py`:35  (def)
@@ -2470,6 +2559,7 @@
 - `_ns` — `tests/test_approuver_bot.py`:29  (def)
 - `_ns` — `tests/test_casier.py`:150  (def)
 - `_ns` — `tests/test_conversation_tickets.py`:30  (def)
+- `_ns` — `tests/test_gif_texte.py`:46  (def)
 - `_ns` — `tests/test_qui_peut_quoi.py`:221  (def)
 - `_ns` — `tests/test_recours_v2.py`:37  (def)
 - `_ns` — `tests/test_revue_tickets.py`:51  (def)
@@ -2481,75 +2571,79 @@
 - `_ns_direction` — `tests/test_tickets_fils.py`:256  (def)
 - `_ns_droits` — `tests/test_revue_tickets.py`:578  (def)
 - `_ns_radiation` — `tests/test_qui_peut_quoi.py`:658  (def)
-- `_ns_tickets` — `tests/test_faq_tickets.py`:143  (def)
-- `_nsfw_image_check` — `bot.py`:5914  (async def)
-- `_numeros` — `questionnaire.py`:2374  (def)
+- `_ns_tickets` — `tests/test_faq_tickets.py`:74  (def)
+- `_nsfw_image_check` — `bot.py`:6060  (async def)
+- `_numeros` — `questionnaire.py`:2410  (def)
 - `_objet` — `annonces_modifiables.py`:33  (def)
-- `_objet` — `questionnaire.py`:6272  (def)
-- `_objet_si` — `tableau.py`:4116  (def)
-- `_objets_ecriture` — `tableau.py`:4171  (async def)
-- `_obs_is_owner` — `bot.py`:23480  (def)
-- `_ocr_alert_compromised` — `bot.py`:5814  (async def)
-- `_ocr_scam_check` — `bot.py`:5726  (async def)
+- `_objet` — `questionnaire.py`:6526  (def)
+- `_objet_si` — `tableau.py`:4142  (def)
+- `_objets_ecriture` — `tableau.py`:4197  (async def)
+- `_obs_is_owner` — `bot.py`:23682  (def)
+- `_observer` — `reponses_auto.py`:371  (def)
+- `_ocr_alert_compromised` — `bot.py`:5960  (async def)
+- `_ocr_gif_lien` — `bot.py`:5906  (async def)
+- `_ocr_scam_check` — `bot.py`:5791  (async def)
 - `_octets_image` — `outils/banc_annees.py`:272  (def)
 - `_oeil` — `outils/dessins_site.py`:1811  (def)
-- `_offense_tick` — `bot.py`:5587  (async def)
-- `_CasierManageView._on_clear_all` — `bot.py`:28862  (method)
+- `_offense_tick` — `bot.py`:5652  (async def)
+- `_CasierManageView._on_clear_all` — `bot.py`:29068  (method)
 - `_on_message` — `tests/test_protection_mineurs.py`:204  (def)
 - `_on_message` — `tests/test_revue_moderation.py`:281  (def)
-- `SecReportView._on_pick` — `bot.py`:3687  (method)
-- `_CasierManageView._on_select` — `bot.py`:28849  (method)
+- `SecReportView._on_pick` — `bot.py`:3691  (method)
+- `_CasierManageView._on_select` — `bot.py`:29055  (method)
 - `_Onboarding` — `tests/test_visibilite_serveur.py`:38  (class)
-- `_op_connue` — `tableau.py`:2459  (async def)
-- `_open_boost_panel` — `bot.py`:23985  (async def)
-- `ModerationPanelV2._open_channel_picker` — `bot.py`:19334  (method)
-- `SecurityChannelsPanelV2._open_picker` — `bot.py`:16476  (method)
-- `RgpdPanelV2._open_purge` — `bot.py`:12137  (method)
-- `ModerationPanelV2._open_role_picker` — `bot.py`:19346  (method)
+- `_op_connue` — `tableau.py`:2482  (async def)
+- `_open_boost_panel` — `bot.py`:24187  (async def)
+- `ModerationPanelV2._open_channel_picker` — `bot.py`:19505  (method)
+- `SecurityChannelsPanelV2._open_picker` — `bot.py`:16647  (method)
+- `RgpdPanelV2._open_purge` — `bot.py`:12309  (method)
+- `ModerationPanelV2._open_role_picker` — `bot.py`:19517  (method)
 - `_options` — `tests/test_logs_exclusions.py`:36  (def)
 - `_orientee` — `bannieres.py`:64  (def)
 - `_orienter_eo` — `outils/dessins_site.py`:2804  (def)
-- `_origine` — `site_vitrine.py`:375  (def)
-- `_origine_direct_ok` — `tableau.py`:3929  (def)
+- `_origine` — `site_vitrine.py`:472  (def)
+- `_origine_direct_ok` — `tableau.py`:3955  (def)
 - `_origine_ok` — `outils/site_maquette.py`:1475  (def)
-- `_origine_ok` — `tableau.py`:1829  (def)
+- `_origine_ok` — `tableau.py`:1834  (def)
 - `_orphelins` — `longevite.py`:701  (async def)
 - `_otsu_threshold` — `ocr_scan.py`:118  (def)
 - `_ou_tiret` — `roblox_panneau.py`:54  (def)
 - `_oublier` — `boosts.py`:99  (async def)
-- `_oublier` — `cadeaux.py`:561  (def)
-- `_oublier_catalogue` — `affiches.py`:307  (def)
+- `_oublier` — `cadeaux.py`:616  (def)
+- `_oublier` — `tickets_interdits.py`:227  (async def)
+- `_oublier_catalogue` — `affiches.py`:316  (def)
 - `_oublier_posts` — `zones.py`:789  (async def)
 - `_ouverture` — `zones.py`:336  (async def)
 - `_Lecteur._ouvre` — `transcript_store.py`:202  (method)
 - `_ouvrir` — `outils/dessins_site.py`:1667  (def)
 - `_ouvrir` — `roblox_news.py`:243  (def)
-- `_ouvrir` — `site_vitrine.py`:383  (async def)
+- `_ouvrir` — `site_vitrine.py`:480  (async def)
 - `_ouvrir` — `tests/test_recours_v2.py`:173  (def)
 - `_ouvrir_avec_carte` — `tests/test_questionnaire.py`:237  (async def)
 - `_ouvrir_contenu` — `roblox_news_contenu.py`:775  (def)
 - `_ouvrir_par_le_panneau` — `tests/test_recrutement_ticket.py`:552  (async def)
-- `_ouvrir_session` — `tableau.py`:486  (async def)
-- `_ouvrir_ticket_recours` — `bot.py`:2714  (async def)
+- `_ouvrir_session` — `tableau.py`:491  (async def)
+- `_ouvrir_ticket_recours` — `bot.py`:2718  (async def)
 - `_OwnerView` — `admin_panels_v2.py`:74  (class)
 - `_page` — `tests/test_youtube_chaine.py`:236  (def)
-- `_page_candidat` — `questionnaire.py`:2706  (def)
-- `_page_direct` — `tableau.py`:3503  (def)
-- `_page_live_due` — `bot.py`:29623  (def)
+- `_page_candidat` — `questionnaire.py`:2742  (def)
+- `_page_direct` — `tableau.py`:3529  (def)
+- `_page_live_due` — `bot.py`:29835  (def)
 - `_page_refus` — `candidature_site.py`:945  (def)
 - `_panneau` — `tests/test_logs_exclusions.py`:19  (def)
-- `_panneau_conteneur` — `entraide.py`:1645  (async def)
-- `_panneau_forum` — `entraide.py`:1605  (async def)
+- `_panneau_conteneur` — `entraide.py`:1658  (async def)
+- `_panneau_forum` — `entraide.py`:1618  (async def)
 - `_panneau_securite` — `tests/test_revue_admin.py`:272  (def)
-- `_panneau_ticket_serveur` — `bot.py`:2594  (async def)
+- `_panneau_ticket_serveur` — `bot.py`:2598  (async def)
 - `_par_cle` — `evenements.py`:472  (async def)
-- `_par_defaut` — `questionnaire.py`:1821  (async def)
+- `_par_defaut` — `questionnaire.py`:1857  (async def)
 - `_par_jour_lu` — `registre.py`:223  (async def)
-- `_par_metiers` — `affiches.py`:1486  (def)
-- `_par_paquets` — `questionnaire.py`:1192  (async def)
-- `_par_tiers` — `outils/site_local.py`:904  (def)
+- `_par_metiers` — `affiches.py`:1545  (def)
+- `_par_paquets` — `questionnaire.py`:1228  (async def)
+- `_par_site` — `hierarchie.py`:414  (def)
+- `_par_tiers` — `outils/site_local.py`:948  (def)
 - `_paragraphes` — `evenements.py`:744  (def)
-- `_parametres` — `tableau.py`:2326  (def)
+- `_parametres` — `tableau.py`:2349  (def)
 - `_parchemin` — `outils/dessins_site.py`:1066  (def)
 - `_parcours_jusqu_aux_reponses` — `tests/test_questionnaire.py`:324  (async def)
 - `_parent_valide` — `tickets_fils.py`:94  (def)
@@ -2557,39 +2651,42 @@
 - `_part` — `tests/test_recrutements.py`:27  (def)
 - `_partage` — `visuels.py`:66  (def)
 - `_partir` — `tests/test_vitrine_equipes.py`:570  (def)
-- `_pas_pret` — `cadeaux.py`:1062  (async def)
-- `_pas_rond` — `site_equipage.py`:704  (def)
+- `_pas_pret` — `cadeaux.py`:1117  (async def)
+- `_pas_rond` — `site_equipage.py`:709  (def)
 - `_passer_aux_sondages_discord` — `sondages.py`:218  (async def)
 - `_passer_en_salons` — `zones.py`:577  (async def)
-- `_passer_logs_sur_site` — `bot.py`:7536  (async def)
+- `_passer_logs_sur_site` — `bot.py`:7682  (async def)
 - `_path` — `tracking_layer.py`:82  (def)
-- `_perm_escalation_guard` — `bot.py`:25630  (async def)
+- `_perm_escalation_guard` — `bot.py`:25831  (async def)
 - `_Perms` — `tests/test_activite_demontage.py`:24  (class)
 - `_Perms` — `tests/test_activite_observation.py`:128  (class)
 - `_perms` — `securite_site.py`:292  (def)
 - `_perms` — `tests/test_usurpation.py`:11  (def)
-- `_persistent_msg_cleaner_wait` — `bot.py`:32298  (async def)
+- `_persistent_msg_cleaner_wait` — `bot.py`:32510  (async def)
 - `Monde._personne` — `outils/site_maquette.py`:307  (method)
-- `_personne` — `affiches.py`:289  (def)
+- `_personne` — `affiches.py`:298  (def)
+- `_personne` — `hierarchie.py`:536  (def)
 - `_personne` — `outils/dessins_site.py`:1263  (def)
-- `_personne_direct` — `tableau.py`:3603  (def)
-- `_personnelles` — `questionnaire.py`:3084  (async def)
-- `_Personnes` — `tableau.py`:803  (class)
-- `_peut` — `questionnaire.py`:4856  (async def)
-- `_peut_decider` — `bot.py`:6607  (async def)
+- `_personne` — `reponses_auto.py`:527  (def)
+- `_personne_direct` — `tableau.py`:3629  (def)
+- `_personnelles` — `questionnaire.py`:3120  (async def)
+- `_Personnes` — `tableau.py`:808  (class)
+- `_peut` — `questionnaire.py`:5102  (async def)
+- `_peut_decider` — `bot.py`:6753  (async def)
 - `_peut_etre` — `outils/dessins_site.py`:1783  (def)
-- `_peut_gerer_roles` — `affiches.py`:1136  (def)
-- `_phrase_de_phishing` — `bot.py`:11494  (def)
-- `_phrase_roles` — `affiches.py`:1296  (def)
+- `_peut_gerer_roles` — `affiches.py`:1195  (def)
+- `_phrase_de_phishing` — `bot.py`:11646  (def)
+- `_phrase_roles` — `affiches.py`:1355  (def)
 - `_pied` — `evenements.py`:1166  (def)
-- `_ping` — `questionnaire.py`:1257  (def)
+- `_ping` — `questionnaire.py`:1293  (def)
 - `_ping_founder_in_channel` — `unified_logger.py`:871  (async def)
-- `_ping_social` — `bot.py`:15380  (async def)
+- `_ping_social` — `bot.py`:15551  (async def)
 - `_place` — `compactage.py`:75  (def)
-- `_place_direct` — `tableau.py`:3636  (def)
-- `_place_medias` — `tableau.py`:2649  (async def)
+- `_place_direct` — `tableau.py`:3662  (def)
+- `_place_medias` — `tableau.py`:2672  (async def)
 - `_plan` — `tests/test_longevite.py`:110  (def)
-- `_planifier_fermeture` — `questionnaire.py`:3548  (def)
+- `_planifier_fermeture` — `questionnaire.py`:3583  (def)
+- `_plier_texte` — `insult_filter.py`:217  (def)
 - `_plume` — `outils/dessins_site.py`:1084  (def)
 - `_plus` — `outils/dessins_site.py`:1594  (def)
 - `_plus_tard` — `securite_site.py`:257  (async def)
@@ -2598,309 +2695,339 @@
 - `_png` — `tests/test_evenements_site.py`:88  (def)
 - `_png` — `tests/test_site_v2_serveur.py`:209  (def)
 - `_png64` — `tests/test_annonces_modifiables.py`:326  (def)
-- `_png_carre` — `metiers.py`:618  (def)
+- `_png_carre` — `metiers.py`:728  (def)
 - `_png_entete` — `tests/test_annonces_modifiables.py`:134  (def)
 - `_poids` — `evenements.py`:1011  (def)
 - `_pointe_rose` — `outils/dessins_site.py`:1355  (def)
 - `_pointe_rose_grande` — `outils/dessins_site.py`:2276  (def)
 - `_police` — `outils/site_maquette.py`:159  (def)
 - `_police` — `outils/visuels.py`:152  (def)
-- `_police` — `site_vitrine.py`:522  (def)
+- `_police` — `site_vitrine.py`:619  (def)
 - `_police_label` — `outils/dessins_site.py`:3606  (def)
-- `SocialMediaManager._poll_loop` — `social_media.py`:1549  (method)
+- `SocialMediaManager._poll_loop` — `social_media.py`:1561  (method)
 - `_polys_d` — `outils/dessins_site.py`:2871  (def)
 - `_port` — `outils/dessins_site.py`:1315  (def)
 - `_portes_direct` — `candidature_site.py`:711  (def)
 - `_portes_publiques` — `candidature_site.py`:1107  (def)
-- `_porteur` — `entraide.py`:728  (def)
+- `_porteur` — `entraide.py`:741  (def)
 - `_porteur` — `equipages.py`:315  (def)
-- `_porteurs_sans_direction` — `bot.py`:15608  (def)
-- `_portrait` — `affiches.py`:1026  (async def)
+- `_porteurs_sans_direction` — `bot.py`:15779  (def)
+- `_portrait` — `affiches.py`:1052  (async def)
 - `_poser` — `rellseas_panneau.py`:394  (def)
-- `_poser` — `site_vitrine.py`:657  (def)
+- `_poser` — `site_vitrine.py`:754  (def)
 - `_post` — `tests/test_social_abonnements.py`:10  (def)
 - `_post_brut` — `tests/test_candidat_ses_cases.py`:92  (def)
-- `_post_weekly_security_report` — `bot.py`:3738  (async def)
+- `_post_weekly_security_report` — `bot.py`:3742  (async def)
 - `_poster` — `tests/test_candidature_site.py`:1157  (def)
-- `_poster_cartes` — `questionnaire.py`:3033  (async def)
+- `_poster_cartes` — `questionnaire.py`:3069  (async def)
 - `_posts` — `zones.py`:372  (async def)
-- `_pour_metier` — `questionnaire.py`:3947  (def)
+- `_pour_metier` — `questionnaire.py`:3994  (def)
 - `_pousser` — `candidature_site.py`:678  (def)
 - `_pragma` — `compactage.py`:52  (async def)
-- `_premier` — `affiches.py`:1375  (def)
+- `_premier` — `affiches.py`:1434  (def)
 - `_premiere_installation` — `tests/test_entraide.py`:468  (def)
-- `TicketControlView._prendre` — `bot.py`:10388  (method)
-- `_prendre` — `tableau.py`:3835  (async def)
+- `TicketControlView._prendre` — `bot.py`:10537  (method)
+- `_prendre` — `tableau.py`:3861  (async def)
+- `_prendre_portraits` — `site_vitrine.py`:214  (async def)
 - `Forme._preparer` — `outils/dessins_site.py`:424  (method)
 - `_preparer_modification` — `evenements.py`:1962  (async def)
-- `SendPanelPaginatedView._prev` — `bot.py`:21713  (method)
+- `SendPanelPaginatedView._prev` — `bot.py`:21891  (method)
 - `_prevenir` — `textes.py`:362  (async def)
-- `_prevenir_radie` — `bot.py`:2962  (async def)
+- `_prevenir_radie` — `bot.py`:2966  (async def)
 - `_prime` — `outils/dessins_site.py`:1844  (def)
 - `_print_exception` — `journal.py`:115  (def)
 - `_prints_hors_except` — `tests/test_journal.py`:153  (def)
-- `_Prise` — `tableau.py`:3517  (class)
+- `_Prise` — `tableau.py`:3543  (class)
 - `_prochaine_echeance` — `evenements.py`:2263  (def)
 - `_profil_colonnes` — `outils/icones_rellseas.py`:1075  (def)
-- `_propre` — `site_vitrine.py`:163  (def)
-- `_propre` — `tests/test_revue_entraide.py`:33  (def)
+- `_propre` — `site_vitrine.py`:227  (def)
+- `_propre` — `tests/test_revue_entraide.py`:32  (def)
 - `_proprio` — `tests/test_revue_admin.py`:169  (def)
 - `_Proxy` — `tests/test_revue_cadeaux.py`:96  (class)
-- `_publications` — `site_equipage.py`:597  (async def)
-- `_publier` — `questionnaire.py`:3153  (async def)
+- `_publications` — `site_equipage.py`:602  (async def)
+- `_publier` — `questionnaire.py`:3189  (async def)
 - `_publier` — `securite_site.py`:271  (async def)
-- `_publier_bilan_sante` — `bot.py`:13589  (async def)
+- `_publier_bilan_sante` — `bot.py`:13761  (async def)
 - `Monde._publier_evt` — `outils/site_maquette.py`:907  (method)
-- `_publier_file_actualites` — `bot.py`:13369  (async def)
-- `_publier_reserve` — `bot.py`:15402  (async def)
-- `_publier_resultat` — `cadeaux.py`:1515  (async def)
-- `_publier_social` — `bot.py`:15389  (async def)
+- `_publier_file_actualites` — `bot.py`:13541  (async def)
+- `_publier_reserve` — `bot.py`:15573  (async def)
+- `_publier_resultat` — `cadeaux.py`:1570  (async def)
+- `_publier_social` — `bot.py`:15560  (async def)
 - `_publieur` — `tests/test_revue_reste.py`:400  (def)
 - `_purge` — `tests/test_commandes_en_double.py`:179  (def)
-- `_purge_old_sec_reports` — `bot.py`:3719  (async def)
-- `_purge_table` — `data_cleanup.py`:117  (async def)
+- `_purge_old_sec_reports` — `bot.py`:3723  (async def)
+- `_purge_table` — `data_cleanup.py`:119  (async def)
 - `_purger_actualites` — `longevite.py`:470  (async def)
 - `_purger_audit` — `longevite.py`:552  (async def)
-- `_purger_candidatures` — `tableau.py`:3110  (async def)
-- `_purger_candidatures_acceptees` — `tableau.py`:3200  (async def)
-- `_purger_commandes_globales` — `bot.py`:20004  (async def)
+- `_purger_candidatures` — `tableau.py`:3136  (async def)
+- `_purger_candidatures_acceptees` — `tableau.py`:3226  (async def)
+- `_purger_commandes_globales` — `bot.py`:20175  (async def)
 - `_purger_empreintes` — `longevite.py`:525  (async def)
 - `_purger_entraide` — `longevite.py`:446  (async def)
 - `_purger_equipes` — `longevite.py`:615  (async def)
 - `_purger_idees` — `longevite.py`:421  (async def)
 - `_purger_invitations` — `longevite.py`:542  (async def)
-- `_purger_journal` — `tableau.py`:3074  (async def)
-- `_purger_journal_messages` — `tableau.py`:3065  (async def)
-- `_purger_medias` — `tableau.py`:3138  (async def)
-- `_purger_ops` — `tableau.py`:3162  (async def)
+- `_purger_journal` — `tableau.py`:3100  (async def)
+- `_purger_journal_messages` — `tableau.py`:3091  (async def)
+- `_purger_medias` — `tableau.py`:3164  (async def)
+- `_purger_ops` — `tableau.py`:3188  (async def)
 - `_purger_orphelins` — `longevite.py`:721  (async def)
 - `_purger_portraits` — `longevite.py`:493  (async def)
 - `_purger_questions` — `longevite.py`:401  (async def)
-- `_purger_sessions` — `tableau.py`:3228  (async def)
+- `_purger_sessions` — `tableau.py`:3254  (async def)
 - `_purger_sondages` — `longevite.py`:409  (async def)
 - `_purger_tickets` — `longevite.py`:346  (async def)
-- `_purger_transcripts` — `tableau.py`:3090  (async def)
-- `_purges_ciblees` — `data_cleanup.py`:171  (async def)
-- `DBPool._put` — `bot.py`:532  (method)
-- `_q_resume` — `questionnaire.py`:5381  (def)
+- `_purger_transcripts` — `tableau.py`:3116  (async def)
+- `_purges_ciblees` — `data_cleanup.py`:173  (async def)
+- `DBPool._put` — `bot.py`:536  (method)
+- `_q_resume` — `questionnaire.py`:5627  (def)
 - `_quand` — `outils/site_maquette.py`:141  (def)
 - `_quand` — `recrutements.py`:396  (def)
-- `_quand` — `tableau.py`:826  (def)
-- `_quarantaine_overwrite` — `bot.py`:3835  (def)
-- `_question` — `questionnaire.py`:1418  (def)
-- `_question` — `tableau.py`:1192  (def)
-- `_question_chef` — `questionnaire.py`:3931  (def)
-- `_question_par_id` — `questionnaire.py`:5448  (async def)
-- `_question_site` — `questionnaire.py`:5150  (def)
+- `_quand` — `tableau.py`:831  (def)
+- `_quarantaine_overwrite` — `bot.py`:3839  (def)
+- `_question` — `questionnaire.py`:1454  (def)
+- `_question` — `tableau.py`:1197  (def)
+- `_question_chef` — `questionnaire.py`:3978  (def)
+- `_question_par_id` — `questionnaire.py`:5694  (async def)
+- `_question_site` — `questionnaire.py`:5396  (def)
+- `_questionnaire` — `tickets_interdits.py`:129  (def)
 - `Monde._questions` — `outils/site_maquette.py`:621  (method)
-- `_questions` — `tableau.py`:1201  (async def)
-- `_questions_en` — `questionnaire.py`:2069  (def)
-- `_questions_hook` — `bot.py`:6422  (async def)
+- `_questions` — `tableau.py`:1206  (async def)
+- `_questions_en` — `questionnaire.py`:2105  (def)
+- `_questions_hook` — `bot.py`:6568  (async def)
 - `_questions_secretes` — `tests/test_candidature_site.py`:251  (def)
-- `_questions_txt` — `questionnaire.py`:634  (def)
+- `_questions_txt` — `questionnaire.py`:664  (def)
 - `_qui` — `evenements.py`:2334  (def)
-- `_qui` — `questionnaire.py`:1239  (def)
+- `_qui` — `questionnaire.py`:1275  (def)
 - `_qui` — `textes.py`:280  (def)
-- `_qui_direct` — `tableau.py`:3597  (def)
-- `_quitte` — `tests/test_metiers.py`:574  (def)
-- `_quoi` — `affiches.py`:779  (def)
-- `_r_apercu` — `questionnaire.py`:6147  (async def)
-- `_r_banque` — `questionnaire.py`:6016  (async def)
-- `_r_chef` — `questionnaire.py`:6265  (async def)
-- `_r_chef_decision` — `questionnaire.py`:6253  (async def)
-- `_r_chef_dossier` — `questionnaire.py`:6245  (async def)
-- `_r_chef_gabarit` — `questionnaire.py`:6225  (async def)
-- `_r_chef_proposer` — `questionnaire.py`:6241  (async def)
-- `_r_chef_proposition` — `questionnaire.py`:6230  (async def)
-- `_r_chef_question` — `questionnaire.py`:6211  (async def)
-- `_r_chef_question_retirer` — `questionnaire.py`:6218  (async def)
-- `_r_chef_retirer` — `questionnaire.py`:6257  (async def)
-- `_r_chef_role` — `questionnaire.py`:6261  (async def)
-- `_r_chefs` — `questionnaire.py`:6207  (async def)
-- `_r_corriger` — `questionnaire.py`:6098  (async def)
-- `_r_decidees` — `questionnaire.py`:6179  (async def)
-- `_r_decision` — `questionnaire.py`:6105  (async def)
+- `_qui` — `tickets_interdits.py`:177  (def)
+- `_qui_direct` — `tableau.py`:3623  (def)
+- `_quitte` — `tests/test_metiers.py`:576  (def)
+- `_quoi` — `affiches.py`:799  (def)
+- `_quoi` — `tickets_interdits.py`:472  (def)
+- `_r_apercu` — `questionnaire.py`:6393  (async def)
+- `_r_banque` — `questionnaire.py`:6262  (async def)
+- `_r_chef` — `questionnaire.py`:6519  (async def)
+- `_r_chef_decision` — `questionnaire.py`:6507  (async def)
+- `_r_chef_dossier` — `questionnaire.py`:6499  (async def)
+- `_r_chef_gabarit` — `questionnaire.py`:6479  (async def)
+- `_r_chef_proposer` — `questionnaire.py`:6495  (async def)
+- `_r_chef_proposition` — `questionnaire.py`:6484  (async def)
+- `_r_chef_question` — `questionnaire.py`:6465  (async def)
+- `_r_chef_question_retirer` — `questionnaire.py`:6472  (async def)
+- `_r_chef_retirer` — `questionnaire.py`:6511  (async def)
+- `_r_chef_role` — `questionnaire.py`:6515  (async def)
+- `_r_chefs` — `questionnaire.py`:6461  (async def)
+- `_r_corriger` — `questionnaire.py`:6344  (async def)
+- `_r_decidees` — `questionnaire.py`:6425  (async def)
+- `_r_decision` — `questionnaire.py`:6351  (async def)
 - `_r_defaut` — `textes.py`:545  (async def)
-- `_r_dossier` — `questionnaire.py`:6071  (async def)
-- `_r_etape1` — `questionnaire.py`:6084  (async def)
-- `_r_etape_suivante` — `questionnaire.py`:6155  (async def)
-- `_r_liens` — `questionnaire.py`:6047  (async def)
-- `_r_liste_noire` — `questionnaire.py`:6183  (async def)
-- `_r_liste_noire_lever` — `questionnaire.py`:6187  (async def)
-- `_r_modele` — `questionnaire.py`:6058  (async def)
-- `_r_modele_retirer` — `questionnaire.py`:6066  (async def)
-- `_r_modeles` — `questionnaire.py`:6020  (async def)
-- `_r_nettoyage` — `questionnaire.py`:6191  (async def)
-- `_r_nettoyage_lancer` — `questionnaire.py`:6195  (async def)
-- `_r_parcours` — `questionnaire.py`:6128  (async def)
-- `_r_parcours_ecrire` — `questionnaire.py`:6132  (async def)
-- `_r_proposition` — `questionnaire.py`:6139  (async def)
-- `_r_purge` — `questionnaire.py`:6199  (async def)
-- `_r_purge_lancer` — `questionnaire.py`:6203  (async def)
-- `_r_question` — `questionnaire.py`:6033  (async def)
-- `_r_question_retirer` — `questionnaire.py`:6040  (async def)
-- `_r_reglages` — `questionnaire.py`:6052  (async def)
+- `_r_dossier` — `questionnaire.py`:6317  (async def)
+- `_r_etape1` — `questionnaire.py`:6330  (async def)
+- `_r_etape_suivante` — `questionnaire.py`:6401  (async def)
+- `_r_etat` — `tickets_interdits.py`:524  (async def)
+- `_r_interdire` — `tickets_interdits.py`:533  (async def)
+- `_r_lever` — `tickets_interdits.py`:537  (async def)
+- `_r_liens` — `questionnaire.py`:6293  (async def)
+- `_r_lire` — `reponses_auto.py`:654  (async def)
+- `_r_liste_noire` — `questionnaire.py`:6437  (async def)
+- `_r_liste_noire_lever` — `questionnaire.py`:6441  (async def)
+- `_r_modele` — `questionnaire.py`:6304  (async def)
+- `_r_modele_retirer` — `questionnaire.py`:6312  (async def)
+- `_r_modeles` — `questionnaire.py`:6266  (async def)
+- `_r_nettoyage` — `questionnaire.py`:6445  (async def)
+- `_r_nettoyage_lancer` — `questionnaire.py`:6449  (async def)
+- `_r_parcours` — `questionnaire.py`:6374  (async def)
+- `_r_parcours_ecrire` — `questionnaire.py`:6378  (async def)
+- `_r_proposition` — `questionnaire.py`:6385  (async def)
+- `_r_purge` — `questionnaire.py`:6453  (async def)
+- `_r_purge_lancer` — `questionnaire.py`:6457  (async def)
+- `_r_question` — `questionnaire.py`:6279  (async def)
+- `_r_question_retirer` — `questionnaire.py`:6286  (async def)
+- `_r_reglages` — `questionnaire.py`:6298  (async def)
+- `_r_regler` — `reponses_auto.py`:658  (async def)
+- `_r_relances` — `questionnaire.py`:6429  (async def)
+- `_r_relances_regler` — `questionnaire.py`:6433  (async def)
 - `_r_renommer` — `textes.py`:549  (async def)
 - `_r_site` — `textes.py`:535  (async def)
-- `_r_suivi` — `questionnaire.py`:6080  (async def)
+- `_r_suivi` — `questionnaire.py`:6326  (async def)
 - `_r_texte` — `textes.py`:541  (async def)
 - `_r_textes` — `textes.py`:529  (async def)
 - `_racine` — `raid_detector.py`:246  (def)
 - `_Radie` — `tests/test_recours_v2.py`:165  (class)
 - `_radie` — `config_salons.py`:227  (def)
-- `_radie_overwrite` — `bot.py`:2207  (def)
-- `_radie_pseudo` — `bot.py`:2192  (def)
-- `_RadieAppelModal` — `bot.py`:2636  (class)
-- `_radier_membre` — `bot.py`:2270  (async def)
+- `_radie_overwrite` — `bot.py`:2211  (def)
+- `_radie_pseudo` — `bot.py`:2196  (def)
+- `_RadieAppelModal` — `bot.py`:2640  (class)
+- `_radier_membre` — `bot.py`:2274  (async def)
+- `_rafale` — `cadeaux.py`:436  (def)
 - `_rafraichir` — `suggestions.py`:342  (async def)
-- `_rafraichir_dossier` — `bot.py`:8487  (async def)
-- `_rafraichir_hub_tickets` — `bot.py`:9367  (async def)
-- `_rafraichir_reperes` — `entraide.py`:1531  (async def)
+- `_rafraichir_dossier` — `bot.py`:8633  (async def)
+- `_rafraichir_hub_tickets` — `bot.py`:9516  (async def)
+- `_rafraichir_reperes` — `entraide.py`:1544  (async def)
+- `_rang` — `tests/test_hierarchie.py`:49  (def)
+- `_rang_du_nom` — `hierarchie.py`:372  (def)
+- `_rang_et_source` — `hierarchie.py`:420  (def)
 - `_rangees` — `ui_v2.py`:253  (def)
 - `_ranger` — `zones.py`:723  (async def)
-- `_ranger_tickets` — `bot.py`:8350  (async def)
+- `_ranger_tickets` — `bot.py`:8496  (async def)
 - `_rangs` — `registre.py`:158  (async def)
 - `_rangs` — `tests/test_candidat_ses_cases.py`:76  (def)
 - `_rangs_etape` — `candidature_site.py`:548  (def)
 - `_rappels_dus` — `evenements.py`:1904  (def)
-- `_rattacher_flux_orphelins` — `bot.py`:14317  (async def)
-- `_rattraper_annonces` — `cadeaux.py`:1579  (async def)
-- `_read_json` — `social_media.py`:1093  (async def)
+- `_rapprocher` — `hierarchie.py`:756  (async def)
+- `_rattacher_flux_orphelins` — `bot.py`:14488  (async def)
+- `_rattraper_annonces` — `cadeaux.py`:1634  (async def)
+- `_read_json` — `social_media.py`:1105  (async def)
 - `VueApercu._reafficher` — `annonces.py`:628  (method)
-- `VueCadeau._reafficher` — `cadeaux.py`:2096  (method)
-- `_CasierManageView._reafficher` — `bot.py`:28845  (method)
-- `YouTubeRSSAdapter._recentes` — `social_media.py`:892  (method)
+- `VueCadeau._reafficher` — `cadeaux.py`:2152  (method)
+- `_CasierManageView._reafficher` — `bot.py`:29051  (method)
+- `YouTubeRSSAdapter._recentes` — `social_media.py`:904  (method)
 - `_recherche` — `longevite.py`:113  (def)
 - `_rechercher` — `outils/dessins_site.py`:1631  (def)
-- `_recidivism_log_escalation` — `bot.py`:4007  (async def)
+- `_recidivism_log_escalation` — `bot.py`:4011  (async def)
 - `_recompute_locked` — `recidivism.py`:267  (async def)
 - `_recopier` — `zones.py`:1022  (async def)
-- `SocialMediaManager._record_announcement` — `social_media.py`:1324  (method)
-- `_record_infraction` — `bot.py`:3976  (async def)
+- `SocialMediaManager._record_announcement` — `social_media.py`:1336  (method)
+- `_record_infraction` — `bot.py`:3980  (async def)
 - `_record_message` — `compromised_detector.py`:164  (def)
-- `_recours_deja_utilise` — `bot.py`:2615  (async def)
-- `_recrues` — `site_equipage.py`:634  (async def)
+- `_recours_deja_utilise` — `bot.py`:2619  (async def)
+- `_recrues` — `site_equipage.py`:639  (async def)
 - `Monde._recrutement` — `outils/site_maquette.py`:1044  (method)
-- `_recrutement_demo` — `outils/site_local.py`:840  (async def)
-- `_recrutement_extras` — `bot.py`:6531  (async def)
-- `_recrutement_rellseas` — `bot.py`:15629  (async def)
+- `_recrutement` — `tickets_interdits.py`:210  (async def)
+- `_recrutement_demo` — `outils/site_local.py`:870  (async def)
+- `_recrutement_extras` — `bot.py`:6677  (async def)
+- `_recrutement_rellseas` — `bot.py`:15800  (async def)
 - `_recu` — `tests/test_webhook_doublon.py`:69  (def)
 - `_recu_v2` — `tests/test_webhook_doublon.py`:102  (def)
 - `_redact_url` — `webhook_leak.py`:129  (def)
-- `_reecrire` — `cadeaux.py`:2199  (async def)
+- `_reecrire` — `cadeaux.py`:2255  (async def)
 - `_references` — `longevite.py`:645  (async def)
-- `_Refus` — `tableau.py`:613  (class)
+- `_Refus` — `tableau.py`:618  (class)
 - `_refus` — `equipages.py`:390  (async def)
 - `_refus` — `evenements.py`:2378  (def)
 - `_refus` — `outils/site_maquette.py`:132  (def)
-- `_refus_bouclier` — `bot.py`:3392  (def)
-- `_refus_cadence` — `site_vitrine.py`:371  (def)
-- `_refus_cible_rellseas` — `bot.py`:29389  (def)
+- `_refus_bouclier` — `bot.py`:3396  (def)
+- `_refus_cadence` — `site_vitrine.py`:468  (def)
+- `_refus_cible_rellseas` — `bot.py`:29601  (def)
 - `_refus_etat` — `candidature_site.py`:1102  (def)
-- `_refus_radiation` — `bot.py`:2470  (def)
-- `_refus_rang_radie` — `bot.py`:3125  (def)
-- `_refus_role_chef` — `questionnaire.py`:4091  (def)
-- `_refuser_depuis_discord` — `questionnaire.py`:4909  (async def)
-- `_register_for_cleanup` — `bot.py`:32253  (async def)
-- `_register_protection_strike` — `bot.py`:5466  (def)
-- `_registre` — `tests/test_acces_site.py`:302  (def)
+- `_refus_general` — `hierarchie.py`:628  (def)
+- `_refus_lien` — `hierarchie.py`:642  (async def)
+- `_refus_radiation` — `bot.py`:2474  (def)
+- `_refus_rang_radie` — `bot.py`:3129  (def)
+- `_refus_role_bot` — `hierarchie.py`:662  (def)
+- `_refus_role_chef` — `questionnaire.py`:4138  (def)
+- `_refuser_depuis_discord` — `questionnaire.py`:5155  (async def)
+- `_register_for_cleanup` — `bot.py`:32465  (async def)
+- `_register_protection_strike` — `bot.py`:5493  (def)
+- `_registre` — `tests/test_acces_site.py`:323  (def)
 - `_registre` — `tests/test_logs_site.py`:44  (def)
+- `_reglages` — `sujets_interdits.py`:459  (def)
+- `_reglages_site` — `reponses_auto.py`:573  (def)
 - `_regle` — `tests/test_longevite.py`:747  (def)
-- `_regle_interne` — `tableau.py`:3239  (def)
-- `_regler` — `entraide.py`:576  (async def)
+- `_regle_interne` — `tableau.py`:3265  (def)
+- `_regler` — `entraide.py`:589  (async def)
+- `_relancer` — `questionnaire.py`:4979  (async def)
 - `_releve_disque` — `stockage.py`:183  (def)
-- `_relever_actus` — `bot.py`:15679  (async def)
+- `_relever_actus` — `bot.py`:15850  (async def)
 - `_relever_discourse` — `roblox_news.py`:437  (async def)
 - `_relever_newsroom` — `roblox_news.py`:702  (async def)
 - `_relever_rss` — `roblox_news.py`:612  (async def)
 - `_relire` — `textes.py`:352  (async def)
-- `_rellseas_autorise` — `bot.py`:29410  (async def)
+- `_rellseas_autorise` — `bot.py`:29622  (async def)
 - `_remettre` — `persistants.py`:22  (def)
-- `_remplacer_salon_partout` — `bot.py`:13738  (async def)
-- `_remplir` — `outils/site_local.py`:758  (async def)
+- `_remplacer_salon_partout` — `bot.py`:13910  (async def)
+- `_remplir` — `outils/site_local.py`:778  (async def)
 - `_remplir` — `tests/test_questionnaire.py`:219  (def)
-- `_remplir_lourd` — `outils/site_local.py`:1298  (async def)
+- `_remplir_lourd` — `outils/site_local.py`:1355  (async def)
 - `_remplir_puis_vider` — `tests/test_longevite.py`:335  (def)
-- `_render_ticket_transcript_html` — `bot.py`:10016  (async def)
+- `_render_ticket_transcript_html` — `bot.py`:10165  (async def)
 - `_ChercheModal._rendre` — `rellseas_panneau.py`:587  (method)
 - `_rendre` — `admin_panels_v2.py`:169  (async def)
 - `_rendre` — `roblox_news_contenu.py`:188  (def)
-- `_rendre_roles_au_retour` — `bot.py`:13695  (async def)
-- `_rendre_roles_isolement` — `bot.py`:3950  (async def)
-- `LogsPanelV2._rendre_site` — `bot.py`:16289  (method)
+- `_rendre_roles_au_retour` — `bot.py`:13867  (async def)
+- `_rendre_roles_isolement` — `bot.py`:3954  (async def)
+- `LogsPanelV2._rendre_site` — `bot.py`:16460  (method)
 - `_rendu` — `evenements.py`:995  (def)
 - `_rendu` — `tests/test_off_radiation.py`:357  (def)
+- `_renumeroter` — `hierarchie.py`:290  (async def)
 - `_Rep` — `tests/test_forum_refus.py`:64  (class)
+- `_Rep` — `tests/test_gif_texte.py`:18  (class)
 - `_Rep` — `tests/test_youtube_chaine.py`:94  (class)
-- `_repartition` — `site_equipage.py`:690  (def)
+- `_repartition` — `site_equipage.py`:695  (def)
 - `_repertoire` — `outils/dessins_site.py`:1124  (def)
-- `_repond` — `tests/test_faq_tickets.py`:213  (def)
-- `Inter._repondre` — `tests/banc_ticket_recrutement.py`:249  (method)
-- `_repondre` — `cadeaux.py`:1027  (async def)
+- `_repond` — `tests/test_faq_tickets.py`:144  (def)
+- `Inter._repondre` — `tests/banc_ticket_recrutement.py`:250  (method)
+- `InterK._repondre` — `tests/test_tickets_interdits.py`:58  (method)
+- `_repondre` — `cadeaux.py`:1082  (async def)
 - `_repondre` — `mod_dashboard.py`:461  (async def)
 - `CheminDuBot._repondre_formulaires` — `outils/site_local_recrutement.py`:129  (method)
 - `_repondre_lien` — `candidature_site.py`:832  (async def)
-- `_repondre_ticket` — `bot.py`:10188  (async def)
+- `_repondre_ticket` — `bot.py`:10337  (async def)
 - `_Reponse` — `tests/test_candidature_site.py`:534  (class)
 - `_Reponse` — `tests/test_site_equipage.py`:597  (class)
-- `_reponse` — `metiers.py`:205  (def)
-- `_reponse` — `site_vitrine.py`:364  (def)
-- `_reponse` — `tests/test_revue_entraide.py`:41  (def)
-- `_reponse_lue` — `questionnaire.py`:2908  (def)
+- `_reponse` — `metiers.py`:242  (def)
+- `_reponse` — `site_vitrine.py`:461  (def)
+- `_reponse` — `tests/test_revue_entraide.py`:39  (def)
+- `_reponse_lue` — `questionnaire.py`:2944  (def)
 - `_reponses` — `candidature_site.py`:579  (async def)
 - `_reponses` — `evenements.py`:493  (async def)
-- `_reponses` — `questionnaire.py`:2917  (async def)
+- `_reponses` — `questionnaire.py`:2953  (async def)
 - `Monde._reponses_etape1` — `outils/site_maquette.py`:581  (method)
 - `_reporter` — `zones.py`:531  (async def)
-- `_reporter_immunites` — `bot.py`:14769  (async def)
+- `_reporter_immunites` — `bot.py`:14940  (async def)
 - `_reposer_role` — `recidivism.py`:343  (async def)
-- `_reposer_sanction_au_retour` — `bot.py`:24146  (async def)
+- `_reposer_sanction_au_retour` — `bot.py`:24348  (async def)
 - `_reprendre_envoi` — `evenements.py`:2286  (async def)
 - `_reprendre_noms_deplaces` — `textes.py`:240  (async def)
-- `_reprendre_vocaux` — `cadeaux.py`:544  (def)
-- `_requete` — `tests/test_acces_site.py`:278  (def)
+- `_reprendre_vocaux` — `cadeaux.py`:599  (def)
+- `_requete` — `tests/test_acces_site.py`:299  (def)
 - `_requete` — `tests/test_revue_cadeaux.py`:88  (def)
 - `_res` — `tests/test_activite_demontage.py`:462  (def)
 - `_resolve_backup_dir` — `db_backup.py`:68  (def)
-- `YouTubeRSSAdapter._resolve_channel_id` — `social_media.py`:937  (method)
+- `YouTubeRSSAdapter._resolve_channel_id` — `social_media.py`:949  (method)
 - `_resolve_db_path` — `db_backup.py`:61  (def)
-- `_resolve_event_type` — `bot.py`:17221  (def)
-- `_resolve_transcript_text` — `bot.py`:9648  (def)
-- `_resoudre` — `entraide.py`:515  (async def)
+- `_resolve_event_type` — `bot.py`:17392  (def)
+- `_resolve_transcript_text` — `bot.py`:9797  (def)
+- `_resoudre` — `entraide.py`:528  (async def)
 - `_resoudre` — `equipages.py`:193  (async def)
 - `_resoudre` — `zones.py`:311  (async def)
-- `_ressemblance` — `questionnaire.py`:880  (def)
+- `_ressemblance` — `questionnaire.py`:916  (def)
 - `_restaurer` — `outils/dessins_site.py`:1958  (def)
 - `_restaurer_etat_global` — `tests/test_configure_social.py`:34  (def)
-- `_resultat_garde` — `tableau.py`:2453  (def)
+- `_resultat_garde` — `tableau.py`:2476  (def)
 - `_resume` — `outils/sonde_limiteds.py`:58  (def)
-- `_resume_type` — `bot.py`:9186  (def)
-- `_ResumeurPasserelle` — `bot.py`:33579  (class)
+- `_resume` — `tickets_interdits.py`:285  (def)
+- `_resume_type` — `bot.py`:9335  (def)
+- `_ResumeurPasserelle` — `bot.py`:33791  (class)
+- `_retenir` — `tickets_interdits.py`:237  (async def)
 - `_retire_recemment` — `annonces.py`:855  (async def)
-- `PaginatedImmuneRemoveView._retirer` — `bot.py`:19790  (method)
-- `_retirer` — `tableau.py`:3761  (def)
-- `_retirer_du_clan` — `bot.py`:6663  (async def)
-- `_retirer_du_verrou` — `tableau.py`:3700  (def)
-- `_retirer_equipages` — `bot.py`:14837  (async def)
-- `_retirer_exclamations` — `bot.py`:13861  (async def)
-- `_retirer_fichier_dangereux` — `bot.py`:5875  (async def)
-- `_retirer_fonctions_mortes` — `bot.py`:13975  (async def)
-- `_retirer_image_arnaque` — `bot.py`:5800  (async def)
-- `_retirer_inscriptions` — `cadeaux.py`:292  (async def)
-- `_retirer_message_etape` — `questionnaire.py`:3163  (async def)
-- `_retirer_recherche_de_groupe` — `bot.py`:14565  (async def)
-- `_retirer_salons_combat` — `bot.py`:13831  (async def)
-- `_retirer_tables_mortes` — `bot.py`:15457  (async def)
+- `PaginatedImmuneRemoveView._retirer` — `bot.py`:19961  (method)
+- `_retirer` — `sujets_interdits.py`:470  (def)
+- `_retirer` — `tableau.py`:3787  (def)
+- `_retirer_du_clan` — `bot.py`:6809  (async def)
+- `_retirer_du_verrou` — `tableau.py`:3726  (def)
+- `_retirer_equipages` — `bot.py`:15008  (async def)
+- `_retirer_exclamations` — `bot.py`:14033  (async def)
+- `_retirer_fichier_dangereux` — `bot.py`:6021  (async def)
+- `_retirer_fonctions_mortes` — `bot.py`:14147  (async def)
+- `_retirer_image_arnaque` — `bot.py`:5946  (async def)
+- `_retirer_inscriptions` — `cadeaux.py`:300  (async def)
+- `_retirer_message_etape` — `questionnaire.py`:3199  (async def)
+- `_retirer_recherche_de_groupe` — `bot.py`:14736  (async def)
+- `_retirer_salons_combat` — `bot.py`:14003  (async def)
+- `_retirer_si_texte_interdit` — `bot.py`:5885  (async def)
+- `_retirer_tables_mortes` — `bot.py`:15628  (async def)
 - `_retour` — `tests/test_revue_moderation.py`:456  (def)
 - `_retrouver` — `annonces.py`:707  (async def)
 - `_retrouver` — `evenements.py`:1734  (async def)
-- `V2GenericChannelPicker._return_to_parent` — `bot.py`:20453  (method)
-- `V2GenericRolePicker._return_to_parent` — `bot.py`:20571  (method)
+- `V2GenericChannelPicker._return_to_parent` — `bot.py`:20624  (method)
+- `V2GenericRolePicker._return_to_parent` — `bot.py`:20742  (method)
 - `_reveiller` — `annonces.py`:238  (async def)
 - `_reveiller` — `evenements.py`:599  (async def)
 - `_revenir` — `admin_panels_v2.py`:151  (async def)
 - `_revenir` — `tests/test_vitrine_equipes.py`:581  (def)
-- `_RgpdPurgeModal` — `bot.py`:11987  (class)
+- `_RgpdPurgeModal` — `bot.py`:12159  (class)
 - `_rien` — `tests/test_bouclier.py`:64  (async def)
 - `_rien` — `tests/test_direct.py`:143  (async def)
 - `_rien` — `tests/test_revue_tickets.py`:180  (async def)
@@ -2915,79 +3042,92 @@
 - `_Role` — `tests/test_revue_tickets.py`:105  (class)
 - `_Role` — `tests/test_visibilite_serveur.py`:20  (class)
 - `_role` — `tests/test_tickets_fils.py`:233  (def)
-- `_role_clan` — `site_equipage.py`:307  (async def)
-- `_role_clan_de` — `bot.py`:6575  (async def)
-- `_role_du_meme_nom` — `metiers.py`:466  (def)
-- `_role_mentionable_guard` — `bot.py`:32099  (async def)
-- `_role_sortie` — `metiers.py`:1191  (def)
-- `_role_supprimable` — `bot.py`:13968  (def)
+- `_role_clan` — `site_equipage.py`:308  (async def)
+- `_role_clan_de` — `bot.py`:6721  (async def)
+- `_role_du_meme_nom` — `metiers.py`:576  (def)
+- `_role_lie` — `hierarchie.py`:237  (def)
+- `_role_mentionable_guard` — `bot.py`:32311  (async def)
+- `_role_sortie` — `metiers.py`:1332  (def)
+- `_role_suit_le_rang` — `hierarchie.py`:837  (async def)
+- `_role_supprimable` — `bot.py`:14140  (def)
 - `RellseasGestionV2._role_utilisable` — `rellseas_panneau.py`:900  (method)
 - `Monde._roles` — `outils/site_maquette.py`:842  (method)
 - `_roles` — `outils/dessins_site.py`:1424  (def)
 - `_roles` — `tests/test_revue_moderation.py`:188  (def)
-- `_roles_automatiques` — `affiches.py`:1310  (async def)
-- `_roles_chef` — `questionnaire.py`:4086  (async def)
+- `_roles_a_changer` — `hierarchie.py`:673  (def)
+- `_roles_automatiques` — `affiches.py`:1369  (async def)
+- `_roles_chef` — `questionnaire.py`:4133  (async def)
 - `_roles_direction` — `tests/test_revue_tickets.py`:380  (def)
-- `_roles_staff_et_plus` — `bot.py`:14387  (def)
-- `_roles_zones_manquants` — `bot.py`:15551  (async def)
+- `_roles_staff_et_plus` — `bot.py`:14558  (def)
+- `_roles_zones_manquants` — `bot.py`:15722  (async def)
 - `_rond` — `tests/test_annonces_modifiables.py`:59  (def)
-- `_ronde` — `tableau.py`:3796  (async def)
+- `_ronde` — `tableau.py`:3822  (async def)
 - `_root_handler` — `health_server.py`:48  (async def)
 - `_rotate_old_backups_sync` — `db_backup.py`:155  (def)
-- `_route` — `questionnaire.py`:6293  (def)
-- `_route` — `tableau.py`:2283  (def)
-- `_route_actualite` — `site_equipage.py`:1447  (async def)
-- `_route_actualite_retirer` — `site_equipage.py`:1492  (async def)
-- `_route_affiche` — `affiches.py`:801  (async def)
-- `_route_affiche_lire` — `affiches.py`:748  (async def)
-- `_route_affiche_restaurer` — `affiches.py`:899  (async def)
-- `_route_affiche_retirer` — `affiches.py`:866  (async def)
-- `_route_affiches` — `affiches.py`:727  (async def)
-- `_route_appliquer` — `affiches.py`:1336  (async def)
-- `_route_avatar` — `affiches.py`:1060  (async def)
-- `_route_bloc` — `site_equipage.py`:1274  (async def)
-- `_route_bloc_deplacer` — `site_equipage.py`:1402  (async def)
-- `_route_bloc_public` — `site_equipage.py`:1345  (async def)
-- `_route_bloc_supprimer` — `site_equipage.py`:1430  (async def)
-- `_route_bloc_visible` — `site_equipage.py`:1321  (async def)
+- `_route` — `questionnaire.py`:6547  (def)
+- `_route` — `tableau.py`:2288  (def)
+- `_route_actualite` — `site_equipage.py`:1473  (async def)
+- `_route_actualite_retirer` — `site_equipage.py`:1518  (async def)
+- `_route_affiche` — `affiches.py`:821  (async def)
+- `_route_affiche_lire` — `affiches.py`:766  (async def)
+- `_route_affiche_restaurer` — `affiches.py`:923  (async def)
+- `_route_affiche_retirer` — `affiches.py`:888  (async def)
+- `_route_affiches` — `affiches.py`:743  (async def)
+- `_route_appliquer` — `affiches.py`:1395  (async def)
+- `_route_attribuer` — `hierarchie.py`:1040  (async def)
+- `_route_avatar` — `affiches.py`:1086  (async def)
+- `_route_bloc` — `site_equipage.py`:1300  (async def)
+- `_route_bloc_deplacer` — `site_equipage.py`:1428  (async def)
+- `_route_bloc_public` — `site_equipage.py`:1371  (async def)
+- `_route_bloc_supprimer` — `site_equipage.py`:1456  (async def)
+- `_route_bloc_visible` — `site_equipage.py`:1347  (async def)
 - `_route_casier_membres` — `longevite.py`:271  (async def)
-- `_route_catalogue` — `affiches.py`:479  (async def)
+- `_route_catalogue` — `affiches.py`:488  (async def)
 - `_route_direct_candidat` — `candidature_site.py`:1412  (async def)
-- `_route_direct_envoi` — `tableau.py`:4050  (async def)
-- `_route_direct_etat` — `tableau.py`:4023  (async def)
-- `_route_element` — `affiches.py`:517  (async def)
-- `_route_equipe` — `site_equipage.py`:1004  (async def)
-- `_route_equipe_deplacer` — `site_equipage.py`:1082  (async def)
-- `_route_equipe_supprimer` — `site_equipage.py`:1065  (async def)
-- `_route_equipes` — `site_equipage.py`:999  (async def)
+- `_route_direct_envoi` — `tableau.py`:4076  (async def)
+- `_route_direct_etat` — `tableau.py`:4049  (async def)
+- `_route_element` — `affiches.py`:526  (async def)
+- `_route_equipe` — `site_equipage.py`:1023  (async def)
+- `_route_equipe_deplacer` — `site_equipage.py`:1101  (async def)
+- `_route_equipe_supprimer` — `site_equipage.py`:1084  (async def)
+- `_route_equipes` — `site_equipage.py`:1018  (async def)
+- `_route_hierarchie` — `hierarchie.py`:770  (async def)
 - `_route_journal` — `longevite.py`:138  (async def)
-- `_route_media` — `tableau.py`:2662  (async def)
-- `_route_nettoyage` — `tableau.py`:2987  (async def)
-- `_route_nettoyage_apercu` — `tableau.py`:3041  (async def)
-- `_route_nettoyage_lancer` — `tableau.py`:3015  (async def)
-- `_route_nettoyage_regle` — `tableau.py`:2994  (async def)
-- `_route_retirer_element` — `affiches.py`:559  (async def)
-- `_route_role` — `affiches.py`:1180  (async def)
-- `_route_roles` — `affiches.py`:1170  (async def)
+- `_route_media` — `tableau.py`:2685  (async def)
+- `_route_nettoyage` — `tableau.py`:3013  (async def)
+- `_route_nettoyage_apercu` — `tableau.py`:3067  (async def)
+- `_route_nettoyage_lancer` — `tableau.py`:3041  (async def)
+- `_route_nettoyage_regle` — `tableau.py`:3020  (async def)
+- `_route_rang` — `hierarchie.py`:778  (async def)
+- `_route_rang_deplacer` — `hierarchie.py`:893  (async def)
+- `_route_rang_role` — `hierarchie.py`:931  (async def)
+- `_route_rang_supprimer` — `hierarchie.py`:860  (async def)
+- `_route_reprise` — `hierarchie.py`:1120  (async def)
+- `_route_retirer_element` — `affiches.py`:568  (async def)
+- `_route_role` — `affiches.py`:1239  (async def)
+- `_route_roles` — `affiches.py`:1229  (async def)
 - `_route_tickets_fermes` — `longevite.py`:229  (async def)
-- `_route_type` — `affiches.py`:483  (async def)
-- `_route_vitrine_affiche` — `site_equipage.py`:1371  (async def)
-- `_routes_de` — `tableau.py`:2276  (def)
-- `_routeur` — `tests/test_acces_site.py`:295  (def)
-- `_rr_messages_connus` — `bot.py`:29520  (async def)
+- `_route_type` — `affiches.py`:492  (async def)
+- `_route_vitrine_affiche` — `site_equipage.py`:1397  (async def)
+- `_routes_de` — `tableau.py`:2281  (def)
+- `_routeur` — `tests/test_acces_site.py`:316  (def)
+- `_rr_messages_connus` — `bot.py`:29732  (async def)
 - `_rss` — `tests/test_roblox_sources_officielles.py`:104  (def)
 - `_run` — `tests/test_activite_observation.py`:18  (def)
-- `_run_clear_and_report` — `bot.py`:27645  (async def)
-- `_run_persistent_cleanup_once` — `bot.py`:32302  (async def)
+- `_run_clear_and_report` — `bot.py`:27851  (async def)
+- `_run_persistent_cleanup_once` — `bot.py`:32514  (async def)
 - `_rx` — `protection_mineurs.py`:100  (def)
+- `_rx` — `sujets_interdits.py`:370  (def)
+- `_rx_ajoutes` — `sujets_interdits.py`:455  (def)
+- `_rx_doubles` — `sujets_interdits.py`:378  (def)
 - `_sabre` — `outils/dessins_site.py`:929  (def)
-- `_safe_defer` — `bot.py`:32212  (async def)
-- `PanelEditViewV2._safe_error` — `bot.py`:21198  (method)
-- `_safe_followup` — `bot.py`:32230  (async def)
-- `_safe_ident` — `gdpr.py`:208  (def)
+- `_safe_defer` — `bot.py`:32424  (async def)
+- `PanelEditViewV2._safe_error` — `bot.py`:21369  (method)
+- `_safe_followup` — `bot.py`:32442  (async def)
+- `_safe_ident` — `gdpr.py`:216  (def)
 - `_SafeErrorView` — `ui_v2.py`:52  (class)
-- `_Salle` — `tableau.py`:3542  (class)
-- `_salle_direct` — `tableau.py`:3556  (def)
+- `_Salle` — `tableau.py`:3568  (class)
+- `_salle_direct` — `tableau.py`:3582  (def)
 - `Monde._salon` — `tests/faux_serveur.py`:303  (method)
 - `_Salon` — `tests/test_activite_demontage.py`:61  (class)
 - `_Salon` — `tests/test_bouclier.py`:78  (class)
@@ -2997,77 +3137,81 @@
 - `_Salon` — `tests/test_tickets_v2.py`:77  (class)
 - `_Salon` — `tests/test_visibilite_serveur.py`:28  (class)
 - `_salon` — `annonces.py`:221  (async def)
-- `_salon` — `cadeaux.py`:1414  (async def)
+- `_salon` — `cadeaux.py`:1469  (async def)
 - `_salon` — `evenements.py`:579  (async def)
 - `_salon` — `tests/test_questions.py`:30  (def)
-- `_salon_aide` — `bot.py`:14582  (async def)
+- `_salon_aide` — `bot.py`:14753  (async def)
 - `_salon_alerte` — `raid_detector.py`:108  (async def)
-- `_salon_alertes_site` — `bot.py`:7162  (async def)
-- `_salon_de_logs_pur` — `bot.py`:7375  (async def)
-- `_salon_des_tickets` — `bot.py`:14505  (def)
-- `_salon_logs_dedie` — `bot.py`:15351  (async def)
-- `_salon_logs_wait` — `bot.py`:13826  (async def)
-- `_salon_panneau_tickets` — `bot.py`:8335  (async def)
-- `_salon_par_nom` — `bot.py`:14513  (def)
-- `_salon_tableau` — `bot.py`:7422  (async def)
-- `_salon_ticket` — `questionnaire.py`:3182  (async def)
-- `_salon_transcripts_rellseas` — `bot.py`:7694  (async def)
+- `_salon_alertes_site` — `bot.py`:7308  (async def)
+- `_salon_de_logs_pur` — `bot.py`:7521  (async def)
+- `_salon_des_tickets` — `bot.py`:14676  (def)
+- `_salon_logs_dedie` — `bot.py`:15522  (async def)
+- `_salon_logs_wait` — `bot.py`:13998  (async def)
+- `_salon_panneau_tickets` — `bot.py`:8481  (async def)
+- `_salon_par_nom` — `bot.py`:14684  (def)
+- `_salon_tableau` — `bot.py`:7568  (async def)
+- `_salon_ticket` — `questionnaire.py`:3218  (async def)
+- `_salon_transcripts_rellseas` — `bot.py`:7840  (async def)
 - `Monde._salons` — `outils/site_maquette.py`:652  (method)
 - `_salons` — `outils/dessins_site.py`:1370  (def)
 - `_salons_commu` — `zones.py`:406  (async def)
-- `_salons_de_flux` — `bot.py`:13726  (async def)
-- `_salons_de_logs` — `bot.py`:13717  (async def)
-- `_salons_du_clan` — `tableau.py`:872  (def)
-- `_salons_hub` — `bot.py`:31977  (def)
-- `_sanctionnes_de` — `metiers.py`:320  (async def)
+- `_salons_de_flux` — `bot.py`:13898  (async def)
+- `_salons_de_logs` — `bot.py`:13889  (async def)
+- `_salons_du_clan` — `tableau.py`:877  (def)
+- `_salons_du_site` — `reponses_auto.py`:548  (def)
+- `_salons_hub` — `bot.py`:32189  (def)
+- `_sanctionnes_de` — `metiers.py`:363  (async def)
 - `_sanctions` — `outils/dessins_site.py`:1438  (def)
-- `_sanctions` — `tableau.py`:1045  (async def)
+- `_sanctions` — `tableau.py`:1050  (async def)
 - `_sans` — `tests/test_tickets_fils.py`:119  (def)
 - `_sans_accents` — `mots_interdits.py`:54  (def)
 - `_sans_accents` — `rellseas_panneau.py`:470  (def)
 - `_sans_attente` — `tests/test_questionnaire.py`:49  (def)
 - `_sans_attente` — `tests/test_recrutement_ticket.py`:52  (def)
+- `_sans_attente` — `tests/test_tickets_interdits.py`:42  (def)
 - `_sans_bruit` — `tests/test_recrutement_ticket.py`:143  (def)
-- `_sans_devoiler` — `questionnaire.py`:1710  (def)
-- `_sans_echec` — `cadeaux.py`:1042  (async def)
+- `_sans_devoiler` — `questionnaire.py`:1746  (def)
+- `_sans_echec` — `cadeaux.py`:1097  (async def)
 - `_sans_echec` — `evenements.py`:1461  (async def)
-- `_sans_echec` — `metiers.py`:1000  (async def)
-- `_sans_echec` — `questionnaire.py`:2503  (async def)
+- `_sans_echec` — `metiers.py`:1110  (async def)
+- `_sans_echec` — `questionnaire.py`:2539  (async def)
+- `_sans_emoji` — `hierarchie.py`:225  (def)
+- `_sans_repetitions` — `sujets_interdits.py`:342  (def)
 - `_sans_reussite` — `tests/test_securite_site.py`:440  (async def)
-- `_sans_zeros` — `metiers.py`:1292  (def)
-- `_SansCarte` — `bot.py`:8697  (class)
+- `_sans_zeros` — `metiers.py`:1461  (def)
+- `_SansCarte` — `bot.py`:8843  (class)
 - `_SansVerrou` — `tests/test_revue_reste.py`:430  (class)
-- `_sante_salons` — `bot.py`:15590  (def)
-- `_sauts_imposes` — `bot.py`:31995  (async def)
-- `V2GenericChannelPicker._save` — `bot.py`:20440  (method)
-- `V2GenericRolePicker._save` — `bot.py`:20558  (method)
-- `SocialMediaManager._save_anns` — `social_media.py`:1223  (method)
-- `_save_api_warning_state` — `bot.py`:20125  (def)
+- `_sante_salons` — `bot.py`:15761  (def)
+- `_sauts_imposes` — `bot.py`:32207  (async def)
+- `V2GenericChannelPicker._save` — `bot.py`:20611  (method)
+- `V2GenericRolePicker._save` — `bot.py`:20729  (method)
+- `SocialMediaManager._save_anns` — `social_media.py`:1235  (method)
+- `_save_api_warning_state` — `bot.py`:20296  (def)
 - `_save_guild` — `tracking_layer.py`:132  (async def)
-- `SocialMediaManager._save_subs` — `social_media.py`:1216  (method)
+- `SocialMediaManager._save_subs` — `social_media.py`:1228  (method)
 - `_scan_for_tokens` — `anti_token_leak.py`:86  (def)
-- `_scan_profile_text` — `bot.py`:4080  (def)
-- `_scan_red_keywords` — `bot.py`:4058  (def)
-- `_scan_security_on_edit` — `bot.py`:24841  (async def)
+- `_scan_profile_text` — `bot.py`:4084  (def)
+- `_scan_red_keywords` — `bot.py`:4062  (def)
+- `_scan_security_on_edit` — `bot.py`:25040  (async def)
 - `_scenario` — `tests/test_config_lost_update.py`:126  (async def)
 - `_score` — `recidivism.py`:150  (async def)
 - `_score_account` — `raid_detector.py`:213  (def)
 - `_score_pseudo` — `raid_detector.py`:194  (def)
-- `_section_with_button` — `bot.py`:33517  (def)
+- `_section_with_button` — `bot.py`:33729  (def)
 - `_sections_du_nouveau` — `outils/refonte_configure.py`:418  (def)
 - `_sections_du_select` — `tests/test_configure_social.py`:64  (def)
 - `_sections_resolues` — `tests/test_configure_social.py`:73  (def)
 - `_sel` — `rellseas_panneau.py`:390  (def)
 - `_select` — `tests/test_cadeaux_v3.py`:71  (def)
 - `_select` — `tests/test_vocaux.py`:28  (def)
-- `SendPanelPaginatedView._select_cb` — `bot.py`:21756  (method)
+- `SendPanelPaginatedView._select_cb` — `bot.py`:21934  (method)
 - `_selection` — `outils/site_maquette.py`:2805  (def)
 - `_selection` — `tests/test_rellseas.py`:250  (def)
-- `_selon_gabarit` — `questionnaire.py`:1912  (async def)
+- `_selon_gabarit` — `questionnaire.py`:1948  (async def)
 - `_sentinelle` — `tests/test_sentinelle_instance.py`:232  (def)
 - `_sep` — `evenements.py`:978  (def)
-- `_server_controls_task_wait` — `bot.py`:8261  (async def)
-- `_Serveur` — `tableau.py`:3058  (class)
+- `_server_controls_task_wait` — `bot.py`:8407  (async def)
+- `_Serveur` — `tableau.py`:3084  (class)
 - `_serveur` — `tests/test_activite_demontage.py`:188  (def)
 - `_serveur` — `tests/test_boosts.py`:124  (def)
 - `_serveur` — `tests/test_salons_v2.py`:39  (def)
@@ -3075,57 +3219,65 @@
 - `_serveur` — `tests/test_visibilite_serveur.py`:70  (def)
 - `_serveur_liens` — `tests/test_revue_cadeaux.py`:543  (def)
 - `_ServeurTextes` — `outils/site_maquette.py`:2909  (class)
-- `_service_legitime` — `bot.py`:11402  (def)
+- `_service_legitime` — `bot.py`:11554  (def)
 - `_Sess` — `tests/test_forum_refus.py`:78  (class)
 - `Local._session` — `tests/test_longevite.py`:440  (method)
 - `Local._session` — `tests/test_site_v2_port.py`:95  (method)
+- `_Session` — `tests/test_gif_texte.py`:34  (class)
 - `_Session` — `tests/test_youtube_chaine.py`:108  (class)
-- `_session` — `tableau.py`:504  (async def)
-- `_session_candidat` — `tests/test_acces_site.py`:253  (def)
-- `_session_direct` — `tableau.py`:3734  (async def)
+- `_session` — `tableau.py`:509  (async def)
+- `_session_candidat` — `tests/test_acces_site.py`:274  (def)
+- `_session_direct` — `tableau.py`:3760  (async def)
 - `_session_ok` — `outils/site_maquette.py`:1366  (def)
-- `ActionConfigPanelV2._set` — `bot.py`:18394  (method)
-- `_AntiRaidActionPickerV2._set` — `bot.py`:12810  (method)
-- `_BadwordsSanctionActionView._set` — `bot.py`:18013  (method)
-- `_setup` — `cadeaux.py`:153  (def)
-- `_shield_lock` — `bot.py`:3321  (async def)
-- `_shield_unlock` — `bot.py`:3360  (async def)
+- `ActionConfigPanelV2._set` — `bot.py`:18565  (method)
+- `_AntiRaidActionPickerV2._set` — `bot.py`:12982  (method)
+- `_BadwordsSanctionActionView._set` — `bot.py`:18184  (method)
+- `_setup` — `cadeaux.py`:161  (def)
+- `_shield_lock` — `bot.py`:3325  (async def)
+- `_shield_unlock` — `bot.py`:3364  (async def)
 - `_sig` — `generate_index.py`:31  (def)
-- `_signalement_note` — `bot.py`:3552  (def)
-- `_signalement_recent` — `bot.py`:3548  (def)
+- `_signalement_note` — `bot.py`:3556  (def)
+- `_signalement_recent` — `bot.py`:3552  (def)
 - `_signaler` — `candidature_site.py`:305  (def)
 - `_signaler` — `evenements.py`:360  (def)
-- `_signaler` — `metiers.py`:250  (def)
-- `_signaler` — `site_equipage.py`:235  (def)
-- `_signaler` — `site_vitrine.py`:78  (def)
+- `_signaler` — `hierarchie.py`:152  (def)
+- `_signaler` — `metiers.py`:287  (def)
+- `_signaler` — `site_equipage.py`:236  (def)
+- `_signaler` — `site_vitrine.py`:80  (def)
 - `_signaler` — `textes.py`:85  (def)
+- `_signaler` — `tickets_interdits.py`:113  (def)
+- `_signaler_flux` — `social_media.py`:56  (def)
 - `_signature` — `boosts.py`:49  (def)
-- `_signature_etiquettes` — `entraide.py`:1812  (def)
+- `_signature_etiquettes` — `entraide.py`:1825  (def)
 - `_silence` — `tests/test_roblox_news_contenu.py`:27  (def)
-- `_silhouette` — `site_vitrine.py`:591  (def)
+- `_silhouette` — `site_vitrine.py`:688  (def)
 - `_similarity` — `impersonation_detector.py`:177  (def)
 - `_simplifier` — `outils/dessins_site.py`:693  (def)
 - `_site_v2` — `tests/test_site_v2_serveur.py`:414  (def)
 - `_slug` — `outils/dessins_site.py`:3041  (def)
 - `_slug` — `outils/site_maquette.py`:136  (def)
-- `_slug` — `tableau.py`:1537  (def)
+- `_slug` — `tableau.py`:1542  (def)
 - `_slugs_newsroom` — `roblox_news.py`:660  (def)
 - `_SocialHandleModal` — `admin_panels_v2.py`:375  (class)
 - `_socket` — `tests/test_direct.py`:115  (async def)
 - `_Socle` — `tests/test_activite_observation.py`:30  (class)
-- `_sondages` — `tableau.py`:1313  (async def)
+- `_sondages` — `tableau.py`:1318  (async def)
 - `Monde._sondages_idees` — `outils/site_maquette.py`:674  (method)
-- `_sortie_actu` — `site_equipage.py`:588  (def)
-- `_sortie_affiche` — `affiches.py`:638  (def)
-- `_sortie_bloc` — `site_equipage.py`:500  (def)
-- `_sortie_element` — `affiches.py`:373  (def)
-- `_sortie_equipe_conflit` — `site_equipage.py`:993  (def)
-- `_sortie_lien` — `affiches.py`:1161  (def)
-- `_sortie_type` — `affiches.py`:353  (def)
+- `_sortie_actu` — `site_equipage.py`:593  (def)
+- `_sortie_affiche` — `affiches.py`:647  (def)
+- `_sortie_affiche_seule` — `affiches.py`:654  (def)
+- `_sortie_bloc` — `site_equipage.py`:505  (def)
+- `_sortie_element` — `affiches.py`:382  (def)
+- `_sortie_equipe_conflit` — `site_equipage.py`:1012  (def)
+- `_sortie_lien` — `affiches.py`:1220  (def)
+- `_sortie_publique` — `hierarchie.py`:584  (def)
+- `_sortie_rang` — `hierarchie.py`:531  (def)
+- `_sortie_role` — `hierarchie.py`:516  (def)
+- `_sortie_type` — `affiches.py`:362  (def)
 - `_sortir` — `casier.py`:94  (async def)
 - `_soumettre` — `tests/test_questionnaire.py`:230  (async def)
 - `_soumettre` — `tests/test_revue_moderation.py`:676  (def)
-- `_source` — `affiches.py`:253  (def)
+- `_source` — `affiches.py`:262  (def)
 - `_source` — `tests/test_autos.py`:22  (def)
 - `_source` — `tests/test_cadeaux.py`:28  (def)
 - `_source` — `tests/test_casier.py`:29  (def)
@@ -3135,7 +3287,7 @@
 - `_source` — `tests/test_lives_memorises.py`:18  (def)
 - `_source` — `tests/test_logs_site.py`:35  (def)
 - `_source` — `tests/test_menage.py`:158  (def)
-- `_source` — `tests/test_metiers.py`:938  (def)
+- `_source` — `tests/test_metiers.py`:940  (def)
 - `_source` — `tests/test_mp_sans_spam.py`:15  (def)
 - `_source` — `tests/test_nettoyage_complet.py`:26  (def)
 - `_source` — `tests/test_optimisation.py`:21  (def)
@@ -3143,7 +3295,7 @@
 - `_source` — `tests/test_questionnaire.py`:1099  (def)
 - `_source` — `tests/test_recours_v2.py`:32  (def)
 - `_source` — `tests/test_revue_cadeaux.py`:26  (def)
-- `_source` — `tests/test_revue_entraide.py`:27  (def)
+- `_source` — `tests/test_revue_entraide.py`:26  (def)
 - `_source` — `tests/test_revue_moderation.py`:54  (def)
 - `_source` — `tests/test_revue_reste.py`:57  (def)
 - `_source` — `tests/test_revue_site.py`:42  (def)
@@ -3165,317 +3317,339 @@
 - `_source` — `tests/test_zones.py`:39  (def)
 - `_sources` — `outils/site_local_port.py`:52  (def)
 - `_sources` — `tests/test_habillage.py`:24  (def)
-- `_spam_content_kind` — `bot.py`:5407  (def)
-- `_spawn_bg_scan` — `bot.py`:5901  (def)
+- `_spam_content_kind` — `bot.py`:5434  (def)
+- `_spawn_bg_scan` — `bot.py`:6047  (def)
 - `_spec` — `notifs.py`:38  (def)
 - `_split_url` — `trust_system.py`:84  (def)
 - `_sqlite` — `longevite.py`:96  (def)
 - `_sqlite` — `outils/banc_annees.py`:103  (def)
 - `_sqlite` — `outils/site_local_port.py`:68  (def)
 - `_sqlite` — `tests/test_longevite.py`:119  (def)
-- `_sqlite_date` — `tableau.py`:2822  (def)
-- `_squelette` — `bot.py`:11361  (def)
+- `_sqlite_date` — `tableau.py`:2848  (def)
+- `_squelette` — `bot.py`:11513  (def)
 - `_src` — `tests/test_installation_auto.py`:33  (def)
 - `_src` — `tests/test_off_radiation.py`:41  (def)
 - `_src_sans_decorateur` — `tests/test_forum_refus.py`:196  (def)
 - `_stable` — `tests/test_candidat_ses_cases.py`:100  (def)
-- `_staff` — `questions.py`:102  (def)
-- `_staff_ou_plus` — `bot.py`:6356  (def)
-- `_staff_sanction_guard` — `bot.py`:28470  (def)
-- `_StaffSanctionModal` — `bot.py`:28509  (class)
-- `_stall_watchdog` — `bot.py`:234  (def)
+- `_staff` — `questions.py`:131  (def)
+- `_staff` — `reponses_auto.py`:284  (def)
+- `_staff_ou_plus` — `bot.py`:6502  (def)
+- `_staff_sanction_guard` — `bot.py`:28676  (def)
+- `_StaffSanctionModal` — `bot.py`:28715  (class)
+- `_stall_watchdog` — `bot.py`:238  (def)
 - `_stats_affiches` — `outils/site_maquette.py`:1889  (def)
-- `_stats_en_base` — `cadeaux.py`:337  (async def)
+- `_stats_en_base` — `cadeaux.py`:345  (async def)
 - `_stats_handler` — `health_server.py`:120  (async def)
 - `MenuDecision._statut` — `suggestions.py`:560  (method)
-- `_statut` — `cadeaux.py`:1092  (async def)
+- `_statut` — `cadeaux.py`:1147  (async def)
 - `_statuts` — `tests/test_tickets_inactifs_combat.py`:61  (async def)
-- `_strip_media_urls` — `bot.py`:5035  (def)
-- `_strip_uid` — `gdpr.py`:406  (def)
+- `_strip_media_urls` — `bot.py`:5062  (def)
+- `_strip_uid` — `gdpr.py`:414  (def)
 - `_StubCursor` — `tests/conftest.py`:21  (class)
-- `_subs_path` — `social_media.py`:1068  (def)
+- `_subs_path` — `social_media.py`:1080  (def)
 - `_subtitle` — `admin_panels_v2.py`:53  (def)
 - `_succes` — `outils/dessins_site.py`:1768  (def)
-- `_suggestions` — `tableau.py`:1236  (async def)
-- `_suivi` — `questionnaire.py`:2869  (async def)
-- `_suivi_ou_creer` — `questionnaire.py`:2875  (async def)
-- `_suivi_ticket` — `bot.py`:9953  (async def)
-- `Inter._suivre` — `tests/banc_ticket_recrutement.py`:264  (method)
+- `_suggestions` — `tableau.py`:1241  (async def)
+- `_suivi` — `questionnaire.py`:2905  (async def)
+- `_suivi_ou_creer` — `questionnaire.py`:2911  (async def)
+- `_suivi_ticket` — `bot.py`:10102  (async def)
+- `Inter._suivre` — `tests/banc_ticket_recrutement.py`:265  (method)
 - `Inter._suivre` — `tests/test_questionnaire.py`:184  (method)
 - `Monde._suivre_evt` — `outils/site_maquette.py`:920  (method)
 - `_suivre_natif` — `evenements.py`:1691  (async def)
+- `_sujet` — `reponses_auto.py`:128  (def)
 - `_sujet` — `tests/test_forum_refus.py`:93  (def)
+- `_sujet_interdit` — `bot.py`:5618  (def)
 - `Serveur._sup` — `tests/test_bouclier.py`:21  (method)
-- `ConfirmerAnciensSalons._supprimer` — `bot.py`:7649  (method)
-- `ConfirmerArchives._supprimer` — `bot.py`:14943  (method)
+- `ConfirmerAnciensSalons._supprimer` — `bot.py`:7795  (method)
+- `ConfirmerArchives._supprimer` — `bot.py`:15114  (method)
 - `_supprimer` — `longevite.py`:82  (async def)
 - `_supprimer` — `outils/dessins_site.py`:3233  (def)
-- `_supprimer` — `tableau.py`:2809  (async def)
-- `_supprimer_filtre` — `bot.py`:5862  (async def)
-- `_supprimer_toutes_archives` — `bot.py`:14867  (async def)
+- `_supprimer` — `tableau.py`:2835  (async def)
+- `_supprimer_filtre` — `bot.py`:6008  (async def)
+- `_supprimer_toutes_archives` — `bot.py`:15038  (async def)
 - `_sur_la_vitrine` — `tests/test_vitrine_equipes.py`:589  (def)
 - `_Surcharge` — `tests/test_activite_demontage.py`:53  (class)
 - `_symboles` — `outils/couper_symboles.py`:45  (def)
 - `_symboles` — `outils/patch_debrancher_animation.py`:96  (def)
-- `_sync_hash_file_path` — `bot.py`:20041  (def)
+- `_sync_hash_file_path` — `bot.py`:20212  (def)
 - `_synchro` — `outils/dessins_site.py`:1706  (def)
 - `_syncs_globaux` — `tests/test_commandes_en_double.py`:59  (def)
 - `_t` — `candidature_site.py`:274  (def)
 - `_t` — `evenements.py`:281  (def)
-- `_t` — `metiers.py`:200  (def)
-- `_t` — `questionnaire.py`:629  (def)
-- `_t` — `site_equipage.py`:86  (def)
+- `_t` — `faq.py`:188  (def)
+- `_t` — `metiers.py`:237  (def)
+- `_t` — `questionnaire.py`:659  (def)
+- `_t` — `reponses_auto.py`:232  (def)
+- `_t` — `site_equipage.py`:87  (def)
 - `_t` — `zones.py`:183  (def)
 - `_tableau` — `health_server.py`:254  (async def)
-- `_tables` — `questionnaire.py`:4539  (async def)
+- `_tables` — `questionnaire.py`:4586  (async def)
 - `_tables_du_bot` — `outils/banc_annees.py`:220  (def)
-- `_tables_du_bot` — `outils/site_local.py`:726  (async def)
+- `_tables_du_bot` — `outils/site_local.py`:746  (async def)
 - `_tables_mortes` — `tests/test_nettoyage_complet.py`:31  (def)
-- `_tags` — `entraide.py`:734  (def)
+- `_tags` — `entraide.py`:747  (def)
 - `_tags` — `equipages.py`:285  (def)
 - `_taille` — `longevite.py`:798  (def)
-- `_taille_transcripts` — `questionnaire.py`:4613  (def)
-- `_task_supervisor_wait` — `bot.py`:16120  (async def)
+- `_taille_transcripts` — `questionnaire.py`:4660  (def)
+- `_task_supervisor_wait` — `bot.py`:16291  (async def)
 - `_telecharger` — `outils/dessins_site.py`:3034  (def)
-- `_tentative_hors_portee` — `tableau.py`:759  (async def)
-- `_terminer` — `questionnaire.py`:5034  (async def)
-- `_tete` — `questionnaire.py`:3327  (async def)
+- `_tentative_hors_portee` — `tableau.py`:764  (async def)
+- `_terminer` — `questionnaire.py`:5280  (async def)
+- `_tete` — `hierarchie.py`:230  (def)
+- `_tete` — `questionnaire.py`:3363  (async def)
 - `_Lecteur._texte` — `transcript_store.py`:274  (method)
 - `_Texte` — `tests/test_sante_salons.py`:27  (class)
-- `_texte` — `affiches.py`:184  (def)
+- `_texte` — `affiches.py`:193  (def)
 - `_texte` — `evenements.py`:974  (def)
-- `_texte` — `questionnaire.py`:1079  (def)
+- `_texte` — `questionnaire.py`:1115  (def)
 - `_texte` — `roblox_news_contenu.py`:134  (def)
 - `_texte` — `tests/test_approuver_bot.py`:130  (def)
 - `_texte` — `tests/test_candidature_site.py`:216  (def)
 - `_texte` — `tests/test_roblox_news_contenu.py`:245  (def)
-- `_texte_blocs` — `questionnaire.py`:5246  (def)
-- `_texte_change` — `metiers.py`:1104  (def)
-- `_texte_choix` — `metiers.py`:1014  (def)
-- `_texte_composants` — `cadeaux.py`:1334  (def)
-- `_texte_demande_refusee` — `bot.py`:15442  (async def)
-- `_texte_direct` — `tableau.py`:3563  (def)
+- `_texte_blocs` — `questionnaire.py`:5492  (def)
+- `_texte_change` — `metiers.py`:1216  (def)
+- `_texte_choix` — `metiers.py`:1124  (def)
+- `_texte_composants` — `cadeaux.py`:1389  (def)
+- `_texte_demande_refusee` — `bot.py`:15613  (async def)
+- `_texte_direct` — `tableau.py`:3589  (def)
 - `_texte_du_guide_change` — `zones.py`:1174  (def)
 - `_texte_espace` — `outils/visuels.py`:172  (def)
-- `_texte_etape` — `questionnaire.py`:3069  (def)
-- `_texte_fiche` — `questionnaire.py`:2080  (def)
-- `_texte_lisible` — `bot.py`:11342  (def)
+- `_texte_etape` — `questionnaire.py`:3105  (def)
+- `_texte_fiche` — `questionnaire.py`:2116  (def)
+- `_texte_image_interdit` — `bot.py`:5869  (async def)
+- `_texte_lisible` — `bot.py`:11494  (def)
 - `_texte_net` — `candidature_site.py`:375  (def)
-- `_texte_refuse_pour` — `bot.py`:15420  (async def)
+- `_texte_refuse_pour` — `bot.py`:15591  (async def)
 - `_texte_registre` — `tests/test_candidature_site.py`:246  (async def)
-- `_texte_sondage_refuse` — `bot.py`:15438  (async def)
-- `_texte_v2` — `bot.py`:9752  (def)
+- `_texte_sondage_refuse` — `bot.py`:15609  (async def)
+- `_texte_v2` — `bot.py`:9901  (def)
 - `_texte_v2` — `tests/test_revue_reste.py`:72  (def)
 - `_textes` — `tests/test_revue_site.py`:161  (def)
 - `_textes` — `tests/test_suggestions.py`:50  (def)
 - `_textes` — `tests/test_tickets_dossier.py`:89  (def)
-- `_textes` — `tests/test_tickets_sous_menus.py`:44  (def)
-- `_textes_complets` — `questionnaire.py`:5059  (def)
+- `_textes` — `tests/test_tickets_sous_menus.py`:56  (def)
+- `_textes_complets` — `questionnaire.py`:5305  (def)
 - `_textes_recus` — `candidature_site.py`:1112  (def)
-- `_texture` — `site_vitrine.py`:541  (def)
-- `_theme` — `questionnaire.py`:1015  (def)
+- `_texture` — `site_vitrine.py`:638  (def)
+- `_theme` — `questionnaire.py`:1051  (def)
 - `_tic_serveur` — `evenements.py`:2243  (async def)
-- `_ticket` — `questionnaire.py`:3053  (async def)
+- `_ticket` — `questionnaire.py`:3089  (async def)
 - `_ticket_age_short` — `tickets_enhance.py`:695  (def)
-- `_ticket_event_parts` — `bot.py`:6315  (def)
-- `_ticket_feedback_view` — `bot.py`:12956  (def)
-- `_ticket_hours_allows` — `bot.py`:8111  (async def)
-- `_ticket_hours_blocked_message` — `bot.py`:8102  (def)
-- `_ticket_hours_status` — `bot.py`:8082  (def)
-- `_ticket_ouvert` — `bot.py`:6432  (async def)
+- `_ticket_event_parts` — `bot.py`:6461  (def)
+- `_ticket_feedback_view` — `bot.py`:13128  (def)
+- `_ticket_hours_allows` — `bot.py`:8257  (async def)
+- `_ticket_hours_blocked_message` — `bot.py`:8248  (def)
+- `_ticket_hours_status` — `bot.py`:8228  (def)
+- `_ticket_ouvert` — `bot.py`:6578  (async def)
 - `_ticket_ouvert` — `candidature_site.py`:484  (async def)
-- `_ticket_ouvrir` — `bot.py`:9026  (async def)
-- `_ticket_requis` — `questionnaire.py`:6012  (def)
-- `_ticket_sans_limite` — `bot.py`:8511  (def)
-- `_ticket_timeline_line` — `bot.py`:6339  (def)
-- `_ticket_toggle_click` — `bot.py`:9589  (async def)
-- `_ticket_transcript_file` — `bot.py`:9793  (async def)
-- `_ticket_transcript_html` — `bot.py`:10163  (async def)
+- `_ticket_ouvrir` — `bot.py`:9172  (async def)
+- `_ticket_requis` — `questionnaire.py`:6258  (def)
+- `_ticket_sans_limite` — `bot.py`:8657  (def)
+- `_ticket_timeline_line` — `bot.py`:6485  (def)
+- `_ticket_toggle_click` — `bot.py`:9738  (async def)
+- `_ticket_transcript_file` — `bot.py`:9942  (async def)
+- `_ticket_transcript_html` — `bot.py`:10312  (async def)
 - `Monde._tickets` — `outils/site_maquette.py`:514  (method)
 - `_tickets` — `outils/dessins_site.py`:1225  (def)
-- `_tickets` — `tableau.py`:958  (async def)
+- `_tickets` — `tableau.py`:963  (async def)
 - `_tickets_fermes_avant` — `longevite.py`:318  (async def)
-- `_tickets_inactifs_wait` — `bot.py`:25508  (async def)
-- `_tickets_visibilite` — `bot.py`:14787  (async def)
+- `_tickets_inactifs_wait` — `bot.py`:25709  (async def)
+- `_tickets_visibilite` — `bot.py`:14958  (async def)
 - `_tient` — `evenements.py`:1032  (def)
 - `_tier_for` — `recidivism.py`:178  (def)
 - `_title` — `admin_panels_v2.py`:48  (def)
-- `_titre` — `affiches.py`:723  (def)
-- `_titre_bloc` — `site_equipage.py`:567  (def)
-- `_titre_direct` — `tableau.py`:3499  (def)
-- `_titre_youtube` — `bot.py`:14231  (async def)
-- `_tix_direction` — `bot.py`:23149  (async def)
-- `_tix_is_in_ticket` — `bot.py`:23158  (async def)
-- `_tix_staff` — `bot.py`:23139  (async def)
-- `_tk_warn_once` — `bot.py`:30383  (def)
+- `_titre` — `affiches.py`:739  (def)
+- `_titre_bloc` — `site_equipage.py`:572  (def)
+- `_titre_direct` — `tableau.py`:3525  (def)
+- `_titre_youtube` — `bot.py`:14402  (async def)
+- `_tix_direction` — `bot.py`:23351  (async def)
+- `_tix_is_in_ticket` — `bot.py`:23360  (async def)
+- `_tix_staff` — `bot.py`:23341  (async def)
+- `_tk_warn_once` — `bot.py`:30595  (def)
 - `_today_paris` — `observability.py`:140  (def)
 - `_tous` — `evenements.py`:479  (async def)
-- `VueTypesTickets._tout` — `bot.py`:9334  (method)
-- `_track_welcome_msg` — `bot.py`:24697  (async def)
-- `_traiter_direct` — `tableau.py`:3906  (async def)
-- `_tranches` — `site_equipage.py`:711  (def)
-- `_transcript_du_ticket` — `questionnaire.py`:5918  (async def)
+- `VueTypesTickets._tout` — `bot.py`:9483  (method)
+- `_track_welcome_msg` — `bot.py`:24896  (async def)
+- `_traiter_direct` — `tableau.py`:3932  (async def)
+- `_tranches` — `site_equipage.py`:716  (def)
+- `_transcript_du_ticket` — `questionnaire.py`:6164  (async def)
 - `_transcript_handler` — `health_server.py`:175  (async def)
 - `_transcript_html` — `outils/banc_annees.py`:287  (def)
-- `_transcripts_lots` — `questionnaire.py`:2944  (async def)
-- `_travaux_de_demarrage` — `bot.py`:15660  (async def)
-- `_tree_dm_guard` — `bot.py`:21844  (async def)
+- `_transcripts_lots` — `questionnaire.py`:2980  (async def)
+- `_travaux_de_demarrage` — `bot.py`:15831  (async def)
+- `_tree_dm_guard` — `bot.py`:22022  (async def)
 - `_trembler` — `outils/dessins_site.py`:2193  (def)
 - `_tri` — `outils/dessins_site.py`:1965  (def)
 - `_tronquer_propre` — `roblox_panneau.py`:257  (def)
-- `_trop` — `site_vitrine.py`:132  (def)
-- `_trop_essais` — `tableau.py`:639  (def)
+- `_trop` — `site_vitrine.py`:134  (def)
+- `_trop_essais` — `tableau.py`:644  (def)
+- `_trop_profond` — `tableau.py`:2324  (def)
 - `_trop_vieux` — `roblox_news.py`:781  (def)
 - `_trouver` — `annonces.py`:215  (def)
-- `_trust_block_notice` — `bot.py`:5514  (async def)
+- `_trust_block_notice` — `bot.py`:5541  (async def)
 - `_try_dir` — `paths.py`:25  (def)
 - `_try_revoke_webhook` — `webhook_leak.py`:138  (async def)
 - `_ts` — `sondages.py`:119  (def)
 - `_tx` — `outils/site_maquette.py`:2890  (def)
 - `_txt_quality` — `ocr_scan.py`:110  (def)
-- `_type` — `questionnaire.py`:1033  (def)
-- `_type_metier` — `site_equipage.py`:846  (def)
-- `_type_par` — `site_equipage.py`:378  (def)
+- `_type` — `questionnaire.py`:1069  (def)
+- `_type_grade` — `hierarchie.py`:203  (def)
+- `_type_metier` — `site_equipage.py`:857  (def)
+- `_type_par` — `site_equipage.py`:379  (def)
 - `_types` — `tests/test_roblox_news_contenu.py`:254  (def)
 - `_types` — `tests/test_v2_partout.py`:31  (def)
-- `_types_tickets` — `bot.py`:9167  (def)
-- `_un` — `questionnaire.py`:1162  (async def)
-- `_unanswered_clear` — `bot.py`:32576  (def)
-- `_unanswered_clear_for_author` — `bot.py`:32612  (def)
-- `_unanswered_on_reaction` — `bot.py`:32584  (def)
-- `_unb64` — `tableau.py`:422  (def)
-- `_une_ligne` — `entraide.py`:595  (def)
+- `_types_tickets` — `bot.py`:9316  (def)
+- `_un` — `questionnaire.py`:1198  (async def)
+- `_unanswered_clear` — `bot.py`:32788  (def)
+- `_unanswered_clear_for_author` — `bot.py`:32824  (def)
+- `_unanswered_on_reaction` — `bot.py`:32796  (def)
+- `_unb64` — `tableau.py`:427  (def)
+- `_une_ligne` — `entraide.py`:608  (def)
 - `_une_ligne` — `equipages.py`:241  (def)
 - `_une_ligne` — `evenements.py`:740  (def)
 - `_unix` — `casier.py`:237  (def)
 - `_unix` — `recrutements.py`:155  (def)
 - `_unix` — `tests/test_recrutements.py`:19  (def)
 - `_unmute` — `tests/test_revue_moderation.py`:388  (def)
-- `_update_support_status` — `bot.py`:8179  (async def)
-- `_url` — `questionnaire.py`:1040  (def)
+- `_update_support_status` — `bot.py`:8325  (async def)
+- `_url` — `questionnaire.py`:1076  (def)
 - `_url_slugs` — `offtopic_filter.py`:43  (def)
 - `_user_has_excluded_role` — `unified_logger.py`:613  (def)
 - `_utc` — `tests/test_observabilite.py`:13  (def)
 - `_v1_du_clan` — `tests/test_zones.py`:443  (def)
 - `_v2_valide` — `tests/test_revue_admin.py`:59  (def)
-- `_v_affiche` — `tableau.py`:4120  (def)
-- `_v_correction` — `tableau.py`:4127  (async def)
-- `_v_corriger` — `questionnaire.py`:6277  (async def)
-- `_v_par_id` — `tableau.py`:4136  (def)
-- `_v_suivante` — `questionnaire.py`:6288  (def)
+- `_v_affiche` — `tableau.py`:4146  (def)
+- `_v_correction` — `tableau.py`:4153  (async def)
+- `_v_corriger` — `questionnaire.py`:6531  (async def)
+- `_v_par_id` — `tableau.py`:4162  (def)
+- `_v_suivante` — `questionnaire.py`:6542  (def)
 - `_valeurs` — `tests/test_questionnaire.py`:319  (async def)
 - `_valeurs_site` — `evenements.py`:2341  (def)
 - `_valid` — `transcript_store.py`:49  (def)
 - `_valider` — `evenements.py`:779  (async def)
 - `_valider` — `outils/dessins_site.py`:1566  (def)
-- `_valider_affiche` — `affiches.py`:675  (def)
-- `_valider_contenu` — `site_equipage.py`:529  (async def)
-- `_valider_element` — `affiches.py`:333  (def)
-- `_valider_equipe` — `site_equipage.py`:881  (async def)
-- `_valider_rattaches` — `metiers.py`:1236  (async def)
-- `_valider_type` — `affiches.py`:323  (def)
+- `_valider_affiche` — `affiches.py`:691  (def)
+- `_valider_contenu` — `site_equipage.py`:534  (async def)
+- `_valider_element` — `affiches.py`:342  (def)
+- `_valider_equipe` — `site_equipage.py`:892  (async def)
+- `_valider_places` — `metiers.py`:1404  (async def)
+- `_valider_rang` — `hierarchie.py`:741  (def)
+- `_valider_rattaches` — `metiers.py`:1382  (async def)
+- `_valider_type` — `affiches.py`:332  (def)
 - `_variables` — `textes.py`:97  (def)
-- `_variables_nombres` — `questionnaire.py`:2074  (def)
-- `_variantes` — `questionnaire.py`:1045  (def)
+- `_variables_nombres` — `questionnaire.py`:2110  (def)
+- `_variantes` — `questionnaire.py`:1081  (def)
+- `_variantes` — `sujets_interdits.py`:346  (def)
 - `_veille_roblox_sans_reseau` — `tests/conftest.py`:106  (def)
-- `_veille_roblox_wait` — `bot.py`:15730  (async def)
-- `_verifier` — `tableau.py`:655  (async def)
-- `_verifier_entetes` — `tests/test_acces_site.py`:334  (def)
-- `_verifier_tickets_ouverts` — `bot.py`:8714  (async def)
-- `_verifier_visibilite` — `bot.py`:13674  (async def)
-- `_Verrou` — `tableau.py`:3508  (class)
+- `_veille_roblox_wait` — `bot.py`:15901  (async def)
+- `_veiller_toujours` — `questionnaire.py`:5083  (async def)
+- `_verdict` — `sujets_interdits.py`:484  (def)
+- `_verifier` — `tableau.py`:660  (async def)
+- `_verifier_entetes` — `tests/test_acces_site.py`:355  (def)
+- `_verifier_tickets_ouverts` — `bot.py`:8860  (async def)
+- `_verifier_visibilite` — `bot.py`:13846  (async def)
+- `_Verrou` — `tableau.py`:3534  (class)
 - `_verrou` — `boosts.py`:37  (def)
-- `_verrou` — `cadeaux.py`:162  (def)
+- `_verrou` — `cadeaux.py`:170  (def)
 - `_verrou` — `candidature_site.py`:1066  (def)
 - `_verrou` — `entraide.py`:362  (def)
 - `_verrou` — `equipages.py`:106  (def)
 - `_verrou` — `evenements.py`:356  (def)
 - `_verrou` — `invitations.py`:50  (def)
-- `_verrou` — `metiers.py`:236  (def)
-- `_verrou` — `questionnaire.py`:1203  (def)
-- `_verrou` — `site_vitrine.py`:151  (def)
+- `_verrou` — `metiers.py`:273  (def)
+- `_verrou` — `questionnaire.py`:1239  (def)
+- `_verrou` — `reponses_auto.py`:280  (def)
+- `_verrou` — `site_vitrine.py`:153  (def)
 - `_verrou` — `suggestions.py`:141  (def)
-- `_verrou` — `tableau.py`:2794  (def)
+- `_verrou` — `tableau.py`:2820  (def)
 - `_verrou` — `textes.py`:268  (def)
+- `_verrou` — `tickets_interdits.py`:121  (def)
 - `_verrou` — `zones.py`:267  (def)
-- `_verrou_ecriture` — `affiches.py`:119  (def)
-- `_verrou_ecriture` — `site_equipage.py`:243  (def)
-- `_verrou_membre` — `metiers.py`:245  (def)
-- `_verrou_raid` — `bot.py`:24661  (async def)
-- `_verrou_rec` — `tableau.py`:3620  (def)
+- `_verrou_ecriture` — `affiches.py`:128  (def)
+- `_verrou_ecriture` — `hierarchie.py`:160  (def)
+- `_verrou_ecriture` — `site_equipage.py`:244  (def)
+- `_verrou_membre` — `metiers.py`:282  (def)
+- `_verrou_membre` — `tickets_interdits.py`:541  (def)
+- `_verrou_membres` — `hierarchie.py`:1195  (def)
+- `_verrou_raid` — `bot.py`:24860  (async def)
+- `_verrou_rec` — `tableau.py`:3646  (def)
 - `_verrou_texte` — `textes.py`:553  (def)
-- `_verrouiller_salons_quarantaine` — `bot.py`:3848  (async def)
-- `_verrouiller_salons_radie` — `bot.py`:2240  (async def)
+- `_verrouiller_salons_quarantaine` — `bot.py`:3852  (async def)
+- `_verrouiller_salons_radie` — `bot.py`:2244  (async def)
 - `_vers_site` — `evenements.py`:2347  (async def)
 - `_version` — `textes.py`:374  (def)
+- `_version` — `tickets_interdits.py`:257  (def)
 - `_version_ok` — `outils/site_maquette.py`:1811  (def)
 - `_vide` — `tests/test_casier.py`:233  (async def)
-- `YouTubeRSSAdapter._videos_page` — `social_media.py`:864  (method)
-- `_vider` — `cadeaux.py`:453  (async def)
+- `YouTubeRSSAdapter._videos_page` — `social_media.py`:876  (method)
+- `_vider` — `cadeaux.py`:508  (async def)
 - `_vider` — `candidature_site.py`:698  (def)
 - `_vider_caches` — `outils/banc_annees.py`:857  (def)
 - `_vient_d_arriver` — `annonces.py`:863  (def)
-- `_vieux_envois` — `questionnaire.py`:4497  (async def)
+- `_vieux_envois` — `questionnaire.py`:4544  (async def)
 - `_vise` — `tests/test_revue_moderation.py`:545  (def)
 - `_visuel_handler` — `health_server.py`:229  (async def)
 - `_vitrine` — `health_server.py`:269  (async def)
+- `_vitrine` — `tests/test_hierarchie.py`:62  (def)
 - `_vitrine` — `tests/test_vitrine_equipes.py`:35  (def)
 - `_vivant` — `candidature_site.py`:662  (def)
-- `_vivant` — `tableau.py`:3877  (def)
+- `_vivant` — `tableau.py`:3903  (def)
 - `_Vocal` — `tests/test_sante_salons.py`:35  (class)
 - `_vocal_clan` — `zones.py`:954  (def)
 - `_vocal_commu` — `zones.py`:825  (def)
-- `_vocal_info` — `bot.py`:15082  (async def)
-- `_vocaux_par_contexte` — `bot.py`:15098  (async def)
-- `_voice_hop_listener` — `bot.py`:32016  (async def)
-- `_voice_log_listener` — `bot.py`:31898  (async def)
-- `_vol_de_compte_prouve` — `bot.py`:11498  (def)
+- `_vocal_info` — `bot.py`:15253  (async def)
+- `_vocaux_par_contexte` — `bot.py`:15269  (async def)
+- `_voice_hop_listener` — `bot.py`:32228  (async def)
+- `_voice_log_listener` — `bot.py`:32110  (async def)
+- `_vol_de_compte_prouve` — `bot.py`:11650  (def)
 - `_vu` — `candidature_site.py`:716  (async def)
-- `_vu_retire` — `cadeaux.py`:316  (async def)
-- `_vue` — `tests/test_cadeaux.py`:72  (def)
+- `_vu_retire` — `cadeaux.py`:324  (async def)
+- `_vue` — `tests/test_cadeaux.py`:73  (def)
 - `_vue` — `tests/test_cadeaux_v3.py`:77  (def)
 - `_vue` — `tests/test_revue_cadeaux.py`:124  (def)
-- `_vue_aide` — `bot.py`:14521  (async def)
+- `_vue_aide` — `bot.py`:14692  (async def)
 - `_vue_aide_ns` — `tests/test_zones.py`:263  (def)
-- `_vue_alerte` — `bot.py`:7199  (def)
+- `_vue_alerte` — `bot.py`:7345  (def)
 - `_vue_avis` — `candidature_site.py`:808  (def)
 - `_vue_avis` — `evenements.py`:1429  (def)
-- `_vue_avis` — `metiers.py`:968  (def)
-- `_vue_avis` — `site_equipage.py`:1569  (def)
-- `_vue_blacklist` — `bot.py`:29231  (def)
-- `_vue_candidat` — `questionnaire.py`:3542  (def)
+- `_vue_avis` — `metiers.py`:1078  (def)
+- `_vue_avis` — `site_equipage.py`:1595  (def)
+- `_vue_blacklist` — `bot.py`:29437  (def)
+- `_vue_candidat` — `questionnaire.py`:3577  (def)
 - `_vue_de` — `tests/test_entraide.py`:103  (def)
 - `_vue_de` — `tests/test_equipages.py`:71  (def)
-- `_vue_decision` — `questionnaire.py`:2364  (def)
-- `_vue_direct` — `questionnaire.py`:5721  (def)
-- `_vue_dossier_ticket` — `bot.py`:8435  (async def)
-- `_vue_dossier_ticket_de` — `bot.py`:8470  (async def)
+- `_vue_decision` — `questionnaire.py`:2400  (def)
+- `_vue_direct` — `questionnaire.py`:5967  (def)
+- `_vue_dossier_ticket` — `bot.py`:8581  (async def)
+- `_vue_dossier_ticket_de` — `bot.py`:8616  (async def)
 - `_vue_figee` — `sondages.py`:254  (def)
 - `_vue_message` — `annonces.py`:449  (def)
-- `_vue_message` — `cadeaux.py`:1003  (def)
-- `_vue_message` — `entraide.py`:1194  (def)
+- `_vue_message` — `cadeaux.py`:1058  (def)
+- `_vue_message` — `entraide.py`:1207  (def)
 - `_vue_message` — `equipages.py`:668  (def)
-- `_vue_pages` — `tableau.py`:3649  (def)
-- `_vue_recrutement` — `bot.py`:7798  (def)
-- `_vue_texte` — `questionnaire.py`:2454  (def)
+- `_vue_pages` — `tableau.py`:3675  (def)
+- `_vue_recrutement` — `bot.py`:7944  (def)
+- `_vue_texte` — `questionnaire.py`:2490  (def)
 - `_vue_texte` — `zones.py`:329  (def)
-- `_vue_ticket_message` — `bot.py`:8937  (def)
+- `_vue_ticket_message` — `bot.py`:9083  (def)
 - `_vues_du_fil` — `tests/test_questionnaire.py`:198  (def)
 - `_wait_ready` — `webhook_tracker.py`:373  (async def)
 - `_walk_file` — `generate_index.py`:69  (def)
-- `_warn_api_dead` — `bot.py`:20143  (async def)
-- `_warn_calm_down` — `bot.py`:5489  (async def)
-- `_web` — `questionnaire.py`:2681  (def)
+- `_wallah` — `sujets_interdits.py`:438  (def)
+- `_warn_api_dead` — `bot.py`:20314  (async def)
+- `_warn_calm_down` — `bot.py`:5516  (async def)
+- `_web` — `questionnaire.py`:2717  (def)
 - `_websub` — `health_server.py`:276  (async def)
-- `_websub_wait` — `bot.py`:30227  (async def)
-- `_welcome_cleanup_before` — `bot.py`:24754  (async def)
-- `_welcome_raid_active` — `bot.py`:12509  (def)
-- `_wiki_et_liens` — `questionnaire.py`:2058  (def)
-- `_write_json` — `social_media.py`:1105  (async def)
+- `_websub_wait` — `bot.py`:30439  (async def)
+- `_welcome_cleanup_before` — `bot.py`:24953  (async def)
+- `_welcome_raid_active` — `bot.py`:12681  (def)
+- `_wiki_et_liens` — `questionnaire.py`:2094  (def)
+- `_write_json` — `social_media.py`:1117  (async def)
 - `_yt` — `tests/test_youtube_chaine.py`:175  (def)
-- `_yt_extract_handle` — `bot.py`:29729  (def)
-- `_yt_extract_uc` — `bot.py`:29715  (def)
-- `_yt_resolve_channel_id` — `bot.py`:29750  (async def)
+- `_yt_extract_handle` — `bot.py`:29941  (def)
+- `_yt_extract_uc` — `bot.py`:29927  (def)
+- `_yt_resolve_channel_id` — `bot.py`:29962  (async def)
 - `a_agi` — `activite_demontage.py`:363  (def)
 - `a_alerte_geree` — `outils/site_maquette.py`:1661  (def)
 - `a_candidature` — `outils/site_maquette.py`:1537  (def)
@@ -3490,9 +3664,9 @@
 - `a_debannir` — `outils/site_maquette.py`:1735  (def)
 - `a_fiche_retirer` — `outils/site_maquette.py`:1669  (def)
 - `a_garder` — `journal.py`:55  (def)
-- `a_la_tete` — `tableau.py`:400  (def)
+- `a_la_tete` — `tableau.py`:405  (def)
 - `a_moderer` — `outils/site_maquette.py`:1609  (def)
-- `a_part` — `tableau.py`:820  (def)
+- `a_part` — `tableau.py`:825  (def)
 - `a_question` — `outils/site_maquette.py`:1645  (def)
 - `a_remettre_a_neuf` — `nettoyage.py`:160  (async def)
 - `a_retirer` — `stockage.py`:100  (def)
@@ -3501,30 +3675,30 @@
 - `a_suggestion_repondre` — `outils/site_maquette.py`:1748  (def)
 - `a_suggestion_retirer` — `outils/site_maquette.py`:1760  (def)
 - `a_ticket_fermer` — `outils/site_maquette.py`:1528  (def)
-- `ableist_hit` — `insult_filter.py`:357  (def)
-- `SocialMediaManager.abonnements_youtube` — `social_media.py`:1422  (method)
+- `ableist_hit` — `insult_filter.py`:469  (def)
+- `SocialMediaManager.abonnements_youtube` — `social_media.py`:1434  (method)
 - `abonner` — `websub_youtube.py`:68  (async def)
 - `absorber_vieux` — `roblox_news.py`:970  (async def)
-- `accepter` — `questionnaire.py`:3595  (async def)
+- `accepter` — `questionnaire.py`:3630  (async def)
 - `accueil` — `outils/site_maquette.py`:3138  (async def)
-- `AccueilLangueView` — `bot.py`:32865  (class)
-- `DBPool.acquire` — `bot.py`:496  (method)
+- `AccueilLangueView` — `bot.py`:33077  (class)
+- `DBPool.acquire` — `bot.py`:500  (method)
 - `_FauxNews.actif` — `tests/test_forum_refus.py`:217  (method)
 - `actif` — `roblox_news.py`:181  (async def)
 - `actif` — `websub_youtube.py`:51  (def)
 - `Action` — `vocabulary.py`:23  (class)
 - `Local.action` — `tests/test_site_v2_port.py`:117  (method)
 - `action` — `outils/site_maquette.py`:1789  (async def)
-- `action` — `tableau.py`:1885  (async def)
-- `ActionConfigPanelV2` — `bot.py`:18311  (class)
+- `action` — `tableau.py`:1890  (async def)
+- `ActionConfigPanelV2` — `bot.py`:18482  (class)
 - `actions_du_bot` — `outils/site_local_port.py`:134  (def)
 - `activer_site` — `unified_logger.py`:307  (async def)
-- `actualites_auto` — `site_equipage.py`:651  (async def)
+- `actualites_auto` — `site_equipage.py`:656  (async def)
 - `actus_a_envoyer` — `roblox_news.py`:1135  (async def)
 - `_FauxArbre.add_command` — `tests/test_commandes_en_double.py`:161  (method)
 - `Message.add_reaction` — `tests/test_salutations.py`:42  (method)
 - `FauxMembre.add_roles` — `tests/test_rellseas.py`:166  (method)
-- `Membre.add_roles` — `tests/banc_ticket_recrutement.py`:186  (method)
+- `Membre.add_roles` — `tests/banc_ticket_recrutement.py`:187  (method)
 - `Membre.add_roles` — `tests/test_clan.py`:85  (method)
 - `Membre.add_roles` — `tests/test_metiers.py`:106  (method)
 - `Membre.add_roles` — `tests/test_qui_peut_quoi.py`:126  (method)
@@ -3533,124 +3707,129 @@
 - `MembreR.add_roles` — `tests/test_revue_reste.py`:525  (method)
 - `_FauxMembre.add_roles` — `tests/test_roblox_pings.py`:227  (method)
 - `_Membre.add_roles` — `tests/test_activite_demontage.py`:86  (method)
-- `TicketControlView.add_staff` — `bot.py`:10478  (method)
-- `SocialMediaManager.add_subscription` — `social_media.py`:1236  (method)
+- `TicketControlView.add_staff` — `bot.py`:10627  (method)
+- `SocialMediaManager.add_subscription` — `social_media.py`:1248  (method)
 - `add_template` — `tickets_enhance.py`:412  (async def)
 - `FauxFil.add_user` — `tests/test_tickets_fils.py`:41  (method)
 - `Fil.add_user` — `tests/faux_serveur.py`:86  (method)
-- `FilTicket.add_user` — `tests/banc_ticket_recrutement.py`:127  (method)
+- `FilTicket.add_user` — `tests/banc_ticket_recrutement.py`:128  (method)
 - `FilTicket.add_user` — `tests/test_tickets_visibles.py`:57  (method)
 - `_Fil.add_user` — `tests/test_revue_tickets.py`:170  (method)
-- `AddDomainModal` — `bot.py`:18137  (class)
-- `AddQModal` — `bot.py`:21602  (class)
-- `AddStaffSelect` — `bot.py`:10719  (class)
-- `AddStaffView` — `bot.py`:10711  (class)
+- `AddDomainModal` — `bot.py`:18308  (class)
+- `AddQModal` — `bot.py`:21780  (class)
+- `AddStaffSelect` — `bot.py`:10871  (class)
+- `AddStaffView` — `bot.py`:10863  (class)
 - `adresse_approx` — `securite_site.py`:127  (def)
 - `adresse_png_wiki` — `outils/icones_rellseas.py`:795  (def)
 - `adresses_montures` — `outils/icones_rellseas.py`:778  (def)
-- `advanced_phishing_check` — `bot.py`:11511  (def)
-- `advanced_scam_check` — `bot.py`:11553  (def)
-- `Banc.affiche` — `tests/test_metiers.py`:291  (method)
+- `advanced_phishing_check` — `bot.py`:11663  (def)
+- `advanced_scam_check` — `bot.py`:11705  (def)
+- `Banc.affiche` — `tests/test_metiers.py`:293  (method)
 - `FausseInteraction.affiche` — `tests/test_panneaux_interaction.py`:128  (method)
 - `Monde.affiche_pub` — `outils/site_maquette.py`:838  (method)
+- `affiches_changees` — `hierarchie.py`:365  (def)
 - `Base.ajouter` — `outils/banc_annees.py`:201  (method)
 - `Base.ajouter` — `tests/test_casier.py`:67  (method)
 - `Casier.ajouter` — `tests/test_revue_reste.py`:278  (method)
 - `Serveur.ajouter` — `tests/test_revue_moderation.py`:171  (method)
 - `ajouter` — `boosts.py`:245  (async def)
 - `ajouter` — `tickets_fils.py`:162  (async def)
-- `ajouter_regle` — `tableau.py`:3260  (def)
+- `ajouter_regle` — `tableau.py`:3286  (def)
 - `alerte_due` — `vigilance.py`:71  (def)
 - `Monde.alertes` — `outils/site_maquette.py`:1142  (method)
 - `alias_des_imports` — `outils/purge_modules.py`:83  (def)
-- `AltConfidenceModal` — `bot.py`:18573  (class)
-- `AltConfigPanelV2` — `bot.py`:18434  (class)
-- `AltDetectionsPanelV2` — `bot.py`:18778  (class)
-- `AltScanResultsPanelV2` — `bot.py`:18609  (class)
+- `AltConfidenceModal` — `bot.py`:18744  (class)
+- `AltConfigPanelV2` — `bot.py`:18605  (class)
+- `AltDetectionsPanelV2` — `bot.py`:18949  (class)
+- `AltScanResultsPanelV2` — `bot.py`:18780  (class)
+- `ambigus` — `insult_filter.py`:270  (def)
 - `amnistie` — `casier.py`:194  (async def)
-- `amnistie_task` — `bot.py`:7081  (async def)
+- `amnistie_task` — `bot.py`:7227  (async def)
 - `amorcer` — `roblox_news.py`:946  (async def)
 - `analyse_bot` — `outils/inventaire_evenements.py`:122  (def)
-- `analyse_phishing` — `bot.py`:5194  (def)
+- `analyse_phishing` — `bot.py`:5221  (def)
 - `analyser` — `outils/verif_evenements.py`:84  (def)
 - `analyser` — `protection_mineurs.py`:311  (def)
-- `analyses` — `site_equipage.py`:727  (async def)
+- `analyses` — `site_equipage.py`:732  (async def)
 - `anciennete_du_suivi` — `activite.py`:270  (async def)
-- `annonce` — `questionnaire.py`:1952  (async def)
-- `annonce_detail` — `questionnaire.py`:1958  (async def)
-- `annoncer_reponses` — `questionnaire.py`:3211  (async def)
+- `annonce` — `questionnaire.py`:1988  (async def)
+- `annonce_detail` — `questionnaire.py`:1994  (async def)
+- `annoncer_reponses` — `questionnaire.py`:3247  (async def)
 - `Local.annonces` — `tests/test_candidature_site.py`:150  (method)
-- `Announcement` — `social_media.py`:216  (class)
-- `annuler` — `cadeaux.py`:1644  (async def)
+- `Announcement` — `social_media.py`:237  (class)
+- `annuler` — `cadeaux.py`:1699  (async def)
 - `annuler` — `evenements.py`:2164  (async def)
 - `annuler` — `publications.py`:84  (async def)
 - `anomaly_check_task` — `observability.py`:804  (async def)
-- `AntiRaidPanelV2` — `bot.py`:12605  (class)
-- `apercu_candidat` — `questionnaire.py`:5408  (async def)
+- `AntiRaidPanelV2` — `bot.py`:12777  (class)
+- `apercu_candidat` — `questionnaire.py`:5654  (async def)
 - `apercu_icones` — `outils/dessins_site.py`:3615  (def)
 - `apercu_modification` — `evenements.py`:2120  (async def)
-- `apercu_page` — `questionnaire.py`:3344  (async def)
-- `apercu_regle` — `tableau.py`:2909  (async def)
+- `apercu_page` — `questionnaire.py`:3380  (async def)
+- `apercu_regle` — `tableau.py`:2935  (async def)
 - `Local.api` — `tests/test_candidature_site.py`:102  (method)
 - `Local.api` — `tests/test_longevite.py`:452  (method)
 - `api` — `candidature_site.py`:1031  (async def)
 - `api` — `outils/site_maquette.py`:3018  (async def)
-- `api` — `tableau.py`:1725  (async def)
+- `api` — `tableau.py`:1730  (async def)
 - `api` — `tests/test_evenements.py`:123  (def)
-- `api_equipage` — `tableau.py`:3383  (async def)
-- `api_equipage_refus` — `tableau.py`:3415  (async def)
-- `api_site` — `tableau.py`:2407  (async def)
+- `api_equipage` — `tableau.py`:3409  (async def)
+- `api_equipage_refus` — `tableau.py`:3441  (async def)
+- `api_site` — `tableau.py`:2430  (async def)
 - `aplatir` — `outils/dessins_site.py`:206  (def)
 - `appareil` — `securite_site.py`:115  (def)
-- `appeler_middleman` — `entraide.py`:1048  (async def)
+- `appeler_middleman` — `entraide.py`:1061  (async def)
 - `application` — `outils/site_maquette.py`:3157  (def)
 - `appliquer` — `config_salons.py`:245  (async def)
-- `appliquer` — `metiers.py`:644  (async def)
+- `appliquer` — `metiers.py`:754  (async def)
 - `appliquer_decision` — `suggestions.py`:572  (async def)
-- `appliquer_roles` — `affiches.py`:1245  (async def)
+- `appliquer_roles` — `affiches.py`:1304  (async def)
 - `apply_honeypot_perms` — `honeypot.py`:97  (async def)
-- `apres_affiche` — `metiers.py`:712  (async def)
+- `apres_affiche` — `metiers.py`:822  (async def)
+- `apres_levee` — `tickets_interdits.py`:424  (async def)
 - `arc_pts` — `outils/dessins_site.py`:349  (def)
 - `Salon.archived_threads` — `tests/test_menage.py`:74  (method)
 - `archives` — `zones.py`:674  (def)
 - `arrivant` — `tests/test_invitations.py`:58  (def)
 - `asset_file` — `transcript_store.py`:73  (def)
+- `assurer` — `hierarchie.py`:379  (async def)
 - `assurer_carte` — `liens_jeux.py`:96  (async def)
 - `assurer_guide` — `zones.py`:897  (async def)
 - `assurer_guide_clan` — `zones.py`:1196  (async def)
 - `assurer_panneau` — `equipages.py`:806  (async def)
 - `assurer_panneau` — `suggestions.py`:164  (async def)
-- `assurer_panneaux` — `entraide.py`:1691  (async def)
+- `assurer_panneaux` — `entraide.py`:1704  (async def)
 - `attente` — `vocaux.py`:91  (def)
 - `au_carre` — `outils/icones_rellseas.py`:1050  (def)
 - `au_pire_moment` — `tests/test_candidat_ses_cases.py`:256  (def)
 - `Banc.autorise` — `tests/test_questionnaire.py`:139  (method)
 - `autorise` — `candidature_site.py`:646  (async def)
-- `autorise_equipage` — `tableau.py`:407  (def)
+- `autorise_equipage` — `tableau.py`:412  (def)
 - `available` — `nsfw_scan.py`:73  (def)
 - `available` — `ocr_scan.py`:96  (def)
 - `avertissements` — `textes.py`:301  (def)
-- `avertissements_fiche` — `questionnaire.py`:1540  (def)
-- `avis` — `tests/test_metiers.py`:329  (def)
+- `avertissements_fiche` — `questionnaire.py`:1576  (def)
+- `avis` — `tests/test_metiers.py`:331  (def)
 - `backup_task` — `db_backup.py`:213  (async def)
-- `badges_chef` — `site_equipage.py`:810  (async def)
-- `badges_chefs` — `questionnaire.py`:4168  (async def)
-- `BadwordsConfigPanelV2` — `bot.py`:17659  (class)
+- `badges_chef` — `site_equipage.py`:821  (async def)
+- `badges_chefs` — `questionnaire.py`:4215  (async def)
+- `BadwordsConfigPanelV2` — `bot.py`:17830  (class)
 - `baht` — `outils/dessins_site.py`:1790  (def)
 - `Serveur.ban` — `tests/test_qui_peut_quoi.py`:167  (method)
 - `Banc` — `tests/test_metiers.py`:189  (class)
 - `Banc` — `tests/test_questionnaire.py`:58  (class)
-- `banc` — `tests/test_metiers.py`:335  (def)
+- `banc` — `tests/test_metiers.py`:337  (def)
 - `banc` — `tests/test_news_file_et_traduction.py`:70  (def)
 - `banc` — `tests/test_recrutement_ticket.py`:62  (def)
 - `banc` — `tests/test_tickets_fils.py`:213  (def)
-- `banc_metiers` — `tests/test_textes.py`:566  (def)
-- `BancTicket` — `tests/banc_ticket_recrutement.py`:353  (class)
+- `banc` — `tests/test_tickets_interdits.py`:63  (def)
+- `banc_metiers` — `tests/test_textes.py`:567  (def)
+- `BancTicket` — `tests/banc_ticket_recrutement.py`:355  (class)
 - `bandeau` — `outils/visuels.py`:250  (def)
 - `bandeau` — `visuels.py`:125  (def)
-- `banniere` — `site_vitrine.py`:483  (async def)
-- `banque` — `questionnaire.py`:5167  (async def)
-- `barre` — `cadeaux.py`:687  (def)
+- `banniere` — `site_vitrine.py`:580  (async def)
+- `banque` — `questionnaire.py`:5413  (async def)
+- `barre` — `cadeaux.py`:742  (def)
 - `bascule` — `outils/site_maquette.py`:3104  (async def)
 - `basculer` — `roblox_pings.py`:200  (async def)
 - `Base` — `outils/banc_annees.py`:188  (class)
@@ -3660,91 +3839,92 @@
 - `base` — `tests/test_forum_refus.py`:36  (def)
 - `base` — `tests/test_tickets_inactifs_combat.py`:38  (def)
 - `base_data_dir` — `paths.py`:38  (def)
-- `RSSHubAdapter.base_url` — `social_media.py`:659  (method)
+- `RSSHubAdapter.base_url` — `social_media.py`:680  (method)
 - `BasePanel` — `ui_v2.py`:178  (class)
-- `before_check_expired` — `bot.py`:31614  (async def)
-- `before_check_restrictions` — `bot.py`:31684  (async def)
-- `before_social_check` — `bot.py`:31076  (async def)
-- `before_temp_voice_watchdog` — `bot.py`:31139  (async def)
-- `bilan` — `questionnaire.py`:2960  (def)
+- `before_check_expired` — `bot.py`:31826  (async def)
+- `before_check_restrictions` — `bot.py`:31896  (async def)
+- `before_social_check` — `bot.py`:31288  (async def)
+- `before_temp_voice_watchdog` — `bot.py`:31351  (async def)
+- `bilan` — `questionnaire.py`:2996  (def)
 - `bilan` — `stockage.py`:202  (async def)
 - `bilan_texte` — `activite_demontage.py`:368  (def)
 - `bilan_texte` — `visibilite_serveur.py`:140  (def)
-- `Banc.biscuit` — `tests/test_metiers.py`:312  (method)
+- `Banc.biscuit` — `tests/test_metiers.py`:314  (method)
 - `Monde.biscuit` — `tests/test_direct.py`:97  (method)
 - `Site.biscuit` — `tests/test_site_v2_serveur.py`:167  (method)
-- `Site.biscuit` — `tests/test_textes.py`:350  (method)
-- `TicketControlView.blacklist_user` — `bot.py`:10587  (method)
-- `blacklist_user` — `bot.py`:773  (def)
+- `Site.biscuit` — `tests/test_textes.py`:351  (method)
+- `TicketControlView.blacklist_user` — `bot.py`:10736  (method)
+- `blacklist_user` — `bot.py`:777  (def)
 - `body` — `ui_v2.py`:122  (def)
 - `boite_chemin` — `outils/dessins_site.py`:2037  (def)
 - `boite_utile` — `outils/icones_rellseas.py`:1037  (def)
 - `boosters` — `boosts.py`:45  (def)
-- `BoostSupportButton` — `bot.py`:23995  (class)
+- `BoostSupportButton` — `bot.py`:24197  (class)
 - `boot` — `diag.py`:103  (def)
 - `bord_dechire` — `outils/affiche_recrutement.py`:41  (def)
 - `bornes` — `recrutements.py`:99  (def)
 - `bornes_classe` — `outils/refonte_configure.py`:308  (def)
-- `bouclier_off` — `bot.py`:3437  (async def)
-- `bouclier_on` — `bot.py`:3406  (async def)
-- `bouclier_secours` — `bot.py`:3467  (async def)
+- `bouclier_off` — `bot.py`:3441  (async def)
+- `bouclier_on` — `bot.py`:3410  (async def)
+- `bouclier_secours` — `bot.py`:3471  (async def)
 - `bouton` — `tests/test_annonces.py`:73  (def)
 - `bouton` — `tests/test_evenements.py`:155  (def)
 - `bouton` — `tests/test_revue_reste.py`:68  (def)
-- `BoutonActualiser` — `cadeaux.py`:726  (class)
-- `BoutonAnciensSalons` — `bot.py`:7585  (class)
-- `BoutonAnnulerConfig` — `bot.py`:15320  (class)
-- `BoutonApercu` — `questionnaire.py`:2583  (class)
-- `BoutonApprouverBot` — `bot.py`:7233  (class)
-- `BoutonArchive` — `bot.py`:14175  (class)
-- `BoutonArchives` — `bot.py`:14888  (class)
-- `BoutonCadeaux` — `cadeaux.py`:753  (class)
-- `BoutonCertifier` — `entraide.py`:1332  (class)
-- `BoutonChercher` — `cadeaux.py`:818  (class)
+- `BoutonActualiser` — `cadeaux.py`:781  (class)
+- `BoutonAnciensSalons` — `bot.py`:7731  (class)
+- `BoutonAnnulerConfig` — `bot.py`:15491  (class)
+- `BoutonApercu` — `questionnaire.py`:2619  (class)
+- `BoutonApprouverBot` — `bot.py`:7379  (class)
+- `BoutonArchive` — `bot.py`:14346  (class)
+- `BoutonArchives` — `bot.py`:15059  (class)
+- `BoutonCadeaux` — `cadeaux.py`:808  (class)
+- `BoutonCertifier` — `entraide.py`:1345  (class)
+- `BoutonChercher` — `cadeaux.py`:873  (class)
 - `BoutonComposer` — `annonces.py`:789  (class)
 - `BoutonContre` — `suggestions.py`:513  (class)
 - `BoutonDecision` — `recrutements.py`:429  (class)
-- `BoutonEtape1` — `questionnaire.py`:2521  (class)
-- `BoutonFermer` — `entraide.py`:1356  (class)
-- `BoutonFicheSite` — `bot.py`:7333  (class)
-- `BoutonGere` — `bot.py`:7305  (class)
+- `BoutonEtape1` — `questionnaire.py`:2557  (class)
+- `BoutonFermer` — `entraide.py`:1369  (class)
+- `BoutonFicheSite` — `bot.py`:7479  (class)
+- `BoutonGere` — `bot.py`:7451  (class)
 - `BoutonGerer` — `suggestions.py`:676  (class)
 - `BoutonLiens` — `liens_jeux.py`:171  (class)
-- `BoutonMiddleman` — `entraide.py`:1083  (class)
+- `BoutonMiddleman` — `entraide.py`:1096  (class)
 - `BoutonModifier` — `equipages.py`:572  (class)
 - `BoutonNotif` — `notifs.py`:79  (class)
-- `BoutonNouvelle` — `entraide.py`:934  (class)
-- `BoutonPage` — `cadeaux.py`:783  (class)
-- `BoutonPage` — `questionnaire.py`:2566  (class)
-- `BoutonParticipants` — `cadeaux.py`:767  (class)
-- `BoutonParticiper` — `cadeaux.py`:698  (class)
+- `BoutonNouvelle` — `entraide.py`:947  (class)
+- `BoutonPage` — `cadeaux.py`:838  (class)
+- `BoutonPage` — `questionnaire.py`:2602  (class)
+- `BoutonParticipants` — `cadeaux.py`:822  (class)
+- `BoutonParticiper` — `cadeaux.py`:753  (class)
 - `BoutonPour` — `suggestions.py`:499  (class)
 - `BoutonProposer` — `suggestions.py`:457  (class)
 - `BoutonPublier` — `equipages.py`:486  (class)
 - `BoutonQuestionnaire` — `candidature_site.py`:867  (class)
-- `BoutonQuitter` — `cadeaux.py`:740  (class)
+- `BoutonQuitter` — `cadeaux.py`:795  (class)
 - `BoutonRecrutement` — `equipages.py`:550  (class)
-- `BoutonRejoindre` — `entraide.py`:1033  (class)
+- `BoutonRejoindre` — `entraide.py`:1046  (class)
 - `BoutonRejoindre` — `equipages.py`:509  (class)
-- `BoutonRepondre` — `questionnaire.py`:2548  (class)
+- `BoutonRepondre` — `questionnaire.py`:2584  (class)
 - `BoutonReponse` — `evenements.py`:1396  (class)
 - `BoutonRetirer` — `equipages.py`:590  (class)
-- `BoutonSiteEquipage` — `site_equipage.py`:1609  (class)
-- `BoutonStats` — `cadeaux.py`:712  (class)
+- `BoutonSiteEquipage` — `site_equipage.py`:1635  (class)
+- `BoutonStats` — `cadeaux.py`:767  (class)
 - `BoutonTableau` — `recrutements.py`:402  (class)
 - `BoutonVu` — `annonces.py`:316  (class)
 - `BoutonVu` — `evenements.py`:1413  (class)
 - `branche` — `tests/test_roblox_pings.py`:237  (def)
 - `branchee` — `candidature_site.py`:1438  (def)
 - `brancher` — `evenements.py`:338  (def)
-- `brancher_badges_chef` — `site_equipage.py`:803  (def)
+- `brancher_badges_chef` — `site_equipage.py`:814  (def)
 - `brancher_demo` — `outils/site_local_recrutement.py`:196  (def)
-- `brancher_evenements` — `affiches.py`:1408  (def)
-- `brancher_metiers` — `affiches.py`:112  (def)
+- `brancher_evenements` — `affiches.py`:1467  (def)
+- `brancher_hierarchie` — `affiches.py`:114  (def)
+- `brancher_metiers` — `affiches.py`:121  (def)
 - `brancher_metiers` — `zones.py`:255  (def)
 - `brancher_site_equipage` — `zones.py`:261  (def)
 - `Brouillon` — `annonces.py`:426  (class)
-- `Brouillon` — `cadeaux.py`:1812  (class)
+- `Brouillon` — `cadeaux.py`:1868  (class)
 - `brouillon` — `tests/test_evenements.py`:128  (def)
 - `bruit` — `outils/dessins_site.py`:2422  (def)
 - `build_alert_panel` — `raid_detector.py`:757  (def)
@@ -3760,125 +3940,126 @@
 - `build_ticket_manage_panel` — `tickets_enhance.py`:323  (def)
 - `bump` — `trust_system.py`:136  (def)
 - `But` — `vocaux.py`:28  (class)
-- `C` — `bot.py`:668  (class)
+- `C` — `bot.py`:672  (class)
 - `caches` — `tests/test_menage.py`:90  (def)
 - `cachet` — `outils/dessins_site.py`:1059  (def)
 - `cachet_pts` — `outils/dessins_site.py`:1046  (def)
-- `cadeaux_task` — `bot.py`:15182  (async def)
+- `cadeaux_task` — `bot.py`:15353  (async def)
 - `cadrer` — `colonnes.py`:21  (def)
 - `calame` — `outils/dessins_site.py`:1480  (def)
-- `AddStaffSelect.callback` — `bot.py`:10724  (method)
-- `BoostSupportButton.callback` — `bot.py`:24006  (method)
-- `BoutonActualiser.callback` — `cadeaux.py`:736  (method)
-- `BoutonAnciensSalons.callback` — `bot.py`:7598  (method)
-- `BoutonAnnulerConfig.callback` — `bot.py`:15330  (method)
-- `BoutonApercu.callback` — `questionnaire.py`:2597  (method)
-- `BoutonApprouverBot.callback` — `bot.py`:7247  (method)
-- `BoutonArchive.callback` — `bot.py`:14188  (method)
-- `BoutonArchives.callback` — `bot.py`:14901  (method)
-- `BoutonCadeaux.callback` — `cadeaux.py`:763  (method)
-- `BoutonCertifier.callback` — `entraide.py`:1342  (method)
-- `BoutonChercher.callback` — `cadeaux.py`:830  (method)
+- `AddStaffSelect.callback` — `bot.py`:10876  (method)
+- `BoostSupportButton.callback` — `bot.py`:24208  (method)
+- `BoutonActualiser.callback` — `cadeaux.py`:791  (method)
+- `BoutonAnciensSalons.callback` — `bot.py`:7744  (method)
+- `BoutonAnnulerConfig.callback` — `bot.py`:15501  (method)
+- `BoutonApercu.callback` — `questionnaire.py`:2633  (method)
+- `BoutonApprouverBot.callback` — `bot.py`:7393  (method)
+- `BoutonArchive.callback` — `bot.py`:14359  (method)
+- `BoutonArchives.callback` — `bot.py`:15072  (method)
+- `BoutonCadeaux.callback` — `cadeaux.py`:818  (method)
+- `BoutonCertifier.callback` — `entraide.py`:1355  (method)
+- `BoutonChercher.callback` — `cadeaux.py`:885  (method)
 - `BoutonComposer.callback` — `annonces.py`:800  (method)
 - `BoutonContre.callback` — `suggestions.py`:523  (method)
 - `BoutonDecision.callback` — `recrutements.py`:446  (method)
-- `BoutonEtape1.callback` — `questionnaire.py`:2544  (method)
-- `BoutonFermer.callback` — `entraide.py`:1366  (method)
-- `BoutonFicheSite.callback` — `bot.py`:7345  (method)
-- `BoutonGere.callback` — `bot.py`:7317  (method)
+- `BoutonEtape1.callback` — `questionnaire.py`:2580  (method)
+- `BoutonFermer.callback` — `entraide.py`:1379  (method)
+- `BoutonFicheSite.callback` — `bot.py`:7491  (method)
+- `BoutonGere.callback` — `bot.py`:7463  (method)
 - `BoutonGerer.callback` — `suggestions.py`:686  (method)
 - `BoutonLiens.callback` — `liens_jeux.py`:182  (method)
-- `BoutonMiddleman.callback` — `entraide.py`:1093  (method)
+- `BoutonMiddleman.callback` — `entraide.py`:1106  (method)
 - `BoutonModifier.callback` — `equipages.py`:582  (method)
 - `BoutonNotif.callback` — `notifs.py`:93  (method)
-- `BoutonNouvelle.callback` — `entraide.py`:946  (method)
-- `BoutonPage.callback` — `cadeaux.py`:795  (method)
-- `BoutonPage.callback` — `questionnaire.py`:2579  (method)
-- `BoutonParticipants.callback` — `cadeaux.py`:779  (method)
-- `BoutonParticiper.callback` — `cadeaux.py`:708  (method)
+- `BoutonNouvelle.callback` — `entraide.py`:959  (method)
+- `BoutonPage.callback` — `cadeaux.py`:850  (method)
+- `BoutonPage.callback` — `questionnaire.py`:2615  (method)
+- `BoutonParticipants.callback` — `cadeaux.py`:834  (method)
+- `BoutonParticiper.callback` — `cadeaux.py`:763  (method)
 - `BoutonPour.callback` — `suggestions.py`:509  (method)
 - `BoutonProposer.callback` — `suggestions.py`:466  (method)
 - `BoutonPublier.callback` — `equipages.py`:497  (method)
 - `BoutonQuestionnaire.callback` — `candidature_site.py`:880  (method)
-- `BoutonQuitter.callback` — `cadeaux.py`:749  (method)
+- `BoutonQuitter.callback` — `cadeaux.py`:804  (method)
 - `BoutonRecrutement.callback` — `equipages.py`:560  (method)
-- `BoutonRejoindre.callback` — `entraide.py`:1044  (method)
+- `BoutonRejoindre.callback` — `entraide.py`:1057  (method)
 - `BoutonRejoindre.callback` — `equipages.py`:519  (method)
-- `BoutonRepondre.callback` — `questionnaire.py`:2562  (method)
+- `BoutonRepondre.callback` — `questionnaire.py`:2598  (method)
 - `BoutonReponse.callback` — `evenements.py`:1409  (method)
 - `BoutonRetirer.callback` — `equipages.py`:600  (method)
-- `BoutonSiteEquipage.callback` — `site_equipage.py`:1621  (method)
-- `BoutonStats.callback` — `cadeaux.py`:722  (method)
+- `BoutonSiteEquipage.callback` — `site_equipage.py`:1647  (method)
+- `BoutonStats.callback` — `cadeaux.py`:777  (method)
 - `BoutonTableau.callback` — `recrutements.py`:414  (method)
 - `BoutonVu.callback` — `annonces.py`:328  (method)
 - `BoutonVu.callback` — `evenements.py`:1425  (method)
 - `ChoixBut.callback` — `vocaux.py`:120  (method)
-- `ChoixMetier.callback` — `metiers.py`:963  (method)
-- `ChoixParticipant.callback` — `cadeaux.py`:812  (method)
-- `DossierCompromisAncien.callback` — `bot.py`:20784  (method)
-- `DossierCompromisBouton.callback` — `bot.py`:20770  (method)
-- `EntraideRatingButton.callback` — `bot.py`:13002  (method)
-- `LangSelectButton.callback` — `bot.py`:32809  (method)
-- `LogsCategoriesSelect.callback` — `bot.py`:27411  (method)
-- `RadieAppelButton.callback` — `bot.py`:2689  (method)
-- `RadieDecisionButton.callback` — `bot.py`:2832  (method)
+- `ChoixMetier.callback` — `metiers.py`:1073  (method)
+- `ChoixParticipant.callback` — `cadeaux.py`:867  (method)
+- `DossierCompromisAncien.callback` — `bot.py`:20955  (method)
+- `DossierCompromisBouton.callback` — `bot.py`:20941  (method)
+- `EntraideRatingButton.callback` — `bot.py`:13174  (method)
+- `LangSelectButton.callback` — `bot.py`:33021  (method)
+- `LogsCategoriesSelect.callback` — `bot.py`:27617  (method)
+- `RadieAppelButton.callback` — `bot.py`:2693  (method)
+- `RadieDecisionButton.callback` — `bot.py`:2836  (method)
 - `RaidAlertButton.callback` — `raid_detector.py`:632  (method)
-- `RobloxPingButton.callback` — `bot.py`:32847  (method)
+- `RobloxPingButton.callback` — `bot.py`:33059  (method)
 - `SanctionDynamicButton.callback` — `staff_sanction.py`:226  (method)
-- `TicketCloseReasonSelect.callback` — `bot.py`:10998  (method)
-- `TicketCreateDynamic.callback` — `bot.py`:9148  (method)
-- `TicketFeedbackButton.callback` — `bot.py`:12916  (method)
-- `TicketHubGererDynamic.callback` — `bot.py`:9265  (method)
-- `TicketHubOpenDynamic.callback` — `bot.py`:9420  (method)
-- `TicketHubTypeDynamic.callback` — `bot.py`:9482  (method)
-- `TicketPrioritySelect.callback` — `bot.py`:10885  (method)
-- `TicketToggleDynamic.callback` — `bot.py`:9644  (method)
-- `TransferTicketSelect.callback` — `bot.py`:10773  (method)
-- `UnwarnSelect.callback` — `bot.py`:28037  (method)
+- `TicketCloseReasonSelect.callback` — `bot.py`:11150  (method)
+- `TicketCreateDynamic.callback` — `bot.py`:9297  (method)
+- `TicketFeedbackButton.callback` — `bot.py`:13088  (method)
+- `TicketHubGererDynamic.callback` — `bot.py`:9414  (method)
+- `TicketHubOpenDynamic.callback` — `bot.py`:9569  (method)
+- `TicketHubTypeDynamic.callback` — `bot.py`:9631  (method)
+- `TicketPrioritySelect.callback` — `bot.py`:11037  (method)
+- `TicketToggleDynamic.callback` — `bot.py`:9793  (method)
+- `TransferTicketSelect.callback` — `bot.py`:10925  (method)
+- `UnwarnSelect.callback` — `bot.py`:28243  (method)
 - `FauxNatif.cancel` — `tests/test_evenements.py`:46  (method)
 - `Local.candidat` — `tests/test_candidature_site.py`:78  (method)
 - `candidatures` — `recrutements.py`:352  (async def)
-- `candidatures_en_cours` — `tableau.py`:1356  (def)
+- `candidatures_en_cours` — `tableau.py`:1361  (def)
 - `capture_snapshot` — `observability.py`:197  (async def)
 - `carte` — `recrutements.py`:481  (def)
-- `carte_affiche` — `questionnaire.py`:2145  (def)
-- `carte_apercu` — `questionnaire.py`:2309  (def)
+- `carte_affiche` — `questionnaire.py`:2181  (def)
+- `carte_apercu` — `questionnaire.py`:2345  (def)
 - `carte_decision` — `recrutements.py`:470  (def)
 - `carte_embed` — `ui_v2.py`:278  (def)
-- `carte_etape` — `questionnaire.py`:2409  (def)
-- `carte_etape1` — `questionnaire.py`:2192  (def)
-- `carte_invitation` — `questionnaire.py`:2293  (def)
+- `carte_etape` — `questionnaire.py`:2445  (def)
+- `carte_etape1` — `questionnaire.py`:2228  (def)
+- `carte_invitation` — `questionnaire.py`:2329  (def)
 - `carte_texte` — `ui_v2.py`:335  (def)
 - `cartes` — `evenements.py`:1364  (async def)
 - `cartes` — `tests/test_boosts.py`:110  (def)
-- `cartes_casier` — `tableau.py`:1149  (def)
-- `cartes_etape2` — `questionnaire.py`:2249  (def)
+- `cartes_casier` — `tableau.py`:1154  (def)
+- `cartes_etape2` — `questionnaire.py`:2285  (def)
 - `Casier` — `tests/test_revue_reste.py`:255  (class)
 - `Base.casier_de` — `tests/test_casier.py`:75  (method)
 - `Site.catalogue` — `tests/test_site_v2_serveur.py`:179  (method)
-- `catalogue` — `affiches.py`:385  (async def)
+- `catalogue` — `affiches.py`:394  (async def)
 - `catalogue` — `outils/icones_rellseas.py`:1243  (def)
-- `catalogue_clan` — `affiches.py`:1432  (async def)
+- `catalogue_clan` — `affiches.py`:1491  (async def)
 - `Categorie` — `tests/faux_serveur.py`:234  (class)
 - `Categorie` — `tests/test_tickets_dossier.py`:149  (class)
 - `Monde.categorie` — `tests/faux_serveur.py`:298  (method)
-- `categorie_cible` — `entraide.py`:1752  (async def)
+- `categorie_cible` — `entraide.py`:1765  (async def)
 - `categorie_clan` — `zones.py`:949  (def)
-- `categorie_communautaire` — `entraide.py`:1744  (def)
+- `categorie_communautaire` — `entraide.py`:1757  (def)
 - `categorie_info` — `liens_jeux.py`:47  (def)
 - `Salon.category` — `tests/test_logs_site.py`:68  (method)
 - `Salon.category` — `tests/test_tickets_rellseas.py`:45  (method)
 - `cercle` — `outils/dessins_site.py`:320  (def)
-- `certifier` — `entraide.py`:1117  (async def)
+- `certifier` — `entraide.py`:1130  (async def)
 - `Banc.cfg` — `tests/test_questionnaire.py`:82  (method)
-- `BancTicket.cfg` — `tests/banc_ticket_recrutement.py`:411  (method)
+- `BancTicket.cfg` — `tests/banc_ticket_recrutement.py`:413  (method)
 - `_Socle.cfg` — `tests/test_activite_observation.py`:42  (method)
-- `cfg` — `bot.py`:1665  (async def)
+- `cfg` — `bot.py`:1669  (async def)
 - `Champ` — `entraide.py`:132  (class)
 - `Champ` — `equipages.py`:70  (class)
-- `chance` — `cadeaux.py`:633  (def)
+- `champs_avec_places` — `metiers.py`:516  (async def)
+- `chance` — `cadeaux.py`:688  (def)
 - `charger` — `annonces.py`:140  (async def)
-- `charger` — `cadeaux.py`:257  (async def)
+- `charger` — `cadeaux.py`:265  (async def)
 - `charger` — `entraide.py`:450  (async def)
 - `charger` — `equipages.py`:163  (async def)
 - `charger` — `evenements.py`:465  (async def)
@@ -3886,75 +4067,77 @@
 - `charger` — `ocr_scan.py`:91  (def)
 - `charger` — `suggestions.py`:282  (async def)
 - `charger` — `textes.py`:202  (async def)
-- `charger_actifs` — `cadeaux.py`:522  (async def)
-- `charger_depart` — `affiches.py`:395  (async def)
+- `charger_actifs` — `cadeaux.py`:577  (async def)
+- `charger_depart` — `affiches.py`:404  (async def)
 - `check` — `rate_limiter.py`:123  (def)
 - `check_and_record` — `rate_limiter.py`:161  (async def)
-- `check_badwords` — `bot.py`:5020  (def)
-- `check_caps` — `bot.py`:5257  (def)
-- `check_channel_cfg` — `bot.py`:6250  (def)
-- `check_dangerous_file` — `bot.py`:11616  (def)
-- `check_expired_restrictions` — `bot.py`:31619  (async def)
-- `check_expired_roles` — `bot.py`:31574  (async def)
-- `check_image` — `bot.py`:5269  (def)
-- `check_image_scam` — `bot.py`:5348  (def)
-- `check_invite` — `bot.py`:5127  (def)
-- `check_link` — `bot.py`:5058  (def)
-- `check_live_ended` — `bot.py`:19893  (async def)
-- `check_masked_links` — `bot.py`:11209  (def)
-- `check_mass_mention` — `bot.py`:5262  (def)
-- `check_mod_perm` — `bot.py`:27570  (async def)
-- `check_phishing` — `bot.py`:5222  (def)
-- `check_qr_code_scam` — `bot.py`:11662  (def)
-- `check_rate_limit` — `bot.py`:742  (def)
-- `check_reddit_feeds` — `bot.py`:30787  (async def)
-- `check_scam` — `bot.py`:5227  (def)
-- `check_shortener` — `bot.py`:11641  (def)
-- `check_social_feeds` — `bot.py`:29633  (async def)
-- `check_spam` — `bot.py`:5448  (async def)
-- `check_tiktok_feeds` — `bot.py`:30398  (async def)
-- `check_twitch_feeds` — `bot.py`:30231  (async def)
-- `check_twitter_feeds` — `bot.py`:30900  (async def)
-- `check_youtube_feeds` — `bot.py`:29797  (async def)
-- `chef_de` — `questionnaire.py`:4180  (async def)
-- `chef_dossier` — `questionnaire.py`:4436  (async def)
-- `chefs` — `questionnaire.py`:4158  (async def)
-- `chefs_site` — `questionnaire.py`:4392  (async def)
+- `check_badwords` — `bot.py`:5047  (def)
+- `check_caps` — `bot.py`:5284  (def)
+- `check_channel_cfg` — `bot.py`:6396  (def)
+- `check_dangerous_file` — `bot.py`:11768  (def)
+- `check_expired_restrictions` — `bot.py`:31831  (async def)
+- `check_expired_roles` — `bot.py`:31786  (async def)
+- `check_image` — `bot.py`:5296  (def)
+- `check_image_scam` — `bot.py`:5375  (def)
+- `check_invite` — `bot.py`:5154  (def)
+- `check_link` — `bot.py`:5085  (def)
+- `check_live_ended` — `bot.py`:20064  (async def)
+- `check_masked_links` — `bot.py`:11361  (def)
+- `check_mass_mention` — `bot.py`:5289  (def)
+- `check_mod_perm` — `bot.py`:27776  (async def)
+- `check_phishing` — `bot.py`:5249  (def)
+- `check_qr_code_scam` — `bot.py`:11814  (def)
+- `check_rate_limit` — `bot.py`:746  (def)
+- `check_reddit_feeds` — `bot.py`:30999  (async def)
+- `check_scam` — `bot.py`:5254  (def)
+- `check_shortener` — `bot.py`:11793  (def)
+- `check_social_feeds` — `bot.py`:29845  (async def)
+- `check_spam` — `bot.py`:5475  (async def)
+- `check_tiktok_feeds` — `bot.py`:30610  (async def)
+- `check_twitch_feeds` — `bot.py`:30443  (async def)
+- `check_twitter_feeds` — `bot.py`:31112  (async def)
+- `check_youtube_feeds` — `bot.py`:30009  (async def)
+- `chef_de` — `questionnaire.py`:4227  (async def)
+- `chef_dossier` — `questionnaire.py`:4483  (async def)
+- `chefs` — `questionnaire.py`:4205  (async def)
+- `chefs_site` — `questionnaire.py`:4439  (async def)
 - `chemin_rot` — `outils/dessins_site.py`:1685  (def)
 - `chemin_transforme` — `outils/dessins_site.py`:290  (def)
 - `CheminDuBot` — `outils/site_local_recrutement.py`:31  (class)
 - `cherche` — `mots_interdits.py`:95  (def)
 - `chercher` — `clan.py`:116  (def)
-- `chiffres` — `tableau.py`:623  (def)
-- `Banc.choisir` — `tests/test_metiers.py`:274  (method)
-- `choisir` — `metiers.py`:1029  (async def)
+- `chiffres` — `tableau.py`:628  (def)
+- `Banc.choisir` — `tests/test_metiers.py`:276  (method)
+- `choisir` — `metiers.py`:1139  (async def)
 - `choisir` — `vocaux.py`:167  (async def)
 - `ChoixBut` — `vocaux.py`:107  (class)
-- `ChoixMetier` — `metiers.py`:945  (class)
-- `ChoixParticipant` — `cadeaux.py`:799  (class)
+- `ChoixMetier` — `metiers.py`:1055  (class)
+- `ChoixParticipant` — `cadeaux.py`:854  (class)
 - `chronometrer` — `outils/banc_annees.py`:819  (async def)
 - `Cible` — `tests/test_salons_v2.py`:18  (class)
-- `citer_sur_affiche` — `questionnaire.py`:2762  (async def)
-- `TicketControlView.claim` — `bot.py`:10369  (method)
+- `citer_sur_affiche` — `questionnaire.py`:2798  (async def)
+- `TicketControlView.claim` — `bot.py`:10518  (method)
 - `Monde.clan_donnees` — `outils/site_maquette.py`:354  (method)
+- `classer` — `reponses_auto.py`:136  (def)
 - `cle_appareil` — `securite_site.py`:140  (def)
 - `cle_config` — `roblox_pings.py`:124  (def)
 - `cle_du_billet` — `roblox_pings.py`:119  (def)
-- `cle_hierarchie` — `site_equipage.py`:872  (def)
+- `cle_grade` — `hierarchie.py`:196  (def)
+- `cle_hierarchie` — `site_equipage.py`:883  (def)
 - `cle_mois` — `recrutements.py`:91  (def)
 - `cle_salon` — `notifs.py`:28  (def)
-- `SocialMediaManager.cleanup_all` — `social_media.py`:1511  (method)
-- `SocialMediaManager.cleanup_announcement` — `social_media.py`:1466  (method)
-- `cleanup_old_db_data` — `bot.py`:20813  (async def)
-- `ConfigCache.clear` — `bot.py`:628  (method)
+- `SocialMediaManager.cleanup_all` — `social_media.py`:1523  (method)
+- `SocialMediaManager.cleanup_announcement` — `social_media.py`:1478  (method)
+- `cleanup_old_db_data` — `bot.py`:20984  (async def)
+- `ConfigCache.clear` — `bot.py`:632  (method)
 - `_FauxArbre.clear_commands` — `tests/test_commandes_en_double.py`:158  (method)
-- `ClearAllConfirmView` — `bot.py`:27660  (class)
+- `ClearAllConfirmView` — `bot.py`:27866  (class)
 - `Client` — `outils/banc_annees.py`:829  (class)
 - `Client` — `tests/test_evenements_site.py`:67  (class)
 - `clore` — `clan.py`:73  (async def)
-- `clore_envoi` — `questionnaire.py`:3195  (async def)
-- `TicketControlView.close` — `bot.py`:10656  (method)
-- `DBPool.close_all` — `bot.py`:537  (method)
+- `clore_envoi` — `questionnaire.py`:3231  (async def)
+- `TicketControlView.close` — `bot.py`:10808  (method)
+- `DBPool.close_all` — `bot.py`:541  (method)
 - `close_reason_stats` — `tickets_enhance.py`:651  (async def)
 - `cloture_task` — `sondages.py`:492  (async def)
 - `code_de_vol` — `token_grabber.py`:108  (def)
@@ -3963,7 +4146,7 @@
 - `Base.cols` — `outils/banc_annees.py`:196  (method)
 - `Monde.combien` — `outils/banc_annees.py`:145  (method)
 - `_Groupe.command` — `tests/test_qui_peut_quoi.py`:861  (method)
-- `Brouillon.comme_cadeau` — `cadeaux.py`:1839  (method)
+- `Brouillon.comme_cadeau` — `cadeaux.py`:1895  (method)
 - `Db.commit` — `tests/test_optimisation.py`:55  (method)
 - `StubDB.commit` — `tests/conftest.py`:64  (method)
 - `_Db.commit` — `tests/test_recours_v2.py`:161  (method)
@@ -3971,49 +4154,51 @@
 - `communautaire` — `config_salons.py`:66  (def)
 - `communautaire` — `zones.py`:271  (def)
 - `completer` — `tickets_fils.py`:57  (async def)
-- `completer_droits` — `entraide.py`:1723  (async def)
+- `completer_droits` — `entraide.py`:1736  (async def)
 - `completer_faux_serveur` — `outils/site_local_port.py`:76  (def)
+- `completer_portrait` — `affiches.py`:1137  (async def)
 - `composants` — `annonces.py`:338  (def)
-- `composants_carte` — `cadeaux.py`:882  (def)
+- `composants_carte` — `cadeaux.py`:937  (def)
 - `compte` — `rellseas_panneau.py`:1141  (def)
 - `Monde.compte_casier` — `outils/site_maquette.py`:1152  (method)
-- `compte_en_vocal` — `cadeaux.py`:398  (def)
+- `compte_en_vocal` — `cadeaux.py`:453  (def)
 - `compter` — `diag.py`:45  (def)
 - `compter` — `recrutements.py`:376  (def)
 - `compter` — `securite_site.py`:164  (def)
 - `compter` — `tests/faux_serveur.py`:425  (def)
-- `compter_liste_noire` — `questionnaire.py`:4786  (async def)
-- `compter_ouvertes` — `entraide.py`:483  (async def)
-- `compter_regle` — `questionnaire.py`:4533  (async def)
+- `compter_liste_noire` — `questionnaire.py`:4833  (async def)
+- `compter_ouvertes` — `entraide.py`:496  (async def)
+- `compter_regle` — `questionnaire.py`:4580  (async def)
 - `compter_vues` — `annonces.py`:154  (async def)
 - `comptes` — `casier.py`:115  (async def)
 - `compteurs` — `securite_site.py`:169  (def)
 - `compute_retention` — `observability.py`:461  (async def)
-- `conf` — `entraide.py`:495  (async def)
+- `conf` — `entraide.py`:508  (async def)
 - `conf` — `equipages.py`:182  (async def)
 - `conf` — `tests/test_boosts.py`:116  (def)
 - `conf` — `zones.py`:275  (async def)
 - `config` — `activite.py`:127  (async def)
 - `config` — `roblox_news.py`:168  (async def)
-- `ConfigCache` — `bot.py`:593  (class)
-- `ConfigIllisible` — `bot.py`:1531  (class)
-- `configure_cmd` — `bot.py`:27218  (async def)
-- `ManualAdapter.configured` — `social_media.py`:322  (method)
-- `PlatformAdapter.configured` — `social_media.py`:274  (method)
-- `RSSHubAdapter.configured` — `social_media.py`:667  (method)
-- `TwitchAdapter.configured` — `social_media.py`:353  (method)
-- `YouTubeRSSAdapter.configured` — `social_media.py`:918  (method)
-- `SocialMediaManager.configured_platforms` — `social_media.py`:1151  (method)
+- `ConfigCache` — `bot.py`:597  (class)
+- `ConfigIllisible` — `bot.py`:1535  (class)
+- `configure_cmd` — `bot.py`:27424  (async def)
+- `ManualAdapter.configured` — `social_media.py`:343  (method)
+- `PlatformAdapter.configured` — `social_media.py`:295  (method)
+- `RSSHubAdapter.configured` — `social_media.py`:688  (method)
+- `TwitchAdapter.configured` — `social_media.py`:374  (method)
+- `YouTubeRSSAdapter.configured` — `social_media.py`:930  (method)
+- `SocialMediaManager.configured_platforms` — `social_media.py`:1163  (method)
 - `confirmer` — `publications.py`:66  (async def)
-- `ConfirmerAnciensSalons` — `bot.py`:7611  (class)
-- `ConfirmerArchives` — `bot.py`:14912  (class)
-- `ConfirmerIsolementV2` — `bot.py`:18711  (class)
+- `ConfirmerAnciensSalons` — `bot.py`:7757  (class)
+- `ConfirmerArchives` — `bot.py`:15083  (class)
+- `ConfirmerIsolementV2` — `bot.py`:18882  (class)
+- `connu` — `hierarchie.py`:147  (def)
 - `construire` — `outils/icones_rellseas.py`:1157  (def)
 - `construire` — `outils/site_local.py`:240  (async def)
 - `construire_actu` — `roblox_panneau.py`:271  (def)
 - `construire_app` — `health_server.py`:315  (def)
 - `container` — `ui_v2.py`:169  (def)
-- `conteneur` — `entraide.py`:529  (async def)
+- `conteneur` — `entraide.py`:542  (async def)
 - `conteneur` — `equipages.py`:207  (async def)
 - `Contexte` — `vocaux.py`:41  (class)
 - `contexte` — `candidature_site.py`:489  (async def)
@@ -4022,25 +4207,27 @@
 - `Monde.conversation` — `outils/site_maquette.py`:1261  (method)
 - `conversation` — `outils/site_local_port.py`:262  (def)
 - `conversation` — `outils/site_maquette.py`:1391  (async def)
-- `conversation` — `tableau.py`:1785  (async def)
+- `conversation` — `tableau.py`:1790  (async def)
 - `copie_recente` — `db_backup.py`:206  (def)
 - `copier_traces` — `outils/dessins_site.py`:3272  (def)
-- `Invalide.corps` — `affiches.py`:180  (method)
+- `Invalide.corps` — `affiches.py`:189  (method)
 - `Refus.corps` — `bannieres.py`:50  (method)
 - `corps_documentation` — `roblox_news_contenu.py`:678  (async def)
-- `corriger` — `questionnaire.py`:5859  (async def)
-- `couleur_du_role` — `metiers.py`:411  (def)
-- `count_user_tickets` — `bot.py`:6291  (async def)
-- `count_user_tickets_today` — `bot.py`:8165  (async def)
+- `corriger` — `questionnaire.py`:6105  (async def)
+- `couleur_du_role` — `metiers.py`:454  (def)
+- `count_user_tickets` — `bot.py`:6437  (async def)
+- `count_user_tickets_today` — `bot.py`:8311  (async def)
 - `coupe` — `bannieres.py`:74  (def)
+- `coupe_ici` — `reponses_auto.py`:303  (def)
 - `courir` — `tests/test_evenements.py`:59  (def)
+- `court` — `cadeaux.py`:416  (def)
 - `Guilde.create_category` — `tests/test_tickets_dossier.py`:164  (method)
 - `Monde.create_category` — `tests/faux_serveur.py`:345  (method)
 - `Monde.create_forum` — `tests/faux_serveur.py`:358  (method)
 - `FauxGuild.create_role` — `tests/test_off_radiation.py`:116  (method)
 - `Guilde.create_role` — `tests/conftest_discord.py`:117  (method)
 - `Monde.create_role` — `tests/faux_serveur.py`:350  (method)
-- `Serveur.create_role` — `tests/banc_ticket_recrutement.py`:224  (method)
+- `Serveur.create_role` — `tests/banc_ticket_recrutement.py`:225  (method)
 - `Serveur.create_role` — `tests/test_bouclier.py`:30  (method)
 - `Serveur.create_role` — `tests/test_metiers.py`:149  (method)
 - `Serveur.create_role` — `tests/test_revue_moderation.py`:182  (method)
@@ -4056,7 +4243,7 @@
 - `Message.create_thread` — `tests/faux_serveur.py`:175  (method)
 - `Salon.create_thread` — `tests/test_menage.py`:68  (method)
 - `Texte.create_thread` — `tests/faux_serveur.py`:225  (method)
-- `create_ticket` — `bot.py`:8777  (async def)
+- `create_ticket` — `bot.py`:8923  (async def)
 - `Monde.create_voice_channel` — `tests/faux_serveur.py`:361  (method)
 - `Fil.created_at` — `tests/test_menage.py`:44  (method)
 - `creer_salon` — `boosts.py`:139  (async def)
@@ -4066,34 +4253,36 @@
 - `custom_id` — `roblox_pings.py`:115  (def)
 - `daily_snapshot_task` — `observability.py`:761  (async def)
 - `dans` — `outils/dessins_site.py`:670  (def)
-- `dans_une_boucle` — `tests/test_textes.py`:103  (def)
-- `date_relative` — `social_media.py`:547  (def)
+- `dans_une_boucle` — `tests/test_textes.py`:104  (def)
+- `date_relative` — `social_media.py`:568  (def)
 - `Db` — `tests/test_optimisation.py`:26  (class)
 - `_Banc.db_get` — `tests/test_config_lost_update.py`:85  (method)
-- `db_get` — `bot.py`:1570  (async def)
-- `db_init` — `bot.py`:871  (async def)
-- `db_optimizer_task` — `bot.py`:32981  (async def)
-- `BancTicket.db_set` — `tests/banc_ticket_recrutement.py`:414  (method)
+- `db_get` — `bot.py`:1574  (async def)
+- `db_init` — `bot.py`:875  (async def)
+- `db_optimizer_task` — `bot.py`:33193  (async def)
+- `BancTicket.db_set` — `tests/banc_ticket_recrutement.py`:416  (method)
 - `_Socle.db_set` — `tests/test_activite_observation.py`:45  (method)
-- `db_set` — `bot.py`:1578  (async def)
+- `db_set` — `bot.py`:1582  (async def)
 - `_Banc.db_set_depuis_base` — `tests/test_config_lost_update.py`:108  (method)
 - `_Banc.db_set_depuis_cache` — `tests/test_config_lost_update.py`:102  (method)
-- `DBPool` — `bot.py`:447  (class)
+- `DBPool` — `bot.py`:451  (class)
 - `Casier.de` — `tests/test_revue_reste.py`:287  (method)
 - `deb_decorateurs` — `outils/purge_commandes.py`:72  (def)
 - `debut_de_mois` — `activite_calendrier.py`:110  (def)
 - `debut_de_semaine` — `activite_calendrier.py`:83  (def)
 - `debut_du_jour` — `activite_calendrier.py`:59  (def)
-- `decidees` — `questionnaire.py`:5958  (async def)
+- `decidees` — `questionnaire.py`:6204  (async def)
 - `Banc.decider` — `tests/test_questionnaire.py`:122  (method)
+- `decider` — `reponses_auto.py`:182  (def)
 - `decider` — `suggestions.py`:564  (async def)
-- `decider_chef` — `questionnaire.py`:4279  (async def)
+- `decider_chef` — `questionnaire.py`:4326  (async def)
 - `decision` — `recrutements.py`:286  (def)
+- `decision_relance` — `questionnaire.py`:4920  (def)
 - `declare` — `textes.py`:144  (def)
 - `declarer` — `textes.py`:110  (def)
 - `declares` — `outils/controle_imports.py`:29  (def)
 - `deescalate_task` — `recidivism.py`:527  (async def)
-- `default_template` — `social_media.py`:1610  (def)
+- `default_template` — `social_media.py`:1622  (def)
 - `defaut` — `textes.py`:148  (def)
 - `FausseReponse.defer` — `tests/test_panneaux_interaction.py`:98  (method)
 - `FausseReponse.defer` — `tests/test_rellseas.py`:223  (method)
@@ -4102,7 +4291,7 @@
 - `Reponse.defer` — `tests/test_qui_peut_quoi.py`:175  (method)
 - `Reponse.defer` — `tests/test_revue_admin.py`:89  (method)
 - `_Reponse.defer` — `tests/test_candidature_site.py`:541  (method)
-- `definir_metiers` — `affiches.py`:927  (async def)
+- `definir_metiers` — `affiches.py`:953  (async def)
 - `deja` — `publications.py`:93  (async def)
 - `deja_publie` — `roblox_news.py`:908  (async def)
 - `Categorie.delete` — `tests/faux_serveur.py`:250  (method)
@@ -4110,8 +4299,8 @@
 - `FauxMessage.delete` — `tests/test_installation_auto.py`:102  (method)
 - `Fil.delete` — `tests/faux_serveur.py`:93  (method)
 - `Fil.delete` — `tests/test_menage.py`:47  (method)
-- `FilTicket.delete` — `tests/banc_ticket_recrutement.py`:131  (method)
-- `MessageFil.delete` — `tests/banc_ticket_recrutement.py`:94  (method)
+- `FilTicket.delete` — `tests/banc_ticket_recrutement.py`:132  (method)
+- `MessageFil.delete` — `tests/banc_ticket_recrutement.py`:95  (method)
 - `Msg.delete` — `tests/test_boosts.py`:31  (method)
 - `Msg.delete` — `tests/test_menage.py`:34  (method)
 - `Msg.delete` — `tests/test_sondages.py`:85  (method)
@@ -4123,27 +4312,28 @@
 - `_Fil.delete` — `tests/test_revue_tickets.py`:167  (method)
 - `_Role.delete` — `tests/test_activite_demontage.py`:43  (method)
 - `_Salon.delete` — `tests/test_activite_demontage.py`:75  (method)
-- `Inter.delete_original_response` — `tests/banc_ticket_recrutement.py`:267  (method)
+- `Inter.delete_original_response` — `tests/banc_ticket_recrutement.py`:268  (method)
 - `Inter.delete_original_response` — `tests/test_questionnaire.py`:188  (method)
 - `delete_template` — `tickets_enhance.py`:503  (async def)
 - `delete_webhook` — `webhook_tracker.py`:216  (async def)
 - `demande_valeurs` — `tests/test_entraide.py`:75  (def)
+- `demandes_aide` — `entraide.py`:483  (async def)
 - `demarrer` — `candidature_site.py`:331  (async def)
-- `demarrer` — `questionnaire.py`:4839  (async def)
+- `demarrer` — `questionnaire.py`:4886  (async def)
 - `demarrer` — `recrutements.py`:556  (def)
 - `demarrer` — `sondages.py`:510  (def)
 - `demenager` — `equipages.py`:727  (async def)
 - `demenager` — `suggestions.py`:181  (async def)
 - `demenager_clan` — `zones.py`:1069  (async def)
 - `demonter` — `activite_demontage.py`:318  (async def)
-- `depart` — `site_equipage.py`:452  (def)
+- `depart` — `site_equipage.py`:457  (def)
 - `deplacer` — `annonces.py`:913  (async def)
 - `deplacer` — `outils/dessins_site.py`:2074  (def)
-- `depuis_fichier` — `questionnaire.py`:1298  (def)
+- `depuis_fichier` — `questionnaire.py`:1334  (def)
 - `dernier_jour_actif` — `activite.py`:188  (async def)
 - `derniere_carte` — `tests/test_evenements.py`:161  (def)
-- `derniere_etape` — `questionnaire.py`:5054  (def)
-- `derniere_selection` — `questionnaire.py`:1464  (async def)
+- `derniere_etape` — `questionnaire.py`:5300  (def)
+- `derniere_selection` — `questionnaire.py`:1500  (async def)
 - `description` — `activite_calendrier.py`:136  (def)
 - `Dessin` — `outils/dessins_site.py`:503  (class)
 - `dessin_affiche` — `outils/dessins_site.py`:2898  (def)
@@ -4160,54 +4350,55 @@
 - `dessin_sceau` — `outils/dessins_site.py`:2154  (def)
 - `dessin_symbole_prime` — `outils/dessins_site.py`:2358  (def)
 - `dessin_tampon` — `outils/dessins_site.py`:2212  (def)
-- `dessiner_banniere` — `site_vitrine.py`:672  (def)
+- `dessiner_banniere` — `site_vitrine.py`:769  (def)
 - `dessiner_icones_app` — `outils/site_maquette.py`:3181  (def)
 - `destinations` — `annonces.py`:250  (def)
 - `destinations` — `evenements.py`:557  (def)
-- `detect_alt_account` — `bot.py`:11799  (async def)
+- `detect_alt_account` — `bot.py`:11971  (async def)
 - `detect_anomalies` — `observability.py`:337  (async def)
-- `detect_injection_attempt` — `bot.py`:812  (def)
+- `detect_injection_attempt` — `bot.py`:816  (def)
 - `diagnostic` — `roblox_news.py`:1050  (async def)
-- `diffuser_candidat` — `tableau.py`:4080  (def)
+- `diffuser_candidat` — `tableau.py`:4106  (def)
 - `direct` — `outils/site_maquette.py`:3074  (async def)
-- `direct` — `tableau.py`:3956  (async def)
-- `direct_ecrit` — `tableau.py`:4063  (def)
-- `direction_cmd` — `bot.py`:28233  (async def)
-- `distance` — `questionnaire.py`:862  (def)
+- `direct` — `tableau.py`:3982  (async def)
+- `direct_ecrit` — `tableau.py`:4089  (def)
+- `direction_cmd` — `bot.py`:28439  (async def)
+- `distance` — `questionnaire.py`:898  (def)
 - `dit` — `tests/test_sondages.py`:127  (def)
 - `divider` — `ui_v2.py`:140  (def)
-- `domaine_officiel` — `bot.py`:11275  (def)
+- `domaine_officiel` — `bot.py`:11427  (def)
 - `Local.donnees` — `tests/test_longevite.py`:462  (method)
 - `Local.donnees` — `tests/test_site_v2_port.py`:120  (method)
 - `Monde.donnees` — `outils/site_maquette.py`:1172  (method)
 - `donnees` — `outils/site_maquette.py`:1370  (async def)
-- `donnees` — `site_vitrine.py`:435  (async def)
-- `donnees` — `tableau.py`:1366  (async def)
-- `donner_aux_affiches` — `metiers.py`:861  (async def)
-- `dossier` — `questionnaire.py`:5725  (async def)
+- `donnees` — `site_vitrine.py`:532  (async def)
+- `donnees` — `tableau.py`:1371  (async def)
+- `donner_aux_affiches` — `metiers.py`:971  (async def)
+- `dossier` — `questionnaire.py`:5971  (async def)
 - `dossier` — `tests/test_logs_config_sure.py`:14  (def)
-- `dossier_site` — `tableau.py`:2574  (def)
-- `DossierCompromisAncien` — `bot.py`:20774  (class)
-- `DossierCompromisBouton` — `bot.py`:20759  (class)
+- `dossier_site` — `tableau.py`:2597  (def)
+- `DossierCompromisAncien` — `bot.py`:20945  (class)
+- `DossierCompromisBouton` — `bot.py`:20930  (class)
 - `Droits` — `tests/faux_serveur.py`:179  (class)
 - `droits` — `equipages.py`:764  (def)
 - `droits_membres` — `sondages.py`:167  (def)
-- `droits_salon` — `cadeaux.py`:1780  (def)
-- `droits_zone` — `entraide.py`:1711  (def)
+- `droits_salon` — `cadeaux.py`:1836  (def)
+- `droits_zone` — `entraide.py`:1724  (def)
 - `du_candidat` — `recrutements.py`:266  (async def)
-- `du_clan` — `questionnaire.py`:3897  (async def)
-- `du_membre` — `questions.py`:249  (async def)
-- `DurationConfigModal` — `bot.py`:18409  (class)
-- `duree_txt` — `cadeaux.py`:680  (def)
+- `du_clan` — `questionnaire.py`:3944  (async def)
+- `du_membre` — `questions.py`:296  (async def)
+- `DurationConfigModal` — `bot.py`:18580  (class)
+- `duree_txt` — `cadeaux.py`:735  (def)
 - `ecarts` — `tests/test_evenements_site.py`:186  (def)
 - `ecarts` — `tests/test_site_v2_port.py`:321  (def)
 - `echue` — `roblox_news.py`:363  (async def)
-- `eclaireur_actu_task` — `bot.py`:15800  (async def)
+- `eclaireur_actu_task` — `bot.py`:15971  (async def)
 - `Local.ecrire` — `tests/test_candidature_site.py`:97  (method)
 - `Local.ecrire` — `tests/test_site_equipage.py`:79  (method)
 - `Monde.ecrire` — `tests/test_vigilance.py`:83  (method)
 - `Site.ecrire` — `tests/test_site_v2_serveur.py`:192  (method)
-- `ecrire` — `tests/test_textes.py`:93  (def)
+- `ecrire` — `tests/test_textes.py`:94  (def)
+- `ecrire` — `tests/test_tickets_interdits.py`:81  (async def)
 - `ecrire` — `textes.py`:392  (async def)
 - `ecrire_affiche` — `outils/dessins_site.py`:2958  (def)
 - `ecrire_catalogue` — `outils/icones_rellseas.py`:1260  (def)
@@ -4232,16 +4423,16 @@
 - `FauxMembre.edit` — `tests/test_off_radiation.py`:97  (method)
 - `FauxNatif.edit` — `tests/test_evenements.py`:43  (method)
 - `Fil.edit` — `tests/faux_serveur.py`:76  (method)
-- `Fil.edit` — `tests/test_metiers.py`:860  (method)
+- `Fil.edit` — `tests/test_metiers.py`:862  (method)
 - `Membre.edit` — `tests/test_qui_peut_quoi.py`:143  (method)
 - `Membre.edit` — `tests/test_revue_moderation.py`:151  (method)
-- `MessageFil.edit` — `tests/banc_ticket_recrutement.py`:88  (method)
+- `MessageFil.edit` — `tests/banc_ticket_recrutement.py`:89  (method)
 - `Msg.edit` — `tests/test_boosts.py`:37  (method)
 - `Partiel.edit` — `tests/conftest_discord.py`:39  (method)
 - `Partiel.edit` — `tests/faux_serveur.py`:16  (method)
 - `PostArchive.edit` — `tests/test_revue_reste.py`:621  (method)
 - `Rangeable.edit` — `tests/faux_serveur.py`:123  (method)
-- `Role.edit` — `tests/test_textes.py`:298  (method)
+- `Role.edit` — `tests/test_textes.py`:299  (method)
 - `Salon.edit` — `tests/conftest_discord.py`:82  (method)
 - `Salon.edit` — `tests/test_logs_site.py`:80  (method)
 - `Salon.edit` — `tests/test_tickets_dossier.py`:144  (method)
@@ -4258,22 +4449,22 @@
 - `FausseInteraction.edit_original_response` — `tests/test_configure_social.py`:173  (method)
 - `FausseInteraction.edit_original_response` — `tests/test_panneaux_interaction.py`:124  (method)
 - `FausseInteraction.edit_original_response` — `tests/test_rellseas.py`:246  (method)
-- `Inter.edit_original_response` — `tests/banc_ticket_recrutement.py`:270  (method)
+- `Inter.edit_original_response` — `tests/banc_ticket_recrutement.py`:271  (method)
 - `Interaction.edit_original_response` — `tests/test_revue_admin.py`:106  (method)
 - `Serveur.edit_role_positions` — `tests/test_metiers.py`:163  (method)
-- `EditPanelSelectViewV2` — `bot.py`:21046  (class)
+- `EditPanelSelectViewV2` — `bot.py`:21217  (class)
 - `effacer_membre` — `casier.py`:141  (async def)
-- `effectifs` — `metiers.py`:699  (async def)
+- `effectifs` — `metiers.py`:809  (async def)
 - `el` — `outils/icones_rellseas.py`:119  (def)
-- `elaguer` — `cadeaux.py`:1309  (async def)
+- `elaguer` — `cadeaux.py`:1364  (async def)
 - `Monde.element` — `outils/site_maquette.py`:792  (method)
-- `eliminatoire` — `questionnaire.py`:3788  (def)
-- `eliminer` — `questionnaire.py`:3801  (async def)
+- `eliminatoire` — `questionnaire.py`:3835  (def)
+- `eliminer` — `questionnaire.py`:3848  (async def)
 - `ellipse` — `outils/dessins_site.py`:325  (def)
-- `_ErreursInteractions.emit` — `bot.py`:15058  (method)
+- `_ErreursInteractions.emit` — `bot.py`:15229  (method)
 - `empreinte_site` — `outils/site_maquette.py`:114  (def)
-- `empreinte_site` — `tableau.py`:1996  (def)
-- `en_cartes` — `entraide.py`:545  (def)
+- `empreinte_site` — `tableau.py`:2001  (def)
+- `en_cartes` — `entraide.py`:558  (def)
 - `en_cartes` — `equipages.py`:222  (def)
 - `en_cours` — `recrutements.py`:329  (async def)
 - `encrer` — `outils/dessins_site.py`:2815  (def)
@@ -4282,26 +4473,27 @@
 - `enfiler_actu` — `roblox_news.py`:1099  (async def)
 - `enforce_on_message` — `recidivism.py`:406  (async def)
 - `enregistrer` — `recrutements.py`:129  (async def)
-- `enregistrer_gabarit_chef` — `questionnaire.py`:4053  (async def)
-- `enregistrer_liens` — `questionnaire.py`:5543  (async def)
-- `enregistrer_modele` — `questionnaire.py`:5607  (async def)
-- `enregistrer_parcours` — `questionnaire.py`:1621  (async def)
-- `enregistrer_question` — `questionnaire.py`:5453  (async def)
-- `enregistrer_question_chef` — `questionnaire.py`:3951  (async def)
-- `enregistrer_reglages` — `questionnaire.py`:5587  (async def)
+- `enregistrer_gabarit_chef` — `questionnaire.py`:4100  (async def)
+- `enregistrer_liens` — `questionnaire.py`:5789  (async def)
+- `enregistrer_modele` — `questionnaire.py`:5853  (async def)
+- `enregistrer_parcours` — `questionnaire.py`:1657  (async def)
+- `enregistrer_question` — `questionnaire.py`:5699  (async def)
+- `enregistrer_question_chef` — `questionnaire.py`:3998  (async def)
+- `enregistrer_reglages` — `questionnaire.py`:5833  (async def)
 - `enrichir_billet` — `roblox_news_contenu.py`:527  (async def)
 - `ensure_channel` — `staff_sanction.py`:134  (async def)
 - `entete` — `colonnes.py`:39  (def)
-- `entraide_task` — `bot.py`:14627  (async def)
-- `EntraidePanelV2` — `entraide.py`:1936  (class)
-- `EntraideRatingButton` — `bot.py`:12989  (class)
+- `entraide_task` — `bot.py`:14798  (async def)
+- `EntraidePanelV2` — `entraide.py`:1949  (class)
+- `EntraideRatingButton` — `bot.py`:13161  (class)
 - `Monde.entree` — `outils/site_maquette.py`:459  (method)
 - `entree` — `candidature_site.py`:961  (async def)
-- `entree` — `tableau.py`:1636  (async def)
+- `entree` — `tableau.py`:1641  (async def)
+- `entree_liste_noire` — `questionnaire.py`:3719  (async def)
 - `Local.entrer` — `tests/test_candidature_site.py`:62  (method)
 - `Local.entrer` — `tests/test_site_equipage.py`:55  (method)
-- `FilTicket.entrer_par_mention` — `tests/banc_ticket_recrutement.py`:116  (method)
-- `entretenir` — `entraide.py`:1450  (async def)
+- `FilTicket.entrer_par_mention` — `tests/banc_ticket_recrutement.py`:117  (method)
+- `entretenir` — `entraide.py`:1463  (async def)
 - `entretenir` — `equipages.py`:866  (async def)
 - `entretenir` — `invitations.py`:170  (async def)
 - `entretenir` — `websub_youtube.py`:84  (async def)
@@ -4316,6 +4508,7 @@
 - `env` — `tests/test_evenements.py`:66  (def)
 - `env` — `tests/test_invitations.py`:21  (def)
 - `env` — `tests/test_liens_jeux.py`:21  (def)
+- `env` — `tests/test_reponses_auto.py`:41  (def)
 - `env` — `tests/test_revue_cadeaux.py`:32  (def)
 - `env` — `tests/test_revue_reste.py`:79  (def)
 - `env` — `tests/test_site_entraide.py`:21  (def)
@@ -4323,52 +4516,53 @@
 - `env` — `tests/test_suggestions.py`:18  (def)
 - `env` — `tests/test_zones.py`:47  (def)
 - `envoi_complet` — `candidature_site.py`:411  (async def)
-- `_Prise.envoyer` — `tableau.py`:3533  (method)
-- `envoyer` — `questionnaire.py`:3373  (async def)
-- `envoyer_etape` — `questionnaire.py`:5080  (async def)
+- `_Prise.envoyer` — `tableau.py`:3559  (method)
+- `envoyer` — `questionnaire.py`:3409  (async def)
+- `envoyer_etape` — `questionnaire.py`:5326  (async def)
 - `envoyer_lien` — `recrutements.py`:418  (async def)
-- `envoyer_lien` — `site_equipage.py`:1595  (async def)
+- `envoyer_lien` — `site_equipage.py`:1621  (async def)
 - `envoyer_lien_envoi` — `candidature_site.py`:859  (async def)
-- `envoyer_tout` — `questionnaire.py`:5112  (async def)
-- `epargne` — `metiers.py`:336  (async def)
+- `envoyer_tout` — `questionnaire.py`:5358  (async def)
+- `epargne` — `metiers.py`:379  (async def)
 - `Monde.equipe` — `outils/site_maquette.py`:1131  (method)
-- `equipes_direction` — `site_equipage.py`:924  (async def)
-- `equipes_lues` — `site_equipage.py`:947  (async def)
+- `equipes_direction` — `site_equipage.py`:935  (async def)
+- `equipes_lues` — `site_equipage.py`:958  (async def)
 - `error` — `diag.py`:92  (def)
-- `espace_du_bot` — `tests/banc_ticket_recrutement.py`:277  (def)
-- `est_affiche` — `questionnaire.py`:2792  (async def)
+- `espace_du_bot` — `tests/banc_ticket_recrutement.py`:278  (def)
+- `est_affiche` — `questionnaire.py`:2828  (async def)
 - `est_chef` — `candidature_site.py`:473  (def)
 - `est_clan` — `config_salons.py`:137  (def)
 - `est_exclamation_libre` — `mots_interdits.py`:63  (def)
-- `est_inscrit` — `cadeaux.py`:330  (async def)
+- `est_inscrit` — `cadeaux.py`:338  (async def)
 - `est_point_entree` — `outils/purge_runtimes.py`:46  (def)
 - `est_pointeur` — `roblox_news_contenu.py`:384  (def)
-- `est_question` — `questions.py`:77  (def)
+- `est_question` — `questions.py`:106  (def)
 - `est_racine` — `outils/purge_commandes.py`:85  (def)
 - `est_salutation` — `salutations.py`:50  (def)
 - `est_staff` — `sondages.py`:123  (def)
 - `est_staff` — `suggestions.py`:84  (def)
 - `et` — `outils/dessins_site.py`:689  (def)
-- `etape1_bouton` — `questionnaire.py`:4860  (async def)
-- `etape_de_question` — `questionnaire.py`:5046  (def)
-- `etape_recue` — `questionnaire.py`:3229  (async def)
-- `etape_suivante` — `questionnaire.py`:3248  (async def)
+- `etape1_bouton` — `questionnaire.py`:5106  (async def)
+- `etape_de_question` — `questionnaire.py`:5292  (def)
+- `etape_recue` — `questionnaire.py`:3265  (async def)
+- `etape_suivante` — `questionnaire.py`:3284  (async def)
 - `etapes_de` — `candidature_site.py`:428  (def)
-- `etapes_de` — `questionnaire.py`:1757  (def)
-- `etat` — `cadeaux.py`:1380  (async def)
+- `etapes_de` — `questionnaire.py`:1793  (def)
+- `etat` — `cadeaux.py`:1435  (async def)
 - `etat` — `compactage.py`:58  (async def)
-- `etat` — `metiers.py`:1197  (async def)
+- `etat` — `metiers.py`:1338  (async def)
 - `etat` — `ocr_scan.py`:101  (def)
+- `etat` — `tickets_interdits.py`:295  (async def)
 - `etat` — `websub_youtube.py`:188  (def)
 - `etat_direct` — `candidature_site.py`:1372  (async def)
 - `etat_file_actu` — `roblox_news.py`:1227  (async def)
 - `Monde.etat_nettoyage` — `outils/site_maquette.py`:1028  (method)
-- `etat_nettoyage` — `tableau.py`:2845  (async def)
+- `etat_nettoyage` — `tableau.py`:2871  (async def)
 - `etat_stockage` — `longevite.py`:827  (async def)
-- `etiquettes_a_jour` — `entraide.py`:1816  (def)
+- `etiquettes_a_jour` — `entraide.py`:1829  (def)
 - `etoile_pts` — `outils/dessins_site.py`:356  (def)
 - `evenement` — `tests/test_evenements.py`:134  (def)
-- `evenements_task` — `bot.py`:15244  (async def)
+- `evenements_task` — `bot.py`:15415  (async def)
 - `event` — `diag.py`:83  (def)
 - `event_loop` — `tests/conftest.py`:98  (def)
 - `EventType` — `unified_logger.py`:49  (class)
@@ -4376,7 +4570,7 @@
 - `Monde.evt_site` — `outils/site_maquette.py`:933  (method)
 - `examiner` — `vigilance.py`:102  (async def)
 - `examiner_entree` — `securite_site.py`:306  (def)
-- `exclu` — `cadeaux.py`:623  (def)
+- `exclu` — `cadeaux.py`:678  (def)
 - `Db.execute` — `tests/test_optimisation.py`:30  (method)
 - `StubDB.execute` — `tests/conftest.py`:58  (method)
 - `_Db.execute` — `tests/test_recours_v2.py`:158  (method)
@@ -4386,19 +4580,19 @@
 - `_Proxy.executemany` — `tests/test_revue_cadeaux.py`:110  (method)
 - `Champ.exemple` — `entraide.py`:146  (method)
 - `existe` — `tickets_fils.py`:154  (async def)
-- `expire_h` — `entraide.py`:562  (def)
+- `expire_h` — `entraide.py`:575  (def)
 - `export` — `outils/site_maquette.py`:1417  (async def)
-- `export` — `tableau.py`:1802  (async def)
+- `export` — `tableau.py`:1807  (async def)
 - `export_task` — `recrutements.py`:541  (async def)
 - `exporter` — `recrutements.py`:521  (async def)
-- `exporter` — `tableau.py`:1541  (async def)
+- `exporter` — `tableau.py`:1546  (async def)
 - `exports` — `outils/controle_imports.py`:58  (def)
-- `extraire_channel_id` — `social_media.py`:515  (def)
+- `extraire_channel_id` — `social_media.py`:536  (def)
 - `extraire_essentiel` — `roblox_news_contenu.py`:245  (def)
 - `extraire_images` — `roblox_news_contenu.py`:293  (def)
 - `extraire_videos` — `roblox_news_contenu.py`:350  (def)
 - `extraire_videos_fichiers` — `roblox_news_contenu.py`:367  (def)
-- `extrait` — `questionnaire.py`:1000  (def)
+- `extrait` — `questionnaire.py`:1036  (def)
 - `Fabrique` — `tests/test_questions.py`:39  (class)
 - `fabriquer` — `outils/affiche_recrutement.py`:122  (def)
 - `Local.faire` — `tests/test_candidature_site.py`:59  (method)
@@ -4406,8 +4600,8 @@
 - `Local.faire` — `tests/test_site_equipage.py`:52  (method)
 - `Local.faire` — `tests/test_site_v2_port.py`:92  (method)
 - `Monde.faire` — `tests/test_site_moderation.py`:123  (method)
+- `famille` — `tickets_interdits.py`:143  (def)
 - `famille_de` — `outils/inventaire_evenements.py`:86  (def)
-- `faq_env` — `tests/test_faq_tickets.py`:79  (def)
 - `FausseGuilde` — `tests/test_tickets_fils.py`:85  (class)
 - `FausseInteraction` — `tests/test_configure_social.py`:156  (class)
 - `FausseInteraction` — `tests/test_panneaux_interaction.py`:112  (class)
@@ -4448,17 +4642,17 @@
 - `FauxUser` — `tests/test_panneaux_interaction.py`:148  (class)
 - `FauxUser` — `tests/test_rellseas.py`:209  (class)
 - `FauxUtilisateur` — `tests/test_off_radiation.py`:592  (class)
-- `RSSHubAdapter.feed_url` — `social_media.py`:678  (method)
-- `YouTubeRSSAdapter.feed_url` — `social_media.py`:921  (method)
+- `RSSHubAdapter.feed_url` — `social_media.py`:699  (method)
+- `YouTubeRSSAdapter.feed_url` — `social_media.py`:933  (method)
 - `Client.fermer` — `outils/banc_annees.py`:843  (method)
-- `fermer` — `entraide.py`:1176  (async def)
-- `fermer_anciennes` — `entraide.py`:1580  (async def)
-- `fermer_sessions` — `tableau.py`:577  (async def)
-- `fetch_avatar_url` — `bot.py`:1461  (async def)
+- `fermer` — `entraide.py`:1189  (async def)
+- `fermer_anciennes` — `entraide.py`:1593  (async def)
+- `fermer_sessions` — `tableau.py`:582  (async def)
+- `fetch_avatar_url` — `bot.py`:1465  (async def)
 - `FausseGuilde.fetch_channel` — `tests/test_tickets_fils.py`:102  (method)
 - `Monde.fetch_channel` — `tests/faux_serveur.py`:333  (method)
 - `_Guilde.fetch_channel` — `tests/test_revue_tickets.py`:136  (method)
-- `FilTicket.fetch_members` — `tests/banc_ticket_recrutement.py`:124  (method)
+- `FilTicket.fetch_members` — `tests/banc_ticket_recrutement.py`:125  (method)
 - `FilTicket.fetch_members` — `tests/test_tickets_visibles.py`:54  (method)
 - `Fil.fetch_message` — `tests/faux_serveur.py`:59  (method)
 - `Salon.fetch_message` — `tests/conftest_discord.py`:77  (method)
@@ -4466,10 +4660,10 @@
 - `Salon.fetch_message` — `tests/test_tickets_rellseas.py`:60  (method)
 - `SalonB.fetch_message` — `tests/test_boosts.py`:60  (method)
 - `Texte.fetch_message` — `tests/faux_serveur.py`:206  (method)
-- `ManualAdapter.fetch_posts` — `social_media.py`:325  (method)
-- `PlatformAdapter.fetch_posts` — `social_media.py`:287  (method)
-- `RSSHubAdapter.fetch_posts` — `social_media.py`:781  (method)
-- `TwitchAdapter.fetch_posts` — `social_media.py`:390  (method)
+- `ManualAdapter.fetch_posts` — `social_media.py`:346  (method)
+- `PlatformAdapter.fetch_posts` — `social_media.py`:308  (method)
+- `RSSHubAdapter.fetch_posts` — `social_media.py`:793  (method)
+- `TwitchAdapter.fetch_posts` — `social_media.py`:411  (method)
 - `_Adaptateur.fetch_posts` — `tests/test_social_sans_gel.py`:97  (method)
 - `Serveur.fetch_roles` — `tests/test_metiers.py`:160  (method)
 - `_Curseur.fetchall` — `tests/test_activite_observation.py`:60  (method)
@@ -4480,22 +4674,22 @@
 - `fibres` — `outils/dessins_site.py`:2457  (def)
 - `Local.fiche` — `tests/test_site_v2_port.py`:123  (method)
 - `Monde.fiche` — `outils/site_maquette.py`:1226  (method)
-- `fiche` — `tableau.py`:1435  (async def)
-- `fiche_du_panneau` — `questionnaire.py`:1519  (def)
-- `fiche_effective` — `questionnaire.py`:1535  (def)
-- `fiche_ouverture` — `questionnaire.py`:3824  (async def)
-- `fiches_clan` — `affiches.py`:1382  (async def)
+- `fiche` — `tableau.py`:1440  (async def)
+- `fiche_du_panneau` — `questionnaire.py`:1555  (def)
+- `fiche_effective` — `questionnaire.py`:1571  (def)
+- `fiche_ouverture` — `questionnaire.py`:3869  (async def)
+- `fiches_clan` — `affiches.py`:1441  (async def)
 - `Brouillon.fichier` — `annonces.py`:445  (method)
-- `Brouillon.fichier` — `cadeaux.py`:1836  (method)
+- `Brouillon.fichier` — `cadeaux.py`:1892  (method)
 - `fichier` — `visuels.py`:147  (def)
 - `Fil` — `tests/faux_serveur.py`:25  (class)
 - `Fil` — `tests/test_menage.py`:38  (class)
-- `Fil` — `tests/test_metiers.py`:848  (class)
+- `Fil` — `tests/test_metiers.py`:850  (class)
 - `fil_du_jour` — `nettoyage.py`:40  (async def)
 - `FilPorte` — `tests/test_tickets_fils.py`:464  (class)
 - `FiltreLogging.filter` — `journal.py`:130  (method)
-- `_ResumeurPasserelle.filter` — `bot.py`:33587  (method)
-- `FilTicket` — `tests/banc_ticket_recrutement.py`:98  (class)
+- `_ResumeurPasserelle.filter` — `bot.py`:33799  (method)
+- `FilTicket` — `tests/banc_ticket_recrutement.py`:99  (class)
 - `FilTicket` — `tests/test_tickets_visibles.py`:28  (class)
 - `filtre` — `casier.py`:74  (def)
 - `FiltreLogging` — `journal.py`:127  (class)
@@ -4511,114 +4705,115 @@
 - `Forme` — `outils/dessins_site.py`:408  (class)
 - `forme` — `tests/test_evenements_site.py`:163  (def)
 - `forme` — `tests/test_site_v2_port.py`:299  (def)
-- `Formulaire` — `entraide.py`:839  (class)
+- `Formulaire` — `entraide.py`:852  (class)
 - `Formulaire` — `equipages.py`:363  (class)
 - `Formulaire` — `suggestions.py`:390  (class)
 - `FormulaireAnnonce` — `annonces.py`:499  (class)
-- `FormulaireChance` — `cadeaux.py`:1999  (class)
-- `FormulaireConditions` — `cadeaux.py`:1969  (class)
+- `FormulaireChance` — `cadeaux.py`:2055  (class)
+- `FormulaireConditions` — `cadeaux.py`:2025  (class)
 - `FormulaireDecision` — `suggestions.py`:531  (class)
-- `FormulaireFiche` — `questionnaire.py`:3829  (class)
+- `FormulaireFiche` — `questionnaire.py`:3874  (class)
 - `FormulaireLiens` — `liens_jeux.py`:125  (class)
-- `FormulaireLot` — `cadeaux.py`:1913  (class)
-- `FormulairePage` — `questionnaire.py`:2637  (class)
-- `FormulaireRecherche` — `cadeaux.py`:836  (class)
-- `FormulaireRefus` — `questionnaire.py`:2615  (class)
+- `FormulaireLot` — `cadeaux.py`:1969  (class)
+- `FormulairePage` — `questionnaire.py`:2673  (class)
+- `FormulaireRecherche` — `cadeaux.py`:891  (class)
+- `FormulaireRefus` — `questionnaire.py`:2651  (class)
 - `Forum` — `tests/faux_serveur.py`:151  (class)
 - `forum_de` — `equipages.py`:188  (def)
 - `forum_de` — `tests/test_entraide.py`:90  (def)
 - `fournisseurs_disponibles` — `roblox_news_contenu.py`:424  (def)
 - `freeze` — `trust_system.py`:34  (def)
-- `BoostSupportButton.from_custom_id` — `bot.py`:24003  (method)
-- `BoutonActualiser.from_custom_id` — `cadeaux.py`:733  (method)
-- `BoutonAnciensSalons.from_custom_id` — `bot.py`:7595  (method)
-- `BoutonAnnulerConfig.from_custom_id` — `bot.py`:15327  (method)
-- `BoutonApercu.from_custom_id` — `questionnaire.py`:2594  (method)
-- `BoutonApprouverBot.from_custom_id` — `bot.py`:7244  (method)
-- `BoutonArchive.from_custom_id` — `bot.py`:14185  (method)
-- `BoutonArchives.from_custom_id` — `bot.py`:14898  (method)
-- `BoutonCadeaux.from_custom_id` — `cadeaux.py`:760  (method)
-- `BoutonCertifier.from_custom_id` — `entraide.py`:1339  (method)
-- `BoutonChercher.from_custom_id` — `cadeaux.py`:827  (method)
+- `BoostSupportButton.from_custom_id` — `bot.py`:24205  (method)
+- `BoutonActualiser.from_custom_id` — `cadeaux.py`:788  (method)
+- `BoutonAnciensSalons.from_custom_id` — `bot.py`:7741  (method)
+- `BoutonAnnulerConfig.from_custom_id` — `bot.py`:15498  (method)
+- `BoutonApercu.from_custom_id` — `questionnaire.py`:2630  (method)
+- `BoutonApprouverBot.from_custom_id` — `bot.py`:7390  (method)
+- `BoutonArchive.from_custom_id` — `bot.py`:14356  (method)
+- `BoutonArchives.from_custom_id` — `bot.py`:15069  (method)
+- `BoutonCadeaux.from_custom_id` — `cadeaux.py`:815  (method)
+- `BoutonCertifier.from_custom_id` — `entraide.py`:1352  (method)
+- `BoutonChercher.from_custom_id` — `cadeaux.py`:882  (method)
 - `BoutonComposer.from_custom_id` — `annonces.py`:797  (method)
 - `BoutonContre.from_custom_id` — `suggestions.py`:520  (method)
 - `BoutonDecision.from_custom_id` — `recrutements.py`:443  (method)
-- `BoutonEtape1.from_custom_id` — `questionnaire.py`:2541  (method)
-- `BoutonFermer.from_custom_id` — `entraide.py`:1363  (method)
-- `BoutonFicheSite.from_custom_id` — `bot.py`:7342  (method)
-- `BoutonGere.from_custom_id` — `bot.py`:7314  (method)
+- `BoutonEtape1.from_custom_id` — `questionnaire.py`:2577  (method)
+- `BoutonFermer.from_custom_id` — `entraide.py`:1376  (method)
+- `BoutonFicheSite.from_custom_id` — `bot.py`:7488  (method)
+- `BoutonGere.from_custom_id` — `bot.py`:7460  (method)
 - `BoutonGerer.from_custom_id` — `suggestions.py`:683  (method)
 - `BoutonLiens.from_custom_id` — `liens_jeux.py`:179  (method)
-- `BoutonMiddleman.from_custom_id` — `entraide.py`:1090  (method)
+- `BoutonMiddleman.from_custom_id` — `entraide.py`:1103  (method)
 - `BoutonModifier.from_custom_id` — `equipages.py`:579  (method)
 - `BoutonNotif.from_custom_id` — `notifs.py`:90  (method)
-- `BoutonNouvelle.from_custom_id` — `entraide.py`:943  (method)
-- `BoutonPage.from_custom_id` — `cadeaux.py`:792  (method)
-- `BoutonPage.from_custom_id` — `questionnaire.py`:2576  (method)
-- `BoutonParticipants.from_custom_id` — `cadeaux.py`:776  (method)
-- `BoutonParticiper.from_custom_id` — `cadeaux.py`:705  (method)
+- `BoutonNouvelle.from_custom_id` — `entraide.py`:956  (method)
+- `BoutonPage.from_custom_id` — `cadeaux.py`:847  (method)
+- `BoutonPage.from_custom_id` — `questionnaire.py`:2612  (method)
+- `BoutonParticipants.from_custom_id` — `cadeaux.py`:831  (method)
+- `BoutonParticiper.from_custom_id` — `cadeaux.py`:760  (method)
 - `BoutonPour.from_custom_id` — `suggestions.py`:506  (method)
 - `BoutonProposer.from_custom_id` — `suggestions.py`:463  (method)
 - `BoutonPublier.from_custom_id` — `equipages.py`:494  (method)
 - `BoutonQuestionnaire.from_custom_id` — `candidature_site.py`:877  (method)
-- `BoutonQuitter.from_custom_id` — `cadeaux.py`:746  (method)
+- `BoutonQuitter.from_custom_id` — `cadeaux.py`:801  (method)
 - `BoutonRecrutement.from_custom_id` — `equipages.py`:557  (method)
-- `BoutonRejoindre.from_custom_id` — `entraide.py`:1041  (method)
+- `BoutonRejoindre.from_custom_id` — `entraide.py`:1054  (method)
 - `BoutonRejoindre.from_custom_id` — `equipages.py`:516  (method)
-- `BoutonRepondre.from_custom_id` — `questionnaire.py`:2559  (method)
+- `BoutonRepondre.from_custom_id` — `questionnaire.py`:2595  (method)
 - `BoutonReponse.from_custom_id` — `evenements.py`:1406  (method)
 - `BoutonRetirer.from_custom_id` — `equipages.py`:597  (method)
-- `BoutonSiteEquipage.from_custom_id` — `site_equipage.py`:1618  (method)
-- `BoutonStats.from_custom_id` — `cadeaux.py`:719  (method)
+- `BoutonSiteEquipage.from_custom_id` — `site_equipage.py`:1644  (method)
+- `BoutonStats.from_custom_id` — `cadeaux.py`:774  (method)
 - `BoutonTableau.from_custom_id` — `recrutements.py`:411  (method)
 - `BoutonVu.from_custom_id` — `annonces.py`:325  (method)
 - `BoutonVu.from_custom_id` — `evenements.py`:1422  (method)
 - `ChoixBut.from_custom_id` — `vocaux.py`:117  (method)
-- `ChoixMetier.from_custom_id` — `metiers.py`:960  (method)
-- `ChoixParticipant.from_custom_id` — `cadeaux.py`:809  (method)
-- `DossierCompromisAncien.from_custom_id` — `bot.py`:20781  (method)
-- `DossierCompromisBouton.from_custom_id` — `bot.py`:20767  (method)
-- `EntraideRatingButton.from_custom_id` — `bot.py`:12999  (method)
-- `LangSelectButton.from_custom_id` — `bot.py`:32806  (method)
+- `ChoixMetier.from_custom_id` — `metiers.py`:1070  (method)
+- `ChoixParticipant.from_custom_id` — `cadeaux.py`:864  (method)
+- `DossierCompromisAncien.from_custom_id` — `bot.py`:20952  (method)
+- `DossierCompromisBouton.from_custom_id` — `bot.py`:20938  (method)
+- `EntraideRatingButton.from_custom_id` — `bot.py`:13171  (method)
+- `LangSelectButton.from_custom_id` — `bot.py`:33018  (method)
 - `Passager.from_custom_id` — `tests/test_persistants.py`:30  (method)
 - `Persistant.from_custom_id` — `tests/test_persistants.py`:21  (method)
-- `RadieAppelButton.from_custom_id` — `bot.py`:2686  (method)
-- `RadieDecisionButton.from_custom_id` — `bot.py`:2829  (method)
+- `RadieAppelButton.from_custom_id` — `bot.py`:2690  (method)
+- `RadieDecisionButton.from_custom_id` — `bot.py`:2833  (method)
 - `RaidAlertButton.from_custom_id` — `raid_detector.py`:624  (method)
-- `RobloxPingButton.from_custom_id` — `bot.py`:32844  (method)
+- `RobloxPingButton.from_custom_id` — `bot.py`:33056  (method)
 - `SanctionDynamicButton.from_custom_id` — `staff_sanction.py`:220  (method)
-- `TicketCreateDynamic.from_custom_id` — `bot.py`:9145  (method)
-- `TicketFeedbackButton.from_custom_id` — `bot.py`:12913  (method)
-- `TicketHubGererDynamic.from_custom_id` — `bot.py`:9262  (method)
-- `TicketHubOpenDynamic.from_custom_id` — `bot.py`:9417  (method)
-- `TicketHubTypeDynamic.from_custom_id` — `bot.py`:9479  (method)
-- `TicketToggleDynamic.from_custom_id` — `bot.py`:9641  (method)
-- `Announcement.from_dict` — `social_media.py`:245  (method)
-- `SocialPost.from_dict` — `social_media.py`:127  (method)
-- `Subscription.from_dict` — `social_media.py`:196  (method)
+- `TicketCreateDynamic.from_custom_id` — `bot.py`:9294  (method)
+- `TicketFeedbackButton.from_custom_id` — `bot.py`:13085  (method)
+- `TicketHubGererDynamic.from_custom_id` — `bot.py`:9411  (method)
+- `TicketHubOpenDynamic.from_custom_id` — `bot.py`:9566  (method)
+- `TicketHubTypeDynamic.from_custom_id` — `bot.py`:9628  (method)
+- `TicketToggleDynamic.from_custom_id` — `bot.py`:9790  (method)
+- `Announcement.from_dict` — `social_media.py`:266  (method)
+- `SocialPost.from_dict` — `social_media.py`:148  (method)
+- `Subscription.from_dict` — `social_media.py`:217  (method)
 - `_LayoutViewDuMessage.from_message` — `tests/test_approuver_bot.py`:25  (method)
-- `fuite` — `questionnaire.py`:959  (def)
+- `fuite` — `questionnaire.py`:995  (def)
 - `fusion_provenance` — `outils/icones_rellseas.py`:1302  (def)
 - `gagnants` — `sondages.py`:134  (def)
 - `garder` — `persistants.py`:30  (def)
 - `garder` — `recrutements.py`:116  (def)
-- `garder_h` — `entraide.py`:567  (def)
-- `gdpr_retention_task` — `bot.py`:8270  (async def)
-- `generation` — `site_equipage.py`:1261  (def)
-- `gere` — `metiers.py`:311  (async def)
+- `garder_h` — `entraide.py`:580  (def)
+- `gdpr_retention_task` — `bot.py`:8416  (async def)
+- `generation` — `site_equipage.py`:1287  (def)
+- `gere` — `metiers.py`:354  (async def)
 - `gerer` — `vigilance.py`:157  (async def)
 - `Client.get` — `tests/test_evenements_site.py`:73  (method)
-- `ConfigCache.get` — `bot.py`:602  (method)
+- `ConfigCache.get` — `bot.py`:606  (method)
 - `Local.get` — `tests/test_longevite.py`:446  (method)
 - `Local.get` — `tests/test_site_v2_port.py`:103  (method)
 - `Reseau.get` — `outils/icones_rellseas.py`:731  (method)
 - `_Sess.get` — `tests/test_forum_refus.py`:82  (method)
+- `_Session.get` — `tests/test_gif_texte.py`:38  (method)
 - `_Session.get` — `tests/test_youtube_chaine.py`:114  (method)
-- `SocialMediaManager.get_adapter` — `social_media.py`:1148  (method)
-- `get_alt_accounts` — `bot.py`:11928  (async def)
+- `SocialMediaManager.get_adapter` — `social_media.py`:1160  (method)
+- `get_alt_accounts` — `bot.py`:12100  (async def)
 - `get_audit` — `tickets_enhance.py`:306  (async def)
-- `get_avatar_hash` — `bot.py`:11760  (def)
-- `get_cached_avatar` — `bot.py`:1419  (async def)
+- `get_avatar_hash` — `bot.py`:11912  (def)
+- `get_cached_avatar` — `bot.py`:1423  (async def)
 - `get_category_channels` — `unified_logger.py`:405  (async def)
 - `FausseGuilde.get_channel` — `tests/test_tickets_fils.py`:96  (method)
 - `FauxGuild.get_channel` — `tests/test_configure_social.py`:219  (method)
@@ -4641,13 +4836,13 @@
 - `_FauxArbre.get_commands` — `tests/test_commandes_en_double.py`:155  (method)
 - `get_configured_channel_id` — `staff_sanction.py`:119  (async def)
 - `Banc.get_db` — `tests/test_questionnaire.py`:75  (method)
-- `BancTicket.get_db` — `tests/banc_ticket_recrutement.py`:388  (method)
+- `BancTicket.get_db` — `tests/banc_ticket_recrutement.py`:390  (method)
 - `_Socle.get_db` — `tests/test_activite_observation.py`:49  (method)
-- `get_db` — `bot.py`:584  (def)
+- `get_db` — `bot.py`:588  (def)
 - `get_disabled_events` — `unified_logger.py`:563  (async def)
 - `get_enabled_categories` — `unified_logger.py`:368  (async def)
 - `get_event_channels` — `unified_logger.py`:455  (async def)
-- `get_gif_type` — `bot.py`:5008  (def)
+- `get_gif_type` — `bot.py`:5035  (def)
 - `get_honeypot_channel_id` — `honeypot.py`:60  (async def)
 - `get_inactive_webhooks` — `webhook_tracker.py`:179  (async def)
 - `get_log_channel` — `unified_logger.py`:230  (async def)
@@ -4665,8 +4860,8 @@
 - `_Guilde.get_member` — `tests/test_revue_tickets.py`:127  (method)
 - `_ServeurTextes.get_member` — `outils/site_maquette.py`:2914  (method)
 - `Fil.get_partial_message` — `tests/faux_serveur.py`:97  (method)
-- `Fil.get_partial_message` — `tests/test_metiers.py`:852  (method)
-- `FilTicket.get_partial_message` — `tests/banc_ticket_recrutement.py`:135  (method)
+- `Fil.get_partial_message` — `tests/test_metiers.py`:854  (method)
+- `FilTicket.get_partial_message` — `tests/banc_ticket_recrutement.py`:136  (method)
 - `PostArchive.get_partial_message` — `tests/test_revue_reste.py`:627  (method)
 - `Salon.get_partial_message` — `tests/conftest_discord.py`:74  (method)
 - `Salon.get_partial_message` — `tests/test_annonces_diffusion.py`:17  (method)
@@ -4674,10 +4869,10 @@
 - `SalonB.get_partial_message` — `tests/test_boosts.py`:65  (method)
 - `Texte.get_partial_message` — `tests/faux_serveur.py`:203  (method)
 - `get_priority` — `tickets_enhance.py`:158  (async def)
-- `get_prot_action_key` — `bot.py`:18295  (def)
-- `get_prot_default_action` — `bot.py`:18303  (def)
-- `get_prot_default_duration` — `bot.py`:18307  (def)
-- `get_prot_duration_key` — `bot.py`:18299  (def)
+- `get_prot_action_key` — `bot.py`:18466  (def)
+- `get_prot_default_action` — `bot.py`:18474  (def)
+- `get_prot_default_duration` — `bot.py`:18478  (def)
+- `get_prot_duration_key` — `bot.py`:18470  (def)
 - `get_recent_anomalies` — `observability.py`:422  (async def)
 - `get_recent_snapshots` — `observability.py`:298  (async def)
 - `FausseGuilde.get_role` — `tests/test_tickets_fils.py`:115  (method)
@@ -4686,7 +4881,7 @@
 - `Guilde.get_role` — `tests/conftest_discord.py`:114  (method)
 - `GuildeDirection.get_role` — `tests/test_tickets_fils.py`:252  (method)
 - `Monde.get_role` — `tests/faux_serveur.py`:342  (method)
-- `Serveur.get_role` — `tests/banc_ticket_recrutement.py`:216  (method)
+- `Serveur.get_role` — `tests/banc_ticket_recrutement.py`:217  (method)
 - `Serveur.get_role` — `tests/test_metiers.py`:139  (method)
 - `Serveur.get_role` — `tests/test_qui_peut_quoi.py`:161  (method)
 - `Serveur.get_role` — `tests/test_revue_moderation.py`:176  (method)
@@ -4700,16 +4895,17 @@
 - `get_server_languages` — `i18n.py`:226  (def)
 - `get_server_languages_async` — `i18n.py`:253  (async def)
 - `get_status` — `rate_limiter.py`:184  (def)
-- `get_strikes` — `bot.py`:1279  (async def)
+- `get_strikes` — `bot.py`:1283  (async def)
 - `get_template` — `tickets_enhance.py`:457  (async def)
 - `Guilde.get_thread` — `tests/conftest_discord.py`:108  (method)
-- `get_ticket` — `bot.py`:6278  (async def)
+- `get_ticket` — `bot.py`:6424  (async def)
 - `get_user_lang` — `i18n.py`:199  (async def)
-- `get_webhook` — `bot.py`:20205  (async def)
+- `get_webhook` — `bot.py`:20376  (async def)
 - `get_webhook_mode` — `unified_logger.py`:517  (async def)
-- `giveaway_gerer` — `bot.py`:15043  (async def)
-- `giveaway_lancer` — `bot.py`:15038  (async def)
+- `giveaway_gerer` — `bot.py`:15214  (async def)
+- `giveaway_lancer` — `bot.py`:15209  (async def)
 - `gonfler` — `outils/dessins_site.py`:737  (def)
+- `grade_affiche` — `hierarchie.py`:469  (def)
 - `graves` — `registre.py`:191  (async def)
 - `groupes` — `textes.py`:327  (def)
 - `groupes_aide` — `zones.py`:922  (def)
@@ -4720,12 +4916,12 @@
 - `Dessin.hach` — `outils/dessins_site.py`:525  (method)
 - `hachures` — `outils/dessins_site.py`:461  (def)
 - `_Images.handle_starttag` — `outils/icones_rellseas.py`:913  (method)
-- `SocialMediaManager.has_announcement` — `social_media.py`:1317  (method)
+- `SocialMediaManager.has_announcement` — `social_media.py`:1329  (method)
 - `has_invite` — `trust_system.py`:187  (def)
 - `has_media` — `trust_system.py`:236  (def)
 - `has_non_media_link` — `trust_system.py`:194  (def)
 - `header` — `ui_v2.py`:213  (def)
-- `help_cmd` — `bot.py`:13029  (async def)
+- `help_cmd` — `bot.py`:13201  (async def)
 - `heure_creuse` — `compactage.py`:70  (def)
 - `hexa` — `outils/dessins_site.py`:74  (def)
 - `FauxSalon.history` — `tests/test_installation_auto.py`:120  (method)
@@ -4741,51 +4937,51 @@
 - `_Salon.history` — `tests/test_recours_v2.py`:94  (method)
 - `CheminDuBot.hooks` — `outils/site_local_recrutement.py`:57  (method)
 - `Horloge` — `tests/test_verrou_raid.py`:18  (class)
-- `Banc.http` — `tests/test_metiers.py`:304  (method)
+- `Banc.http` — `tests/test_metiers.py`:306  (method)
 - `Monde.http` — `tests/test_direct.py`:101  (method)
 - `Site.http` — `tests/test_site_v2_serveur.py`:171  (method)
-- `Site.http` — `tests/test_textes.py`:354  (method)
+- `Site.http` — `tests/test_textes.py`:355  (method)
 - `icone` — `outils/dessins_site.py`:802  (def)
 - `icone` — `outils/visuels.py`:292  (def)
 - `icone` — `visuels.py`:133  (def)
 - `icone_carree` — `outils/icones_rellseas.py`:1069  (def)
 - `icone_carree_sans_rognage` — `outils/icones_rellseas.py`:1115  (def)
-- `icone_du_role` — `metiers.py`:592  (async def)
-- `icone_servie_publique` — `site_vitrine.py`:321  (def)
+- `icone_du_role` — `metiers.py`:702  (async def)
+- `icone_servie_publique` — `site_vitrine.py`:418  (def)
 - `Monde.ident` — `outils/site_maquette.py`:318  (method)
 - `identifiant` — `publications.py`:41  (def)
 - `_FauxNews.identifiants_connus_actus` — `tests/test_forum_refus.py`:220  (method)
 - `identifiants_connus_actus` — `roblox_news.py`:876  (async def)
 - `ids` — `tests/faux_serveur.py`:409  (def)
-- `ids_roles_clan` — `metiers.py`:458  (async def)
+- `ids_roles_clan` — `metiers.py`:568  (async def)
 - `ids_roles_systeme` — `activite_demontage.py`:92  (def)
-- `ids_salons` — `entraide.py`:503  (def)
+- `ids_salons` — `entraide.py`:516  (def)
 - `ids_salons` — `zones.py`:286  (def)
 - `ids_salons_systeme` — `activite_demontage.py`:103  (def)
 - `Illisible` — `stockage.py`:34  (class)
-- `image` — `site_vitrine.py`:455  (async def)
+- `image` — `site_vitrine.py`:552  (async def)
 - `image_avatar` — `outils/site_maquette.py`:177  (def)
 - `image_icone` — `outils/site_maquette.py`:191  (def)
 - `Brouillon.image_nom` — `annonces.py`:442  (method)
-- `Brouillon.image_nom` — `cadeaux.py`:1833  (method)
+- `Brouillon.image_nom` — `cadeaux.py`:1889  (method)
 - `image_roblox` — `outils/site_maquette.py`:222  (def)
 - `image_text` — `ocr_scan.py`:150  (def)
-- `ImageConfigPanelV2` — `bot.py`:17574  (class)
-- `ImmunePanelV2` — `bot.py`:19391  (class)
-- `ImmuneRemoveViewV2` — `bot.py`:19628  (class)
+- `ImageConfigPanelV2` — `bot.py`:17745  (class)
+- `ImmunePanelV2` — `bot.py`:19562  (class)
+- `ImmuneRemoveViewV2` — `bot.py`:19799  (class)
 - `importer` — `outils/icones_rellseas.py`:924  (def)
 - `imprimer` — `journal.py`:98  (def)
 - `imprimer_glyphes` — `outils/dessins_site.py`:1997  (def)
 - `incidents` — `vigilance.py`:54  (def)
-- `indication` — `questionnaire.py`:950  (def)
-- `infractions_cmd` — `bot.py`:28890  (async def)
-- `DBPool.init` — `bot.py`:463  (method)
+- `indication` — `questionnaire.py`:986  (def)
+- `infractions_cmd` — `bot.py`:29096  (async def)
+- `DBPool.init` — `bot.py`:467  (method)
 - `init_db` — `activite.py`:93  (async def)
-- `init_db` — `affiches.py`:129  (async def)
+- `init_db` — `affiches.py`:138  (async def)
 - `init_db` — `annonces.py`:113  (async def)
 - `init_db` — `anti_token_leak.py`:61  (async def)
 - `init_db` — `boosts.py`:30  (async def)
-- `init_db` — `cadeaux.py`:204  (async def)
+- `init_db` — `cadeaux.py`:212  (async def)
 - `init_db` — `candidature_site.py`:313  (async def)
 - `init_db` — `casier.py`:44  (async def)
 - `init_db` — `clan.py`:33  (async def)
@@ -4793,34 +4989,37 @@
 - `init_db` — `equipages.py`:137  (async def)
 - `init_db` — `error_logger.py`:56  (async def)
 - `init_db` — `evenements.py`:404  (async def)
+- `init_db` — `hierarchie.py`:169  (async def)
 - `init_db` — `honeypot.py`:71  (async def)
 - `init_db` — `i18n.py`:155  (async def)
 - `init_db` — `impersonation_detector.py`:90  (async def)
 - `init_db` — `invitations.py`:40  (async def)
 - `init_db` — `publications.py`:32  (async def)
-- `init_db` — `questionnaire.py`:812  (async def)
-- `init_db` — `questions.py`:58  (async def)
+- `init_db` — `questionnaire.py`:848  (async def)
+- `init_db` — `questions.py`:80  (async def)
 - `init_db` — `raid_detector.py`:150  (async def)
 - `init_db` — `recidivism.py`:91  (async def)
 - `init_db` — `recrutements.py`:69  (async def)
 - `init_db` — `registre.py`:66  (async def)
+- `init_db` — `reponses_auto.py`:266  (async def)
 - `init_db` — `roblox_news.py`:189  (async def)
-- `init_db` — `site_equipage.py`:252  (async def)
+- `init_db` — `site_equipage.py`:253  (async def)
 - `init_db` — `sondages.py`:66  (async def)
 - `init_db` — `staff_sanction.py`:86  (async def)
 - `init_db` — `suggestions.py`:60  (async def)
-- `init_db` — `tableau.py`:357  (async def)
+- `init_db` — `tableau.py`:362  (async def)
 - `init_db` — `textes.py`:223  (async def)
+- `init_db` — `tickets_interdits.py`:104  (async def)
 - `init_db` — `token_grabber.py`:157  (async def)
 - `init_db` — `vigilance.py`:44  (async def)
 - `init_db` — `webhook_leak.py`:69  (async def)
 - `init_db` — `webhook_tracker.py`:61  (async def)
-- `inscrits` — `cadeaux.py`:277  (async def)
-- `inscrits_quand` — `cadeaux.py`:284  (async def)
+- `inscrits` — `cadeaux.py`:285  (async def)
+- `inscrits_quand` — `cadeaux.py`:292  (async def)
 - `installe` — `tests/test_entraide.py`:62  (def)
 - `installe` — `tests/test_equipages.py`:53  (def)
 - `installer` — `boosts.py`:150  (async def)
-- `installer` — `entraide.py`:1758  (async def)
+- `installer` — `entraide.py`:1771  (async def)
 - `installer` — `equipages.py`:776  (async def)
 - `installer` — `journal.py`:141  (def)
 - `installer` — `sondages.py`:198  (async def)
@@ -4829,91 +5028,93 @@
 - `installer_clan` — `zones.py`:961  (async def)
 - `installer_icones` — `visuels.py`:155  (async def)
 - `instantane` — `config_salons.py`:235  (def)
-- `Inter` — `tests/banc_ticket_recrutement.py`:236  (class)
+- `Inter` — `tests/banc_ticket_recrutement.py`:237  (class)
 - `Inter` — `tests/test_questionnaire.py`:176  (class)
 - `inter` — `tests/test_evenements.py`:145  (def)
 - `Interaction` — `tests/test_qui_peut_quoi.py`:198  (class)
 - `Interaction` — `tests/test_revue_admin.py`:95  (class)
 - `interaction` — `tests/conftest_discord.py`:160  (def)
 - `interaction` — `tests/faux_serveur.py`:376  (def)
-- `interaction` — `tests/test_metiers.py`:317  (def)
-- `ActionConfigPanelV2.interaction_check` — `bot.py`:18320  (method)
-- `AltConfigPanelV2.interaction_check` — `bot.py`:18442  (method)
-- `AltDetectionsPanelV2.interaction_check` — `bot.py`:18789  (method)
-- `AltScanResultsPanelV2.interaction_check` — `bot.py`:18620  (method)
-- `AntiRaidPanelV2.interaction_check` — `bot.py`:12611  (method)
-- `BadwordsConfigPanelV2.interaction_check` — `bot.py`:17667  (method)
+- `interaction` — `tests/test_metiers.py`:319  (def)
+- `ActionConfigPanelV2.interaction_check` — `bot.py`:18491  (method)
+- `AltConfigPanelV2.interaction_check` — `bot.py`:18613  (method)
+- `AltDetectionsPanelV2.interaction_check` — `bot.py`:18960  (method)
+- `AltScanResultsPanelV2.interaction_check` — `bot.py`:18791  (method)
+- `AntiRaidPanelV2.interaction_check` — `bot.py`:12783  (method)
+- `BadwordsConfigPanelV2.interaction_check` — `bot.py`:17838  (method)
 - `BasePanel.interaction_check` — `ui_v2.py`:193  (method)
-- `ConfirmerAnciensSalons.interaction_check` — `bot.py`:7636  (method)
-- `ConfirmerArchives.interaction_check` — `bot.py`:14932  (method)
-- `ConfirmerIsolementV2.interaction_check` — `bot.py`:18733  (method)
-- `EditPanelSelectViewV2.interaction_check` — `bot.py`:21055  (method)
-- `EntraidePanelV2.interaction_check` — `entraide.py`:1941  (method)
-- `ImageConfigPanelV2.interaction_check` — `bot.py`:17582  (method)
-- `ImmunePanelV2.interaction_check` — `bot.py`:19399  (method)
-- `ImmuneRemoveViewV2.interaction_check` — `bot.py`:19636  (method)
-- `LinkConfigPanelV2.interaction_check` — `bot.py`:18035  (method)
-- `LogLevelPanelV2.interaction_check` — `bot.py`:16687  (method)
-- `LogsCategoriesPanelV2.interaction_check` — `bot.py`:16876  (method)
-- `LogsEventRoutingPanelV2.interaction_check` — `bot.py`:16781  (method)
-- `LogsEventsPanelV2.interaction_check` — `bot.py`:16967  (method)
-- `LogsExclusionsPanelV2.interaction_check` — `bot.py`:17100  (method)
-- `LogsPanelV2.interaction_check` — `bot.py`:16194  (method)
-- `LogsRoutingPanelV2.interaction_check` — `bot.py`:16563  (method)
-- `MainPanelV2.interaction_check` — `bot.py`:12237  (method)
+- `ConfirmerAnciensSalons.interaction_check` — `bot.py`:7782  (method)
+- `ConfirmerArchives.interaction_check` — `bot.py`:15103  (method)
+- `ConfirmerIsolementV2.interaction_check` — `bot.py`:18904  (method)
+- `EditPanelSelectViewV2.interaction_check` — `bot.py`:21226  (method)
+- `EntraidePanelV2.interaction_check` — `entraide.py`:1954  (method)
+- `ImageConfigPanelV2.interaction_check` — `bot.py`:17753  (method)
+- `ImmunePanelV2.interaction_check` — `bot.py`:19570  (method)
+- `ImmuneRemoveViewV2.interaction_check` — `bot.py`:19807  (method)
+- `LinkConfigPanelV2.interaction_check` — `bot.py`:18206  (method)
+- `LogLevelPanelV2.interaction_check` — `bot.py`:16858  (method)
+- `LogsCategoriesPanelV2.interaction_check` — `bot.py`:17047  (method)
+- `LogsEventRoutingPanelV2.interaction_check` — `bot.py`:16952  (method)
+- `LogsEventsPanelV2.interaction_check` — `bot.py`:17138  (method)
+- `LogsExclusionsPanelV2.interaction_check` — `bot.py`:17271  (method)
+- `LogsPanelV2.interaction_check` — `bot.py`:16365  (method)
+- `LogsRoutingPanelV2.interaction_check` — `bot.py`:16734  (method)
+- `MainPanelV2.interaction_check` — `bot.py`:12409  (method)
 - `MenuDecision.interaction_check` — `suggestions.py`:557  (method)
-- `ModerationPanelV2.interaction_check` — `bot.py`:19259  (method)
-- `PaginatedImmuneRemoveView.interaction_check` — `bot.py`:19741  (method)
-- `PanelBlacklistView.interaction_check` — `bot.py`:21428  (method)
-- `PanelEditViewV2.interaction_check` — `bot.py`:21102  (method)
-- `PanelQsView.interaction_check` — `bot.py`:21567  (method)
-- `ProtDetailV2.interaction_check` — `bot.py`:17307  (method)
-- `ProtPanelV2.interaction_check` — `bot.py`:17242  (method)
+- `ModerationPanelV2.interaction_check` — `bot.py`:19430  (method)
+- `PaginatedImmuneRemoveView.interaction_check` — `bot.py`:19912  (method)
+- `PanelBlacklistView.interaction_check` — `bot.py`:21599  (method)
+- `PanelEditViewV2.interaction_check` — `bot.py`:21273  (method)
+- `PanelQsView.interaction_check` — `bot.py`:21745  (method)
+- `ProtDetailV2.interaction_check` — `bot.py`:17478  (method)
+- `ProtPanelV2.interaction_check` — `bot.py`:17413  (method)
 - `RellseasGestionV2.interaction_check` — `rellseas_panneau.py`:674  (method)
 - `RellseasPanelV2.interaction_check` — `rellseas_panneau.py`:145  (method)
-- `RgpdPanelV2.interaction_check` — `bot.py`:12107  (method)
+- `RgpdPanelV2.interaction_check` — `bot.py`:12279  (method)
 - `RobloxPanelV2.interaction_check` — `roblox_panneau.py`:430  (method)
-- `SecurityChannelsPanelV2.interaction_check` — `bot.py`:16409  (method)
-- `SendPanelPaginatedView.interaction_check` — `bot.py`:21643  (method)
+- `SecurityChannelsPanelV2.interaction_check` — `bot.py`:16580  (method)
+- `SendPanelPaginatedView.interaction_check` — `bot.py`:21821  (method)
 - `SondagesPanelV2.interaction_check` — `sondages.py`:610  (method)
 - `SuggestionsPanelV2.interaction_check` — `suggestions.py`:805  (method)
-- `SuspectScanPanelV2.interaction_check` — `bot.py`:18893  (method)
-- `TicketMainPanelV2.interaction_check` — `bot.py`:20864  (method)
-- `V2GenericChannelPicker.interaction_check` — `bot.py`:20437  (method)
-- `V2GenericRolePicker.interaction_check` — `bot.py`:20555  (method)
+- `SuspectScanPanelV2.interaction_check` — `bot.py`:19064  (method)
+- `TicketMainPanelV2.interaction_check` — `bot.py`:21035  (method)
+- `V2GenericChannelPicker.interaction_check` — `bot.py`:20608  (method)
+- `V2GenericRolePicker.interaction_check` — `bot.py`:20726  (method)
 - `VueApercu.interaction_check` — `annonces.py`:613  (method)
-- `VueCadeau.interaction_check` — `cadeaux.py`:2085  (method)
-- `VueCertifier.interaction_check` — `entraide.py`:1222  (method)
-- `VueCloturer.interaction_check` — `entraide.py`:1279  (method)
+- `VueCadeau.interaction_check` — `cadeaux.py`:2141  (method)
+- `VueCertifier.interaction_check` — `entraide.py`:1235  (method)
+- `VueCloturer.interaction_check` — `entraide.py`:1292  (method)
 - `VueComposer.interaction_check` — `annonces.py`:491  (method)
-- `VueTypesTickets.interaction_check` — `bot.py`:9322  (method)
-- `_AntiRaidActionPickerV2.interaction_check` — `bot.py`:12771  (method)
-- `_BadwordsSanctionActionView.interaction_check` — `bot.py`:17960  (method)
-- `_CasierManageView.interaction_check` — `bot.py`:28816  (method)
+- `VueTypesTickets.interaction_check` — `bot.py`:9471  (method)
+- `_AntiRaidActionPickerV2.interaction_check` — `bot.py`:12943  (method)
+- `_BadwordsSanctionActionView.interaction_check` — `bot.py`:18131  (method)
+- `_CasierManageView.interaction_check` — `bot.py`:29022  (method)
 - `_OwnerView.interaction_check` — `admin_panels_v2.py`:82  (method)
+- `interdire` — `tickets_interdits.py`:388  (async def)
+- `InterK` — `tests/test_tickets_interdits.py`:51  (class)
 - `intermediaire` — `outils/site_maquette.py`:3129  (async def)
-- `TicketControlView.internal_note` — `bot.py`:10565  (method)
+- `TicketControlView.internal_note` — `bot.py`:10714  (method)
 - `Forme.intervalles` — `outils/dessins_site.py`:448  (method)
-- `ConfigCache.invalidate` — `bot.py`:623  (method)
-- `Invalide` — `affiches.py`:173  (class)
-- `invitation` — `metiers.py`:1141  (async def)
-- `invitations_de` — `cadeaux.py`:591  (async def)
-- `invitations_tous` — `cadeaux.py`:598  (async def)
-- `inviter_au_choix` — `metiers.py`:1165  (async def)
+- `ConfigCache.invalidate` — `bot.py`:627  (method)
+- `Invalide` — `affiches.py`:182  (class)
+- `invitation` — `metiers.py`:1253  (async def)
+- `invitations_de` — `cadeaux.py`:646  (async def)
+- `invitations_tous` — `cadeaux.py`:653  (async def)
+- `inviter_au_choix` — `metiers.py`:1306  (async def)
 - `Serveur.invites` — `tests/test_bouclier.py`:27  (method)
 - `Role.is_assignable` — `tests/test_qui_peut_quoi.py`:88  (method)
-- `is_blacklisted` — `bot.py`:764  (def)
-- `is_channel_immune` — `bot.py`:1949  (async def)
+- `is_blacklisted` — `bot.py`:768  (def)
+- `is_channel_immune` — `bot.py`:1953  (async def)
 - `is_compromised` — `compromised_detector.py`:290  (def)
 - `is_crash_text` — `behavior_guard.py`:39  (def)
 - `FauxRole.is_default` — `tests/test_off_radiation.py`:57  (method)
-- `Role.is_default` — `tests/banc_ticket_recrutement.py`:159  (method)
+- `Role.is_default` — `tests/banc_ticket_recrutement.py`:160  (method)
 - `Role.is_default` — `tests/faux_serveur.py`:260  (method)
 - `Role.is_default` — `tests/test_metiers.py`:79  (method)
 - `Role.is_default` — `tests/test_qui_peut_quoi.py`:85  (method)
 - `Role.is_default` — `tests/test_revue_moderation.py`:101  (method)
 - `Role.is_default` — `tests/test_site_v2_serveur.py`:60  (method)
-- `Role.is_default` — `tests/test_textes.py`:295  (method)
+- `Role.is_default` — `tests/test_textes.py`:296  (method)
 - `_Role.is_default` — `tests/test_activite_demontage.py`:37  (method)
 - `_Role.is_default` — `tests/test_mots_vocaux_stockage.py`:103  (method)
 - `_Role.is_default` — `tests/test_revue_tickets.py`:110  (method)
@@ -4924,23 +5125,24 @@
 - `Reponse.is_done` — `tests/test_questionnaire.py`:160  (method)
 - `Reponse.is_done` — `tests/test_qui_peut_quoi.py`:186  (method)
 - `Reponse.is_done` — `tests/test_revue_admin.py`:73  (method)
+- `Reponse.is_done` — `tests/test_tickets_interdits.py`:221  (method)
 - `_Reponse.is_done` — `tests/test_candidature_site.py`:538  (method)
 - `_Reponse.is_done` — `tests/test_site_equipage.py`:601  (method)
 - `_Surcharge.is_empty` — `tests/test_activite_demontage.py`:57  (method)
 - `Sondage.is_finalized` — `tests/test_sondages.py`:34  (method)
 - `is_frozen` — `trust_system.py`:47  (def)
-- `is_fully_immune` — `bot.py`:2081  (async def)
-- `is_immune` — `bot.py`:1892  (async def)
+- `is_fully_immune` — `bot.py`:2085  (async def)
+- `is_immune` — `bot.py`:1896  (async def)
 - `is_locked` — `rate_limiter.py`:108  (def)
 - `is_media_url` — `trust_system.py`:214  (def)
 - `Salon.is_news` — `tests/test_annonces_diffusion.py`:14  (method)
 - `is_nsfw` — `nsfw_scan.py`:78  (def)
-- `PlatformAdapter.is_post_active` — `social_media.py`:291  (method)
-- `RSSHubAdapter.is_post_active` — `social_media.py`:810  (method)
+- `PlatformAdapter.is_post_active` — `social_media.py`:312  (method)
+- `RSSHubAdapter.is_post_active` — `social_media.py`:822  (method)
 - `_Adaptateur.is_post_active` — `tests/test_social_sans_gel.py`:100  (method)
 - `is_super_owner` — `owner_ids.py`:42  (def)
 - `Msg.is_system` — `tests/test_sondages.py`:82  (method)
-- `is_ticket_channel` — `bot.py`:1960  (async def)
+- `is_ticket_channel` — `bot.py`:1964  (async def)
 - `Membre.is_timed_out` — `tests/conftest_discord.py`:156  (method)
 - `Membre.is_timed_out` — `tests/faux_serveur.py`:273  (method)
 - `Membre.is_timed_out` — `tests/test_casier.py`:143  (method)
@@ -4949,13 +5151,15 @@
 - `Membre.is_timed_out` — `tests/test_site_moderation.py`:46  (method)
 - `is_trusted` — `trust_system.py`:156  (def)
 - `isinstance_module` — `outils/purge_commandes.py`:66  (def)
-- `isolate_member` — `bot.py`:4207  (async def)
+- `isolate_member` — `bot.py`:4209  (async def)
 - `item` — `textes.py`:313  (def)
-- `jeton` — `tableau.py`:426  (def)
+- `jeton` — `tableau.py`:431  (def)
 - `jeton_de` — `transcript_store.py`:309  (def)
 - `Jeu` — `zones.py`:193  (class)
-- `jeux_du_salon` — `faq.py`:248  (def)
-- `jeux_nommes` — `faq.py`:243  (def)
+- `jeux_du_lieu` — `reponses_auto.py`:168  (def)
+- `jeux_du_salon` — `faq.py`:244  (def)
+- `jeux_nommes` — `faq.py`:239  (def)
+- `jeux_vises` — `reponses_auto.py`:177  (def)
 - `joignable` — `candidature_site.py`:784  (def)
 - `jour` — `activite_calendrier.py`:54  (def)
 - `Journal` — `tests/test_tickets_rellseas.py`:69  (class)
@@ -4968,11 +5172,12 @@
 - `jours_ecoules` — `activite.py`:213  (def)
 - `jours_entre` — `activite_calendrier.py`:64  (def)
 - `jours_inactif` — `activite.py`:225  (async def)
-- `jours_regle` — `tableau.py`:2826  (async def)
-- `jours_sur_serveur` — `cadeaux.py`:583  (def)
+- `jours_regle` — `tableau.py`:2852  (async def)
+- `jours_sur_serveur` — `cadeaux.py`:638  (def)
 - `jours_vus` — `activite.py`:249  (async def)
 - `Requete.json` — `tests/test_tableau.py`:61  (method)
 - `_Rep.json` — `tests/test_forum_refus.py`:68  (method)
+- `juger` — `sujets_interdits.py`:488  (def)
 - `jusqu_aux_reponses` — `tests/test_recrutement_ticket.py`:122  (async def)
 - `TrackedPost.key` — `tracking_layer.py`:68  (method)
 - `Membre.kick` — `tests/test_qui_peut_quoi.py`:137  (method)
@@ -4980,65 +5185,68 @@
 - `kv_block` — `ui_v2.py`:127  (def)
 - `kwarg` — `outils/purge_commandes.py`:92  (def)
 - `laisser_finir` — `tests/conftest_discord.py`:11  (async def)
-- `lancer` — `cadeaux.py`:1849  (async def)
+- `lancer` — `cadeaux.py`:1905  (async def)
 - `lang_choice_label` — `i18n.py`:977  (def)
 - `lang_of` — `i18n.py`:269  (async def)
-- `LangSelectButton` — `bot.py`:32786  (class)
+- `LangSelectButton` — `bot.py`:32998  (class)
+- `langue` — `insult_filter.py`:228  (def)
 - `langue_de` — `annonces.py`:88  (async def)
-- `langue_de` — `cadeaux.py`:172  (async def)
+- `langue_de` — `cadeaux.py`:180  (async def)
 - `langue_de` — `entraide.py`:366  (async def)
 - `langue_de` — `equipages.py`:110  (async def)
 - `langue_de` — `evenements.py`:383  (async def)
-- `langue_du_texte` — `faq.py`:197  (def)
+- `langue_de` — `reponses_auto.py`:118  (def)
+- `langue_du_texte` — `faq.py`:193  (def)
 - `largeur` — `colonnes.py`:11  (def)
 - `LayoutView` — `ui_v2.py`:86  (class)
 - `_Banc.lecteur_en_vol` — `tests/test_config_lost_update.py`:116  (method)
-- `lecteurs_statique` — `tableau.py`:2061  (def)
-- `lecture_accueil` — `site_equipage.py`:1166  (async def)
-- `lecture_depart` — `site_equipage.py`:1113  (async def)
-- `lecture_equipage` — `site_equipage.py`:1131  (async def)
+- `lecteurs_statique` — `tableau.py`:2066  (def)
+- `lecture_accueil` — `site_equipage.py`:1192  (async def)
+- `lecture_depart` — `site_equipage.py`:1132  (async def)
+- `lecture_equipage` — `site_equipage.py`:1150  (async def)
 - `lecture_hors_tete` — `securite_site.py`:209  (async def)
 - `lecture_seule` — `config_salons.py`:71  (def)
-- `levenshtein_distance` — `bot.py`:11706  (def)
-- `lever_liste_noire` — `questionnaire.py`:3754  (async def)
+- `levenshtein_distance` — `bot.py`:11858  (def)
+- `lever` — `tickets_interdits.py`:396  (async def)
+- `lever_liste_noire` — `questionnaire.py`:3801  (async def)
 - `liaison` — `candidature_site.py`:626  (async def)
 - `Champ.libelle` — `entraide.py`:143  (method)
 - `Zone.libelle` — `entraide.py`:170  (method)
 - `libelle` — `recrutements.py`:107  (def)
 - `libelle` — `sondages.py`:128  (def)
-- `libelles_boutons` — `tests/test_textes.py`:113  (def)
+- `libelles_boutons` — `tests/test_textes.py`:114  (def)
 - `libelles_carte` — `evenements.py`:286  (def)
-- `libelles_page` — `site_equipage.py`:217  (def)
-- `Banc.lien` — `tests/test_metiers.py`:297  (method)
+- `libelles_page` — `site_equipage.py`:218  (def)
+- `Banc.lien` — `tests/test_metiers.py`:299  (method)
 - `Banc.lien` — `tests/test_questionnaire.py`:142  (method)
-- `BancTicket.lien` — `tests/banc_ticket_recrutement.py`:459  (method)
-- `lien` — `entraide.py`:551  (def)
+- `BancTicket.lien` — `tests/banc_ticket_recrutement.py`:464  (method)
+- `lien` — `entraide.py`:564  (def)
 - `lien` — `equipages.py`:227  (async def)
 - `lien_billet` — `roblox_news.py`:227  (def)
 - `lien_documentation` — `roblox_news_contenu.py`:631  (def)
 - `lien_envoi` — `candidature_site.py`:755  (async def)
-- `lien_equipage` — `site_equipage.py`:1551  (async def)
-- `lien_guide` — `metiers.py`:1136  (def)
+- `lien_equipage` — `site_equipage.py`:1577  (async def)
+- `lien_guide` — `metiers.py`:1248  (def)
 - `lien_jouer` — `zones.py`:804  (def)
 - `lien_newsroom` — `roblox_news.py`:642  (def)
-- `lien_pour` — `tableau.py`:465  (async def)
+- `lien_pour` — `tableau.py`:470  (async def)
 - `lien_presse` — `roblox_news.py`:537  (def)
 - `lien_salon` — `zones.py`:301  (def)
 - `lien_ticket` — `candidature_site.py`:789  (async def)
 - `lien_utilise` — `invitations.py`:77  (def)
-- `lien_vitrine` — `site_equipage.py`:1640  (def)
+- `lien_vitrine` — `site_equipage.py`:1666  (def)
 - `liens` — `liens_jeux.py`:42  (def)
-- `liens` — `questionnaire.py`:1449  (async def)
+- `liens` — `questionnaire.py`:1485  (async def)
 - `liens_texte` — `annonces.py`:302  (def)
 - `lies` — `outils/reparer_noms.py`:41  (def)
-- `lift_isolation` — `bot.py`:4321  (async def)
+- `lift_isolation` — `bot.py`:4323  (async def)
 - `ligne` — `colonnes.py`:34  (def)
 - `ligne` — `outils/dessins_site.py`:345  (def)
 - `lignes_clan` — `rellseas_panneau.py`:1119  (def)
-- `lignes_progres` — `cadeaux.py`:950  (def)
-- `limite` — `entraide.py`:824  (async def)
-- `limite_grave` — `tableau.py`:1843  (async def)
-- `LinkConfigPanelV2` — `bot.py`:18027  (class)
+- `lignes_progres` — `cadeaux.py`:1005  (def)
+- `limite` — `entraide.py`:837  (async def)
+- `limite_grave` — `tableau.py`:1848  (async def)
+- `LinkConfigPanelV2` — `bot.py`:18198  (class)
 - `Client.lire` — `outils/banc_annees.py`:846  (method)
 - `Local.lire` — `tests/test_candidature_site.py`:92  (method)
 - `Local.lire` — `tests/test_site_equipage.py`:75  (method)
@@ -5047,29 +5255,31 @@
 - `lire` — `registre.py`:170  (async def)
 - `lire_atom` — `websub_youtube.py`:101  (def)
 - `lire_conversation` — `transcript_store.py`:299  (def)
-- `lire_duree` — `cadeaux.py`:645  (def)
-- `lire_jeton` — `tableau.py`:433  (def)
+- `lire_duree` — `cadeaux.py`:700  (def)
+- `lire_jeton` — `tableau.py`:438  (def)
 - `lire_json_sur` — `stockage.py`:38  (def)
 - `lire_liens` — `annonces.py`:281  (def)
-- `lire_media` — `tableau.py`:2724  (async def)
+- `lire_media` — `tableau.py`:2747  (async def)
 - `lire_provenance` — `outils/icones_rellseas.py`:1291  (def)
+- `lire_reglages` — `reponses_auto.py`:297  (def)
 - `lire_sondage` — `sondages.py`:142  (def)
 - `lisse` — `outils/dessins_site.py`:1029  (def)
-- `SocialMediaManager.list_announcements` — `social_media.py`:1313  (method)
+- `SocialMediaManager.list_announcements` — `social_media.py`:1325  (method)
 - `list_announcements` — `tracking_layer.py`:199  (async def)
-- `SocialMediaManager.list_subscriptions` — `social_media.py`:1295  (method)
+- `SocialMediaManager.list_subscriptions` — `social_media.py`:1307  (method)
 - `list_tags` — `tickets_enhance.py`:228  (async def)
 - `list_templates` — `tickets_enhance.py`:481  (async def)
 - `list_unclaimed_tickets` — `tickets_enhance.py`:669  (async def)
-- `liste_noire_site` — `questionnaire.py`:3713  (async def)
+- `liste_noire_site` — `questionnaire.py`:3760  (async def)
 - `lister` — `equipages.py`:722  (async def)
-- `lister` — `questions.py`:230  (async def)
+- `lister` — `questions.py`:277  (async def)
 - `lister` — `sondages.py`:517  (async def)
 - `lister` — `suggestions.py`:616  (async def)
+- `listes` — `tests/test_tickets_interdits.py`:77  (def)
 - `load_cache` — `recidivism.py`:106  (async def)
 - `load_error` — `ocr_scan.py`:86  (def)
-- `SocialMediaManager.load_guild` — `social_media.py`:1183  (method)
-- `load_live_state_from_db` — `bot.py`:19834  (async def)
+- `SocialMediaManager.load_guild` — `social_media.py`:1195  (method)
+- `load_live_state_from_db` — `bot.py`:20005  (async def)
 - `Local` — `tests/test_candidature_site.py`:54  (class)
 - `Local` — `tests/test_longevite.py`:431  (class)
 - `Local` — `tests/test_site_equipage.py`:48  (class)
@@ -5087,20 +5297,20 @@
 - `log_member_join` — `unified_logger.py`:1030  (async def)
 - `log_member_leave` — `unified_logger.py`:1043  (async def)
 - `log_message_delete` — `unified_logger.py`:1059  (async def)
-- `log_security_event` — `bot.py`:832  (async def)
+- `log_security_event` — `bot.py`:836  (async def)
 - `log_security_event` — `unified_logger.py`:818  (async def)
-- `log_staff_action` — `bot.py`:4683  (async def)
-- `LogLevelPanelV2` — `bot.py`:16664  (class)
-- `logs_categories` — `bot.py`:27431  (async def)
-- `logs_setchannel` — `bot.py`:27298  (async def)
-- `logs_status` — `bot.py`:27348  (async def)
-- `LogsCategoriesPanelV2` — `bot.py`:16868  (class)
-- `LogsCategoriesSelect` — `bot.py`:27389  (class)
-- `LogsEventRoutingPanelV2` — `bot.py`:16771  (class)
-- `LogsEventsPanelV2` — `bot.py`:16954  (class)
-- `LogsExclusionsPanelV2` — `bot.py`:17086  (class)
-- `LogsPanelV2` — `bot.py`:16186  (class)
-- `LogsRoutingPanelV2` — `bot.py`:16554  (class)
+- `log_staff_action` — `bot.py`:4685  (async def)
+- `LogLevelPanelV2` — `bot.py`:16835  (class)
+- `logs_categories` — `bot.py`:27637  (async def)
+- `logs_setchannel` — `bot.py`:27504  (async def)
+- `logs_status` — `bot.py`:27554  (async def)
+- `LogsCategoriesPanelV2` — `bot.py`:17039  (class)
+- `LogsCategoriesSelect` — `bot.py`:27595  (class)
+- `LogsEventRoutingPanelV2` — `bot.py`:16942  (class)
+- `LogsEventsPanelV2` — `bot.py`:17125  (class)
+- `LogsExclusionsPanelV2` — `bot.py`:17257  (class)
+- `LogsPanelV2` — `bot.py`:16357  (class)
+- `LogsRoutingPanelV2` — `bot.py`:16725  (class)
 - `longueur` — `outils/verif_limites_ui.py`:22  (def)
 - `lot_18` — `tests/faux_serveur.py`:440  (def)
 - `lots` — `casier.py`:183  (async def)
@@ -5140,7 +5350,7 @@
 - `main` — `outils/refonte_configure.py`:315  (def)
 - `main` — `outils/reparer_noms.py`:93  (def)
 - `main` — `outils/retape_selecteurs.py`:283  (def)
-- `main` — `outils/site_local.py`:1429  (def)
+- `main` — `outils/site_local.py`:1486  (def)
 - `main` — `outils/site_maquette.py`:3219  (def)
 - `main` — `outils/sonde_limiteds.py`:67  (async def)
 - `main` — `outils/sonde_panneaux.py`:37  (def)
@@ -5151,36 +5361,37 @@
 - `main` — `outils/verif_evenements.py`:122  (def)
 - `main` — `outils/verif_noms.py`:87  (def)
 - `main` — `outils/verif_portees.py`:134  (def)
-- `MainPanelV2` — `bot.py`:12223  (class)
+- `MainPanelV2` — `bot.py`:12395  (class)
 - `maintenant` — `activite_calendrier.py`:45  (def)
 - `maj_annonce` — `annonces.py`:403  (async def)
-- `maj_carte` — `cadeaux.py`:1427  (async def)
+- `maj_carte` — `cadeaux.py`:1482  (async def)
 - `maj_carte` — `evenements.py`:1581  (async def)
-- `TicketControlView.manage` — `bot.py`:10687  (method)
+- `TicketControlView.manage` — `bot.py`:10839  (method)
 - `manager_injecte` — `admin_panels_v2.py`:124  (def)
-- `ManualAdapter` — `social_media.py`:313  (class)
+- `ManualAdapter` — `social_media.py`:334  (class)
 - `mark_deleted` — `tracking_layer.py`:219  (async def)
-- `mark_live_announced` — `bot.py`:19880  (async def)
-- `mark_live_still_active` — `bot.py`:19952  (def)
-- `mark_welcome_raid` — `bot.py`:12492  (def)
+- `mark_live_announced` — `bot.py`:20051  (async def)
+- `mark_live_still_active` — `bot.py`:20123  (def)
+- `mark_welcome_raid` — `bot.py`:12664  (def)
 - `markdown` — `outils/banc_annees.py`:1225  (def)
-- `marquer` — `questions.py`:187  (async def)
+- `marquer` — `questions.py`:216  (async def)
 - `marquer_actif` — `activite.py`:142  (async def)
 - `marquer_actu_envoyee` — `roblox_news.py`:1176  (async def)
+- `marquer_bot` — `questions.py`:249  (async def)
 - `marquer_publie` — `roblox_news.py`:921  (async def)
 - `marquer_vu` — `annonces.py`:372  (async def)
 - `marquer_vu` — `evenements.py`:1543  (async def)
 - `masquer` — `outils/dessins_site.py`:707  (def)
-- `Subscription.matches` — `social_media.py`:161  (method)
-- `max_metiers` — `metiers.py`:296  (async def)
+- `Subscription.matches` — `social_media.py`:182  (method)
+- `max_metiers` — `metiers.py`:339  (async def)
 - `media` — `outils/site_maquette.py`:1337  (async def)
-- `media` — `tableau.py`:2757  (async def)
-- `medias_permis` — `site_equipage.py`:1208  (async def)
-- `medias_utilises` — `affiches.py`:1369  (async def)
+- `media` — `tableau.py`:2783  (async def)
+- `medias_permis` — `site_equipage.py`:1234  (async def)
+- `medias_utilises` — `affiches.py`:1428  (async def)
 - `medias_utilises` — `evenements.py`:518  (async def)
-- `medias_utilises` — `site_equipage.py`:1230  (async def)
+- `medias_utilises` — `site_equipage.py`:1256  (async def)
 - `melange` — `outils/dessins_site.py`:2061  (def)
-- `Membre` — `tests/banc_ticket_recrutement.py`:169  (class)
+- `Membre` — `tests/banc_ticket_recrutement.py`:170  (class)
 - `Membre` — `tests/conftest_discord.py`:148  (class)
 - `Membre` — `tests/faux_serveur.py`:264  (class)
 - `Membre` — `tests/test_casier.py`:139  (class)
@@ -5192,16 +5403,16 @@
 - `Membre` — `tests/test_site_moderation.py`:38  (class)
 - `Membre` — `tests/test_site_v2_serveur.py`:64  (class)
 - `Monde.membre` — `tests/faux_serveur.py`:317  (method)
-- `Serveur.membre` — `tests/banc_ticket_recrutement.py`:228  (method)
+- `Serveur.membre` — `tests/banc_ticket_recrutement.py`:229  (method)
 - `Serveur.membre` — `tests/test_metiers.py`:135  (method)
 - `membre` — `outils/site_maquette.py`:1382  (async def)
-- `membre` — `tableau.py`:1765  (async def)
+- `membre` — `tableau.py`:1770  (async def)
 - `membre` — `tests/test_boosts.py`:92  (def)
 - `membre_parti` — `longevite.py`:566  (async def)
 - `MembreR` — `tests/test_revue_reste.py`:521  (class)
 - `Monde.membres` — `outils/banc_annees.py`:141  (method)
 - `memoire_mo` — `stockage.py`:143  (def)
-- `menage_salons_task` — `bot.py`:13782  (async def)
+- `menage_salons_task` — `bot.py`:13954  (async def)
 - `Salon.mention` — `tests/conftest_discord.py`:66  (method)
 - `Salon.mention` — `tests/test_logs_site.py`:72  (method)
 - `Salon.mention` — `tests/test_sondages.py`:44  (method)
@@ -5211,10 +5422,10 @@
 - `MenuDecision` — `suggestions.py`:545  (class)
 - `Message` — `tests/conftest_discord.py`:43  (class)
 - `Message` — `tests/faux_serveur.py`:170  (class)
-- `Message` — `tests/test_faq_tickets.py`:69  (class)
+- `Message` — `tests/test_reponses_auto.py`:25  (class)
 - `Message` — `tests/test_salutations.py`:36  (class)
 - `Message` — `vocabulary.py`:130  (class)
-- `MessageFil` — `tests/banc_ticket_recrutement.py`:85  (class)
+- `MessageFil` — `tests/banc_ticket_recrutement.py`:86  (class)
 - `CheminDuBot.messages_prives` — `outils/site_local_recrutement.py`:190  (method)
 - `messages_publies` — `annonces.py`:191  (async def)
 - `mesure` — `vigilance.py`:65  (def)
@@ -5229,18 +5440,19 @@
 - `mesurer_memoire` — `outils/banc_annees.py`:986  (async def)
 - `mesurer_regles` — `outils/banc_annees.py`:963  (async def)
 - `mesurer_routes` — `outils/banc_annees.py`:872  (async def)
-- `metiers_du_catalogue` — `metiers.py`:366  (async def)
-- `metiers_du_membre` — `metiers.py`:1157  (async def)
-- `metiers_task` — `bot.py`:16165  (async def)
-- `mettre_a_niveau` — `entraide.py`:1837  (async def)
-- `mettre_sur_liste_noire` — `questionnaire.py`:3696  (async def)
-- `migrer_v2` — `entraide.py`:1869  (async def)
-- `mod_active_cmd` — `bot.py`:28671  (async def)
-- `mod_clear` — `bot.py`:27709  (async def)
-- `mod_note_cmd` — `bot.py`:29176  (async def)
+- `metier_des_reponses` — `metiers.py`:538  (def)
+- `metiers_du_catalogue` — `metiers.py`:409  (async def)
+- `metiers_du_membre` — `metiers.py`:1298  (async def)
+- `metiers_task` — `bot.py`:16336  (async def)
+- `mettre_a_niveau` — `entraide.py`:1850  (async def)
+- `mettre_sur_liste_noire` — `questionnaire.py`:3743  (async def)
+- `migrer_v2` — `entraide.py`:1882  (async def)
+- `mod_active_cmd` — `bot.py`:28877  (async def)
+- `mod_clear` — `bot.py`:27915  (async def)
+- `mod_note_cmd` — `bot.py`:29382  (async def)
 - `mode_site` — `unified_logger.py`:298  (async def)
-- `modeles` — `questionnaire.py`:1456  (async def)
-- `ModerationPanelV2` — `bot.py`:19249  (class)
+- `modeles` — `questionnaire.py`:1492  (async def)
+- `ModerationPanelV2` — `bot.py`:19420  (class)
 - `moderniser` — `suggestions.py`:247  (async def)
 - `modifier` — `equipages.py`:455  (async def)
 - `modifier` — `evenements.py`:2026  (async def)
@@ -5258,12 +5470,12 @@
 - `Monde` — `tests/test_vocal_hop.py`:28  (class)
 - `monde` — `tests/test_direct.py`:111  (def)
 - `Banc.monter` — `tests/test_questionnaire.py`:85  (method)
-- `BancTicket.monter` — `tests/banc_ticket_recrutement.py`:436  (method)
-- `monter` — `tableau.py`:2238  (def)
-- `monter_equipage` — `tableau.py`:3325  (def)
-- `montrer_participant` — `cadeaux.py`:1278  (async def)
-- `montrer_participants` — `cadeaux.py`:1198  (async def)
-- `montrer_stats` — `cadeaux.py`:1171  (async def)
+- `BancTicket.monter` — `tests/banc_ticket_recrutement.py`:441  (method)
+- `monter` — `tableau.py`:2243  (def)
+- `monter_equipage` — `tableau.py`:3351  (def)
+- `montrer_participant` — `cadeaux.py`:1333  (async def)
+- `montrer_participants` — `cadeaux.py`:1253  (async def)
+- `montrer_stats` — `cadeaux.py`:1226  (async def)
 - `mot` — `outils/dessins_site.py`:2022  (def)
 - `mot_centre` — `outils/dessins_site.py`:2045  (def)
 - `MotifRefus` — `recrutements.py`:456  (class)
@@ -5274,38 +5486,39 @@
 - `Msg` — `tests/test_sondages.py`:74  (class)
 - `msg_count` — `trust_system.py`:149  (def)
 - `MsgVieux` — `tests/test_revue_reste.py`:317  (class)
-- `mute_cmd` — `bot.py`:28078  (async def)
+- `mute_cmd` — `bot.py`:28284  (async def)
 - `n` — `outils/dessins_site.py`:79  (def)
 - `n1` — `outils/dessins_site.py`:85  (def)
-- `nb_actifs` — `cadeaux.py`:348  (def)
-- `nb_conditions` — `cadeaux.py`:579  (def)
-- `nb_inscrits` — `cadeaux.py`:324  (async def)
-- `nb_pages` — `questionnaire.py`:1970  (def)
-- `nettoyage_site` — `questionnaire.py`:4802  (async def)
-- `nettoyage_site_task` — `bot.py`:7141  (async def)
+- `nb_actifs` — `cadeaux.py`:356  (def)
+- `nb_conditions` — `cadeaux.py`:634  (def)
+- `nb_inscrits` — `cadeaux.py`:332  (async def)
+- `nb_pages` — `questionnaire.py`:2006  (def)
+- `nettoyage_site` — `questionnaire.py`:4849  (async def)
+- `nettoyage_site_task` — `bot.py`:7287  (async def)
 - `nettoyer` — `casier.py`:129  (async def)
-- `nettoyer` — `questions.py`:70  (def)
+- `nettoyer` — `questions.py`:92  (def)
 - `nettoyer` — `recrutements.py`:300  (def)
-- `nettoyer` — `tableau.py`:2920  (async def)
-- `nettoyer_avis` — `cadeaux.py`:1348  (async def)
+- `nettoyer` — `tableau.py`:2946  (async def)
+- `nettoyer_avis` — `cadeaux.py`:1403  (async def)
 - `nettoyer_comme_le_bot` — `outils/banc_annees.py`:743  (async def)
-- `nettoyer_liste_noire` — `questionnaire.py`:4771  (async def)
-- `nettoyer_maintenant` — `questionnaire.py`:4815  (async def)
+- `nettoyer_liste_noire` — `questionnaire.py`:4818  (async def)
+- `nettoyer_maintenant` — `questionnaire.py`:4862  (async def)
 - `nettoyer_obsoletes` — `outils/icones_rellseas.py`:1226  (def)
-- `nettoyer_regle` — `questionnaire.py`:4514  (async def)
-- `nettoyer_si_du` — `tableau.py`:2966  (async def)
+- `nettoyer_regle` — `questionnaire.py`:4561  (async def)
+- `nettoyer_si_du` — `tableau.py`:2992  (async def)
 - `neuf` — `tests/test_journal.py`:25  (def)
 - `new_token` — `transcript_store.py`:45  (def)
-- `NewPanelModal` — `bot.py`:21025  (class)
+- `NewPanelModal` — `bot.py`:21196  (class)
 - `Monde.nom` — `outils/site_maquette.py`:324  (method)
 - `Monde.nom` — `tests/faux_serveur.py`:309  (method)
 - `nom_appel` — `outils/verif_limites_ui.py`:34  (def)
 - `nom_de_salon_systeme` — `activite_demontage.py`:119  (def)
 - `nom_discord` — `outils/icones_rellseas.py`:1153  (def)
-- `nom_du_fil` — `entraide.py`:603  (def)
+- `nom_du_fil` — `entraide.py`:616  (def)
 - `nom_du_fil` — `equipages.py`:245  (def)
+- `nom_du_grade` — `hierarchie.py`:213  (def)
 - `nom_du_jour` — `nettoyage.py`:36  (def)
-- `nom_du_role` — `metiers.py`:398  (def)
+- `nom_du_role` — `metiers.py`:441  (def)
 - `nom_fichier_wiki` — `outils/icones_rellseas.py`:767  (def)
 - `nom_groupe_de_decorateur` — `outils/purge_commandes.py`:77  (def)
 - `nom_lisible` — `notifs.py`:32  (def)
@@ -5315,18 +5528,19 @@
 - `CheminDuBot.nommer_chef` — `outils/site_local_recrutement.py`:156  (method)
 - `nommer_groupe` — `textes.py`:136  (def)
 - `noms` — `tests/test_zones.py`:135  (def)
-- `noms_choisis` — `metiers.py`:380  (def)
+- `noms_choisis` — `metiers.py`:423  (def)
 - `noms_dans_chaines` — `outils/purge_morts.py`:60  (def)
 - `noms_lies` — `outils/verif_noms.py`:25  (def)
 - `normaliser` — `config_salons.py`:37  (def)
 - `normaliser` — `protection_mineurs.py`:70  (def)
-- `normaliser` — `questionnaire.py`:857  (def)
+- `normaliser` — `questionnaire.py`:893  (def)
 - `normalize_lang` — `i18n.py`:77  (def)
-- `normalize_username` — `bot.py`:11690  (def)
+- `normalize_username` — `bot.py`:11842  (def)
 - `Banc.noter` — `tests/test_questionnaire.py`:147  (method)
-- `BancTicket.noter` — `tests/banc_ticket_recrutement.py`:464  (method)
+- `BancTicket.noter` — `tests/banc_ticket_recrutement.py`:469  (method)
 - `Journal.noter` — `tests/test_tickets_rellseas.py`:76  (method)
 - `noter` — `registre.py`:114  (async def)
+- `noter` — `tickets_interdits.py`:411  (async def)
 - `noter_action` — `securite_site.py`:176  (async def)
 - `noter_appareil` — `securite_site.py`:144  (async def)
 - `noter_echec_actu` — `roblox_news.py`:1194  (async def)
@@ -5336,8 +5550,8 @@
 - `Monde.nouveau_fil` — `tests/faux_serveur.py`:312  (method)
 - `Monde.nouvel_id` — `outils/site_maquette.py`:1288  (method)
 - `Monde.nouvel_id` — `tests/faux_serveur.py`:294  (method)
-- `now` — `bot.py`:674  (def)
-- `NumberConfigModal` — `bot.py`:18198  (class)
+- `now` — `bot.py`:678  (def)
+- `NumberConfigModal` — `bot.py`:18369  (class)
 - `Obj` — `tests/conftest_discord.py`:23  (class)
 - `Obj` — `tests/test_actus_seules.py`:19  (class)
 - `Obj` — `tests/test_autos.py`:17  (class)
@@ -5349,94 +5563,96 @@
 - `Obj` — `tests/test_tickets_inactifs_combat.py`:28  (class)
 - `Obj` — `tests/test_tickets_rellseas.py`:34  (class)
 - `Obj` — `tests/test_transcripts_nommes.py`:30  (class)
-- `objet_direct` — `tableau.py`:3491  (def)
+- `objet_direct` — `tableau.py`:3517  (def)
 - `observation_jours` — `activite.py`:289  (async def)
-- `off_list_cmd` — `bot.py`:3255  (async def)
-- `off_off_cmd` — `bot.py`:3224  (async def)
-- `off_on_cmd` — `bot.py`:3006  (async def)
-- `on_app_command_error` — `bot.py`:21859  (async def)
-- `on_audit_log_entry_create` — `bot.py`:23901  (async def)
-- `on_bulk_message_delete` — `bot.py`:24821  (async def)
-- `FormulaireFiche.on_error` — `questionnaire.py`:3873  (method)
-- `FormulairePage.on_error` — `questionnaire.py`:2662  (method)
-- `FormulaireRefus.on_error` — `questionnaire.py`:2633  (method)
+- `occupes` — `metiers.py`:489  (async def)
+- `off_list_cmd` — `bot.py`:3259  (async def)
+- `off_off_cmd` — `bot.py`:3228  (async def)
+- `off_on_cmd` — `bot.py`:3010  (async def)
+- `on_app_command_error` — `bot.py`:22037  (async def)
+- `on_audit_log_entry_create` — `bot.py`:24103  (async def)
+- `on_bulk_message_delete` — `bot.py`:25020  (async def)
+- `FormulaireFiche.on_error` — `questionnaire.py`:3920  (method)
+- `FormulairePage.on_error` — `questionnaire.py`:2698  (method)
+- `FormulaireRefus.on_error` — `questionnaire.py`:2669  (method)
 - `_ChercheModal.on_error` — `rellseas_panneau.py`:604  (method)
 - `_SafeErrorView.on_error` — `ui_v2.py`:55  (method)
-- `on_guild_channel_create` — `bot.py`:25191  (async def)
-- `on_guild_channel_delete` — `bot.py`:25524  (async def)
-- `on_guild_channel_update` — `bot.py`:25543  (async def)
-- `on_guild_join` — `bot.py`:23007  (async def)
-- `on_guild_role_create` — `bot.py`:25570  (async def)
-- `on_guild_role_delete` — `bot.py`:25584  (async def)
-- `on_guild_role_update` — `bot.py`:25598  (async def)
+- `on_guild_channel_create` — `bot.py`:25392  (async def)
+- `on_guild_channel_delete` — `bot.py`:25725  (async def)
+- `on_guild_channel_update` — `bot.py`:25744  (async def)
+- `on_guild_join` — `bot.py`:23209  (async def)
+- `on_guild_role_create` — `bot.py`:25771  (async def)
+- `on_guild_role_delete` — `bot.py`:25785  (async def)
+- `on_guild_role_update` — `bot.py`:25799  (async def)
 - `on_infraction` — `recidivism.py`:381  (async def)
-- `on_interaction` — `bot.py`:23059  (async def)
-- `on_member_ban` — `bot.py`:23583  (async def)
-- `on_member_join` — `bot.py`:24234  (async def)
+- `on_interaction` — `bot.py`:23261  (async def)
+- `on_member_ban` — `bot.py`:23785  (async def)
+- `on_member_join` — `bot.py`:24436  (async def)
 - `on_member_join` — `raid_detector.py`:266  (async def)
-- `on_member_remove` — `bot.py`:23619  (async def)
-- `on_member_update` — `bot.py`:23850  (async def)
+- `on_member_remove` — `bot.py`:23821  (async def)
+- `on_member_update` — `bot.py`:24052  (async def)
 - `on_member_update_hook` — `impersonation_detector.py`:414  (async def)
-- `on_message` — `bot.py`:25782  (async def)
-- `on_message_delete` — `bot.py`:24805  (async def)
-- `on_message_edit` — `bot.py`:25169  (async def)
+- `on_message` — `bot.py`:25983  (async def)
+- `on_message_delete` — `bot.py`:25004  (async def)
+- `on_message_edit` — `bot.py`:25370  (async def)
 - `on_message_hook` — `anti_token_leak.py`:100  (async def)
 - `on_message_hook` — `honeypot.py`:151  (async def)
 - `on_message_hook` — `token_grabber.py`:305  (async def)
 - `on_message_hook` — `webhook_leak.py`:160  (async def)
-- `on_raw_poll_vote_add` — `bot.py`:23042  (async def)
-- `on_raw_reaction_add` — `bot.py`:29571  (async def)
-- `on_raw_reaction_remove` — `bot.py`:29606  (async def)
-- `on_raw_thread_delete` — `bot.py`:25513  (async def)
-- `on_ready` — `bot.py`:22212  (async def)
-- `AddDomainModal.on_submit` — `bot.py`:18150  (method)
-- `AddQModal.on_submit` — `bot.py`:21612  (method)
-- `AltConfidenceModal.on_submit` — `bot.py`:18586  (method)
-- `DurationConfigModal.on_submit` — `bot.py`:18421  (method)
-- `Formulaire.on_submit` — `entraide.py`:852  (method)
+- `on_raw_poll_vote_add` — `bot.py`:23244  (async def)
+- `on_raw_reaction_add` — `bot.py`:29783  (async def)
+- `on_raw_reaction_remove` — `bot.py`:29818  (async def)
+- `on_raw_thread_delete` — `bot.py`:25714  (async def)
+- `on_ready` — `bot.py`:22414  (async def)
+- `AddDomainModal.on_submit` — `bot.py`:18321  (method)
+- `AddQModal.on_submit` — `bot.py`:21790  (method)
+- `AltConfidenceModal.on_submit` — `bot.py`:18757  (method)
+- `DurationConfigModal.on_submit` — `bot.py`:18592  (method)
+- `Formulaire.on_submit` — `entraide.py`:865  (method)
 - `Formulaire.on_submit` — `equipages.py`:378  (method)
 - `Formulaire.on_submit` — `suggestions.py`:401  (method)
 - `FormulaireAnnonce.on_submit` — `annonces.py`:520  (method)
-- `FormulaireChance.on_submit` — `cadeaux.py`:2007  (method)
-- `FormulaireConditions.on_submit` — `cadeaux.py`:1986  (method)
+- `FormulaireChance.on_submit` — `cadeaux.py`:2063  (method)
+- `FormulaireConditions.on_submit` — `cadeaux.py`:2042  (method)
 - `FormulaireDecision.on_submit` — `suggestions.py`:541  (method)
-- `FormulaireFiche.on_submit` — `questionnaire.py`:3869  (method)
+- `FormulaireFiche.on_submit` — `questionnaire.py`:3916  (method)
 - `FormulaireLiens.on_submit` — `liens_jeux.py`:139  (method)
-- `FormulaireLot.on_submit` — `cadeaux.py`:1933  (method)
-- `FormulairePage.on_submit` — `questionnaire.py`:2658  (method)
-- `FormulaireRecherche.on_submit` — `cadeaux.py`:843  (method)
-- `FormulaireRefus.on_submit` — `questionnaire.py`:2630  (method)
+- `FormulaireLot.on_submit` — `cadeaux.py`:1989  (method)
+- `FormulairePage.on_submit` — `questionnaire.py`:2694  (method)
+- `FormulaireRecherche.on_submit` — `cadeaux.py`:898  (method)
+- `FormulaireRefus.on_submit` — `questionnaire.py`:2666  (method)
 - `MotifRefus.on_submit` — `recrutements.py`:464  (method)
-- `NewPanelModal.on_submit` — `bot.py`:21034  (method)
-- `NumberConfigModal.on_submit` — `bot.py`:18219  (method)
-- `PanelAppearanceModalSimple.on_submit` — `bot.py`:21367  (method)
-- `SetMaxModal.on_submit` — `bot.py`:21548  (method)
-- `TicketCloseModal.on_submit` — `bot.py`:10348  (method)
-- `TicketNoteModal.on_submit` — `bot.py`:10936  (method)
-- `TicketQuestionnaireModal.on_submit` — `bot.py`:8969  (method)
-- `WelcomeMessageModalSimple.on_submit` — `bot.py`:21398  (method)
-- `_AntiRaidThresholdsModal.on_submit` — `bot.py`:12749  (method)
-- `_BadwordsAddListModal.on_submit` — `bot.py`:17852  (method)
-- `_BadwordsRemoveListModal.on_submit` — `bot.py`:17897  (method)
-- `_BadwordsThresholdsModal.on_submit` — `bot.py`:17932  (method)
+- `NewPanelModal.on_submit` — `bot.py`:21205  (method)
+- `NumberConfigModal.on_submit` — `bot.py`:18390  (method)
+- `PanelAppearanceModalSimple.on_submit` — `bot.py`:21538  (method)
+- `SetMaxModal.on_submit` — `bot.py`:21726  (method)
+- `TicketCloseModal.on_submit` — `bot.py`:10497  (method)
+- `TicketNoteModal.on_submit` — `bot.py`:11088  (method)
+- `TicketQuestionnaireModal.on_submit` — `bot.py`:9115  (method)
+- `WelcomeMessageModalSimple.on_submit` — `bot.py`:21569  (method)
+- `_AntiRaidThresholdsModal.on_submit` — `bot.py`:12921  (method)
+- `_BadwordsAddListModal.on_submit` — `bot.py`:18023  (method)
+- `_BadwordsRemoveListModal.on_submit` — `bot.py`:18068  (method)
+- `_BadwordsThresholdsModal.on_submit` — `bot.py`:18103  (method)
 - `_ChercheModal.on_submit` — `rellseas_panneau.py`:529  (method)
-- `_RadieAppelModal.on_submit` — `bot.py`:2654  (method)
-- `_RgpdPurgeModal.on_submit` — `bot.py`:12000  (method)
+- `_RadieAppelModal.on_submit` — `bot.py`:2658  (method)
+- `_RgpdPurgeModal.on_submit` — `bot.py`:12172  (method)
 - `_SocialHandleModal.on_submit` — `admin_panels_v2.py`:383  (method)
-- `_StaffSanctionModal.on_submit` — `bot.py`:28536  (method)
-- `on_thread_create` — `bot.py`:23029  (async def)
-- `on_user_update` — `bot.py`:23976  (async def)
+- `_StaffSanctionModal.on_submit` — `bot.py`:28742  (method)
+- `on_thread_create` — `bot.py`:23231  (async def)
+- `on_user_update` — `bot.py`:24178  (async def)
 - `on_user_update_hook` — `impersonation_detector.py`:438  (async def)
-- `on_voice_state_update` — `bot.py`:31153  (async def)
-- `on_webhooks_update` — `bot.py`:25402  (async def)
+- `on_voice_state_update` — `bot.py`:31365  (async def)
+- `on_webhooks_update` — `bot.py`:25603  (async def)
 - `_Guild.onboarding` — `tests/test_visibilite_serveur.py`:59  (method)
 - `opaque` — `outils/icones_rellseas.py`:1041  (def)
-- `options_selecteur` — `metiers.py`:430  (async def)
+- `options_selecteur` — `metiers.py`:473  (async def)
 - `ordonner` — `zones.py`:738  (async def)
 - `ordonner_publication` — `roblox_news.py`:122  (def)
 - `Serveur.ordre` — `tests/test_metiers.py`:145  (method)
+- `ordre_de` — `hierarchie.py`:476  (def)
 - `ou` — `outils/dessins_site.py`:685  (def)
-- `oublier` — `site_vitrine.py`:91  (def)
+- `oublier` — `site_vitrine.py`:93  (def)
 - `oublier_publies` — `roblox_news.py`:1018  (async def)
 - `ouvertes` — `suggestions.py`:121  (async def)
 - `ouvertes` — `vigilance.py`:173  (async def)
@@ -5446,15 +5662,15 @@
 - `Client.ouvrir` — `outils/banc_annees.py`:835  (method)
 - `ouvrir` — `annonces.py`:455  (async def)
 - `ouvrir` — `tickets_fils.py`:128  (async def)
-- `ouvrir_composeur` — `cadeaux.py`:2179  (async def)
+- `ouvrir_composeur` — `cadeaux.py`:2235  (async def)
 - `Local.ouvrir_etape` — `tests/test_candidature_site.py`:146  (method)
-- `ouvrir_formulaire` — `questionnaire.py`:4934  (async def)
-- `ouvrir_gestion` — `cadeaux.py`:2189  (async def)
+- `ouvrir_formulaire` — `questionnaire.py`:5180  (async def)
+- `ouvrir_gestion` — `cadeaux.py`:2245  (async def)
 - `ouvrir_onboarding` — `visibilite_serveur.py`:105  (async def)
 - `CheminDuBot.ouvrir_par_le_panneau` — `outils/site_local_recrutement.py`:81  (method)
 - `ouvrir_rgba` — `outils/icones_rellseas.py`:1031  (def)
 - `ouvrir_session` — `candidature_site.py`:609  (async def)
-- `BancTicket.ouvrir_ticket` — `tests/banc_ticket_recrutement.py`:468  (method)
+- `BancTicket.ouvrir_ticket` — `tests/banc_ticket_recrutement.py`:473  (method)
 - `Salon.overwrites` — `tests/test_tickets_rellseas.py`:49  (method)
 - `FauxSalon.overwrites_for` — `tests/test_off_radiation.py`:127  (method)
 - `FauxSalon.overwrites_for` — `tests/test_tickets_fils.py`:76  (method)
@@ -5464,36 +5680,37 @@
 - `Salon.overwrites_for` — `tests/test_sondages.py`:67  (method)
 - `_Salon.overwrites_for` — `tests/test_activite_demontage.py`:67  (method)
 - `_Salon.overwrites_for` — `tests/test_bouclier.py`:83  (method)
-- `owner_mod_stats_cmd` — `bot.py`:23113  (async def)
+- `owner_mod_stats_cmd` — `bot.py`:23315  (async def)
 - `FauxSalon.ows` — `tests/test_tickets_fils.py`:81  (method)
 - `page` — `candidature_site.py`:1015  (async def)
 - `page` — `outils/site_maquette.py`:1297  (async def)
-- `page` — `site_vitrine.py`:401  (async def)
-- `page` — `tableau.py`:1696  (async def)
+- `page` — `site_vitrine.py`:498  (async def)
+- `page` — `tableau.py`:1701  (async def)
 - `CheminDuBot.page_candidat` — `outils/site_local_recrutement.py`:48  (method)
-- `page_equipage` — `tableau.py`:3368  (async def)
+- `page_equipage` — `tableau.py`:3394  (async def)
 - `page_fichier_wiki` — `outils/icones_rellseas.py`:774  (def)
-- `YouTubeRSSAdapter.page_url` — `social_media.py`:861  (method)
-- `page_web` — `questionnaire.py`:5138  (def)
-- `pages_envoi` — `questionnaire.py`:1978  (def)
-- `PaginatedImmuneRemoveView` — `bot.py`:19722  (class)
+- `YouTubeRSSAdapter.page_url` — `social_media.py`:873  (method)
+- `page_web` — `questionnaire.py`:5384  (def)
+- `pages_envoi` — `questionnaire.py`:2014  (def)
+- `PaginatedImmuneRemoveView` — `bot.py`:19893  (class)
 - `Palette` — `ui_v2.py`:94  (class)
-- `PanelAppearanceModalSimple` — `bot.py`:21350  (class)
-- `PanelBlacklistView` — `bot.py`:21419  (class)
-- `PanelEditViewV2` — `bot.py`:21093  (class)
-- `PanelQsView` — `bot.py`:21559  (class)
-- `panneau_direction` — `questionnaire.py`:2386  (def)
+- `PanelAppearanceModalSimple` — `bot.py`:21521  (class)
+- `PanelBlacklistView` — `bot.py`:21590  (class)
+- `PanelEditViewV2` — `bot.py`:21264  (class)
+- `PanelQsView` — `bot.py`:21737  (class)
+- `panneau_direction` — `questionnaire.py`:2422  (def)
+- `panneaux` — `tickets_interdits.py`:148  (def)
 - `panneaux_tickets` — `rellseas_panneau.py`:99  (def)
 - `Monde.par_jour` — `outils/site_maquette.py`:1164  (method)
 - `par_jour` — `registre.py`:197  (async def)
-- `parcours` — `questionnaire.py`:1493  (async def)
+- `parcours` — `questionnaire.py`:1529  (async def)
 - `parcours` — `tests/test_evenements_site.py`:95  (async def)
 - `parcours_regle` — `tests/test_recrutement_ticket.py`:88  (async def)
-- `parcours_site` — `questionnaire.py`:5348  (async def)
-- `parcours_tous` — `questionnaire.py`:5366  (async def)
+- `parcours_site` — `questionnaire.py`:5594  (async def)
+- `parcours_tous` — `questionnaire.py`:5612  (async def)
 - `parent` — `tickets_fils.py`:101  (async def)
-- `part_libre` — `data_cleanup.py`:204  (async def)
-- `participer` — `cadeaux.py`:1099  (async def)
+- `part_libre` — `data_cleanup.py`:206  (async def)
+- `participer` — `cadeaux.py`:1154  (async def)
 - `Partiel` — `tests/conftest_discord.py`:32  (class)
 - `Partiel` — `tests/faux_serveur.py`:12  (class)
 - `Passager` — `tests/test_persistants.py`:25  (class)
@@ -5516,48 +5733,51 @@
 - `permissions_parent` — `tickets_fils.py`:37  (def)
 - `perms` — `tests/conftest_discord.py`:28  (def)
 - `Persistant` — `tests/test_persistants.py`:16  (class)
-- `persistent_msg_cleaner` — `bot.py`:32288  (async def)
+- `persistent_msg_cleaner` — `bot.py`:32500  (async def)
 - `peupler` — `outils/banc_annees.py`:162  (async def)
-- `peut_certifier` — `entraide.py`:1101  (async def)
+- `peut_certifier` — `entraide.py`:1114  (async def)
 - `peut_evenements` — `evenements.py`:1617  (def)
-- `peut_participer` — `cadeaux.py`:628  (def)
+- `peut_participer` — `cadeaux.py`:683  (def)
 - `peut_proposer` — `suggestions.py`:378  (async def)
-- `peut_publier` — `entraide.py`:812  (async def)
+- `peut_publier` — `entraide.py`:825  (async def)
 - `phase_de` — `evenements.py`:1092  (def)
 - `photographier` — `invitations.py`:89  (async def)
 - `phrase` — `roblox_pings.py`:230  (def)
-- `phrase_bilan` — `metiers.py`:915  (def)
+- `phrase_bilan` — `metiers.py`:1025  (def)
 - `Piece` — `tests/test_zones.py`:489  (class)
 - `ping` — `notifs.py`:75  (def)
-- `placer_sous_le_clan` — `metiers.py`:548  (async def)
+- `placer_sous_le_clan` — `metiers.py`:658  (async def)
+- `places` — `metiers.py`:503  (async def)
 - `plafonner` — `transcript_store.py`:335  (def)
 - `plafonner_dossier` — `stockage.py`:114  (def)
 - `plan` — `config_salons.py`:76  (def)
 - `plan_v2` — `config_salons.py`:142  (def)
 - `planifier` — `vigilance.py`:83  (def)
-- `planifier_attribution` — `metiers.py`:900  (def)
-- `planifier_guide` — `metiers.py`:1112  (def)
+- `planifier_attribution` — `metiers.py`:1010  (def)
+- `planifier_guide` — `metiers.py`:1224  (def)
 - `planifier_maj` — `annonces.py`:389  (def)
-- `planifier_maj` — `cadeaux.py`:1400  (def)
+- `planifier_maj` — `cadeaux.py`:1455  (def)
 - `planifier_maj` — `evenements.py`:1564  (def)
-- `Platform` — `social_media.py`:53  (class)
-- `PlatformAdapter` — `social_media.py`:268  (class)
-- `YouTubeRSSAdapter.playlist_url` — `social_media.py`:886  (method)
+- `plat` — `questions.py`:99  (def)
+- `Platform` — `social_media.py`:74  (class)
+- `PlatformAdapter` — `social_media.py`:289  (class)
+- `YouTubeRSSAdapter.playlist_url` — `social_media.py`:898  (method)
 - `Dessin.plein` — `outils/dessins_site.py`:513  (method)
+- `plier` — `sujets_interdits.py`:323  (def)
 - `Local.png` — `tests/test_site_equipage.py`:90  (method)
 - `pointe` — `outils/dessins_site.py`:1511  (def)
 - `police` — `outils/affiche_recrutement.py`:27  (def)
-- `SocialMediaManager.poll_all` — `social_media.py`:1439  (method)
-- `SocialMediaManager.poll_subscription` — `social_media.py`:1352  (method)
+- `SocialMediaManager.poll_all` — `social_media.py`:1451  (method)
+- `SocialMediaManager.poll_subscription` — `social_media.py`:1364  (method)
 - `poly` — `outils/dessins_site.py`:339  (def)
 - `poly_arrondi` — `outils/dessins_site.py`:1521  (def)
-- `portees` — `tests/test_acces_site.py`:270  (def)
+- `portees` — `tests/test_acces_site.py`:291  (def)
 - `portes_de` — `candidature_site.py`:460  (def)
 - `porteurs` — `securite_site.py`:358  (def)
 - `portrait` — `outils/icones_rellseas.py`:1088  (def)
-- `posable` — `questionnaire.py`:1426  (def)
-- `poser_affiche` — `questionnaire.py`:2798  (async def)
-- `poser_etape1` — `questionnaire.py`:2834  (async def)
+- `posable` — `questionnaire.py`:1462  (def)
+- `poser_affiche` — `questionnaire.py`:2834  (async def)
+- `poser_etape1` — `questionnaire.py`:2870  (async def)
 - `poser_panneau` — `vocaux.py`:150  (async def)
 - `possible` — `tickets_fils.py`:27  (def)
 - `Client.post` — `tests/test_evenements_site.py`:77  (method)
@@ -5565,41 +5785,46 @@
 - `Local.post` — `tests/test_site_v2_port.py`:110  (method)
 - `post` — `zones.py`:306  (def)
 - `PostArchive` — `tests/test_revue_reste.py`:615  (class)
-- `PostType` — `social_media.py`:62  (class)
-- `premiere_incomplete` — `questionnaire.py`:1994  (def)
+- `PostType` — `social_media.py`:83  (class)
+- `premiere_incomplete` — `questionnaire.py`:2030  (def)
 - `Banc.preparer` — `tests/test_questionnaire.py`:91  (method)
-- `BancTicket.preparer` — `tests/banc_ticket_recrutement.py`:395  (method)
+- `BancTicket.preparer` — `tests/banc_ticket_recrutement.py`:397  (method)
+- `preparer` — `tests/test_tickets_interdits.py`:72  (async def)
 - `pres` — `outils/dessins_site.py`:676  (def)
 - `presence` — `activite.py`:339  (async def)
 - `presences` — `activite.py`:370  (async def)
-- `pret` — `cadeaux.py`:166  (def)
+- `pret` — `cadeaux.py`:174  (def)
 - `pret` — `candidature_site.py`:301  (def)
 - `pret` — `evenements.py`:347  (def)
+- `pret` — `hierarchie.py`:143  (def)
 - `pret` — `longevite.py`:67  (def)
-- `pret` — `metiers.py`:232  (def)
-- `pret` — `questionnaire.py`:703  (def)
-- `pret` — `site_equipage.py`:299  (def)
-- `pret` — `site_vitrine.py`:87  (def)
+- `pret` — `metiers.py`:269  (def)
+- `pret` — `questionnaire.py`:735  (def)
+- `pret` — `reponses_auto.py`:262  (def)
+- `pret` — `site_equipage.py`:300  (def)
+- `pret` — `site_vitrine.py`:89  (def)
 - `pret` — `textes.py`:81  (def)
+- `pret` — `tickets_interdits.py`:100  (def)
 - `prevenir` — `clan.py`:57  (async def)
-- `prevenir` — `entraide.py`:572  (def)
+- `prevenir` — `entraide.py`:585  (def)
 - `prevenir_auteur` — `suggestions.py`:652  (async def)
-- `TicketControlView.priority` — `bot.py`:10541  (method)
+- `TicketControlView.priority` — `bot.py`:10690  (method)
 - `prive` — `config_salons.py`:57  (def)
-- `progres` — `cadeaux.py`:936  (def)
-- `proposer_chef` — `questionnaire.py`:4205  (async def)
-- `proposition` — `questionnaire.py`:5387  (async def)
-- `proposition_chef` — `questionnaire.py`:4189  (async def)
+- `progres` — `cadeaux.py`:991  (def)
+- `proposer_chef` — `questionnaire.py`:4252  (async def)
+- `proposition` — `questionnaire.py`:5633  (async def)
+- `proposition_chef` — `questionnaire.py`:4236  (async def)
 - `propre` — `registre.py`:82  (def)
 - `propre` — `textes.py`:287  (def)
-- `ProtDetailV2` — `bot.py`:17297  (class)
-- `protege_de` — `affiches.py`:1140  (def)
-- `ProtPanelV2` — `bot.py`:17234  (class)
+- `ProtDetailV2` — `bot.py`:17468  (class)
+- `protection` — `tickets_interdits.py`:184  (async def)
+- `protege_de` — `affiches.py`:1199  (def)
+- `ProtPanelV2` — `bot.py`:17405  (class)
 - `prune_old` — `tracking_layer.py`:302  (async def)
 - `prune_to_max` — `tracking_layer.py`:233  (async def)
 - `public_base_url` — `transcript_store.py`:315  (def)
 - `publier` — `annonces.py`:723  (async def)
-- `publier` — `entraide.py`:870  (async def)
+- `publier` — `entraide.py`:883  (async def)
 - `publier` — `equipages.py`:399  (async def)
 - `publier` — `evenements.py`:1775  (async def)
 - `publier` — `suggestions.py`:419  (async def)
@@ -5607,31 +5832,31 @@
 - `publier` — `tests/test_equipages.py`:65  (def)
 - `publier` — `tests/test_evenements.py`:139  (def)
 - `publier_actu` — `roblox_panneau.py`:381  (async def)
-- `SocialMediaManager.publier_post` — `social_media.py`:1383  (method)
+- `SocialMediaManager.publier_post` — `social_media.py`:1395  (method)
 - `publier_recap` — `recrutements.py`:504  (async def)
-- `purge_apercu` — `questionnaire.py`:4674  (async def)
-- `purge_executer` — `questionnaire.py`:4689  (async def)
+- `purge_apercu` — `questionnaire.py`:4721  (async def)
+- `purge_executer` — `questionnaire.py`:4736  (async def)
 - `purge_old` — `transcript_store.py`:347  (def)
-- `purge_user` — `gdpr.py`:245  (async def)
-- `purger` — `cadeaux.py`:1656  (async def)
+- `purge_user` — `gdpr.py`:253  (async def)
+- `purger` — `cadeaux.py`:1711  (async def)
 - `purger` — `evenements.py`:531  (async def)
-- `purger` — `questionnaire.py`:4480  (async def)
+- `purger` — `questionnaire.py`:4527  (async def)
 - `purger` — `registre.py`:103  (async def)
 - `purger` — `roblox_news.py`:1039  (async def)
 - `purger_file_actu` — `roblox_news.py`:1254  (async def)
 - `purger_salon` — `nettoyage.py`:131  (async def)
-- `purges_en_regle` — `tableau.py`:3245  (def)
+- `purges_en_regle` — `tableau.py`:3271  (def)
 - `qr_payloads` — `ocr_scan.py`:262  (def)
 - `Monde.quand` — `outils/banc_annees.py`:158  (method)
 - `quand_change` — `textes.py`:152  (def)
-- `questions` — `questionnaire.py`:1431  (async def)
-- `questions_chef` — `questionnaire.py`:3941  (async def)
-- `questions_de_la_page` — `questionnaire.py`:1974  (def)
+- `questions` — `questionnaire.py`:1467  (async def)
+- `questions_chef` — `questionnaire.py`:3988  (async def)
+- `questions_de_la_page` — `questionnaire.py`:2010  (def)
 - `Monde.questions_donnees` — `outils/site_maquette.py`:639  (method)
 - `StubDB.queue_rows` — `tests/conftest.py`:54  (method)
 - `Monde.qui` — `outils/banc_annees.py`:151  (method)
 - `qui_a_vu` — `annonces.py`:184  (async def)
-- `quitter` — `cadeaux.py`:1150  (async def)
+- `quitter` — `cadeaux.py`:1205  (async def)
 - `r_affiche` — `outils/site_maquette.py`:1906  (def)
 - `r_affiche_get` — `outils/site_maquette.py`:1899  (def)
 - `r_affiche_restaurer` — `outils/site_maquette.py`:1978  (def)
@@ -5680,17 +5905,19 @@
 - `r_textes` — `outils/site_maquette.py`:2921  (def)
 - `r_textes_site` — `outils/site_maquette.py`:2926  (def)
 - `r_tickets_fermes` — `outils/site_maquette.py`:2597  (def)
-- `RadieAppelButton` — `bot.py`:2674  (class)
-- `RadieDecisionButton` — `bot.py`:2808  (class)
-- `radier_menu_contextuel` — `bot.py`:3036  (async def)
+- `RadieAppelButton` — `bot.py`:2678  (class)
+- `RadieDecisionButton` — `bot.py`:2812  (class)
+- `radier_menu_contextuel` — `bot.py`:3040  (async def)
 - `rafraichir` — `sondages.py`:379  (async def)
 - `rafraichir_entete` — `boosts.py`:285  (async def)
 - `rafraichir_plus_tard` — `suggestions.py`:355  (def)
 - `RaidAlertButton` — `raid_detector.py`:602  (class)
 - `raison_du_refus` — `sondages.py`:289  (async def)
 - `Rang` — `tests/test_revue_reste.py`:510  (class)
+- `rang_affiche` — `hierarchie.py`:459  (def)
+- `rang_de` — `hierarchie.py`:449  (def)
 - `Rangeable` — `tests/faux_serveur.py`:101  (class)
-- `rangs_grades` — `site_equipage.py`:863  (def)
+- `rangs_grades` — `site_equipage.py`:874  (def)
 - `rangs_modifiables` — `candidature_site.py`:552  (def)
 - `rappel` — `websub_youtube.py`:59  (def)
 - `rappels` — `clan.py`:84  (async def)
@@ -5698,62 +5925,68 @@
 - `rattraper` — `recrutements.py`:183  (async def)
 - `FauxPiece.read` — `tests/test_annonces.py`:29  (method)
 - `Requete.read` — `tests/test_publications.py`:95  (method)
+- `_Asset.read` — `tests/test_vitrine_portraits.py`:33  (method)
+- `_Rep.read` — `tests/test_gif_texte.py`:24  (method)
 - `recadrer` — `bannieres.py`:85  (def)
 - `recentes` — `annonces.py`:147  (async def)
 - `recentes` — `entraide.py`:469  (async def)
-- `recents` — `cadeaux.py`:264  (async def)
+- `recents` — `cadeaux.py`:272  (async def)
 - `recherche` — `outils/site_maquette.py`:1400  (async def)
-- `recherche` — `tableau.py`:881  (async def)
+- `recherche` — `tableau.py`:886  (async def)
 - `recidive` — `tests/test_revue_reste.py`:535  (def)
 - `recompute` — `recidivism.py`:255  (async def)
 - `reconcilier` — `invitations.py`:153  (async def)
-- `reconcilier` — `metiers.py`:768  (async def)
-- `reconnaitre` — `faq.py`:206  (def)
+- `reconcilier` — `metiers.py`:878  (async def)
+- `reconnaitre` — `faq.py`:202  (def)
 - `record` — `rate_limiter.py`:132  (def)
 - `record_join` — `observability.py`:144  (async def)
 - `record_leave` — `observability.py`:164  (async def)
 - `record_post` — `tracking_layer.py`:160  (async def)
 - `rect` — `outils/dessins_site.py`:330  (def)
 - `redimensionner` — `outils/icones_rellseas.py`:1057  (def)
-- `reencoder_image` — `tableau.py`:2592  (def)
-- `MainPanelV2.refresh` — `bot.py`:12360  (method)
+- `reencoder_image` — `tableau.py`:2615  (def)
+- `MainPanelV2.refresh` — `bot.py`:12532  (method)
 - `refresh_staff_index` — `impersonation_detector.py`:204  (async def)
 - `refs_autres_fichiers` — `outils/purge_morts.py`:69  (def)
 - `refs_par_nom` — `outils/purge_morts.py`:47  (def)
 - `Refus` — `bannieres.py`:43  (class)
 - `Refus` — `outils/icones_rellseas.py`:668  (class)
-- `refus_role` — `affiches.py`:1115  (def)
-- `refus_verrou` — `tableau.py`:4095  (def)
-- `refuser` — `questionnaire.py`:3478  (async def)
-- `SocialMediaManager.register_adapter` — `social_media.py`:1145  (method)
+- `refus_role` — `affiches.py`:1174  (def)
+- `refus_verrou` — `tableau.py`:4121  (def)
+- `refuser` — `questionnaire.py`:3514  (async def)
+- `SocialMediaManager.register_adapter` — `social_media.py`:1157  (method)
 - `register_persistent_views` — `raid_detector.py`:745  (def)
 - `register_persistent_views` — `staff_sanction.py`:582  (def)
-- `registre_textes` — `tests/test_textes.py`:76  (def)
-- `reglages` — `metiers.py`:292  (async def)
-- `reglages` — `questionnaire.py`:1438  (async def)
-- `reglages_de` — `metiers.py`:280  (def)
-- `regler_role_chef` — `questionnaire.py`:4113  (async def)
+- `registre_textes` — `tests/test_textes.py`:77  (def)
+- `reglages` — `metiers.py`:335  (async def)
+- `reglages` — `questionnaire.py`:1474  (async def)
+- `reglages_de` — `metiers.py`:317  (def)
+- `reglages_relance` — `questionnaire.py`:4929  (async def)
+- `regler` — `reponses_auto.py`:615  (async def)
+- `regler_relances` — `questionnaire.py`:5054  (async def)
+- `regler_role_chef` — `questionnaire.py`:4160  (async def)
 - `regler_salon` — `sondages.py`:175  (async def)
-- `rejoindre` — `entraide.py`:972  (async def)
-- `relancer` — `cadeaux.py`:1617  (async def)
+- `rejoindre` — `entraide.py`:985  (async def)
+- `relancer` — `cadeaux.py`:1672  (async def)
 - `relancer_actus_abandonnees` — `roblox_news.py`:1207  (async def)
+- `relances_site` — `questionnaire.py`:5029  (async def)
 - `releve` — `diag.py`:61  (def)
-- `releve` — `entraide.py`:1526  (def)
+- `releve` — `entraide.py`:1539  (def)
 - `releve` — `evenements.py`:351  (def)
 - `releve` — `invitations.py`:198  (async def)
 - `releve` — `visibilite_serveur.py`:67  (def)
 - `relever` — `roblox_news.py`:403  (async def)
 - `_FauxNews.relever_mises_a_jour` — `tests/test_forum_refus.py`:223  (method)
 - `relever_mises_a_jour` — `roblox_news.py`:335  (async def)
-- `rellseas_cmd` — `bot.py`:29441  (async def)
+- `rellseas_cmd` — `bot.py`:29653  (async def)
 - `RellseasGestionV2` — `rellseas_panneau.py`:618  (class)
 - `RellseasPanelV2` — `rellseas_panneau.py`:133  (class)
-- `remettre` — `tests/test_textes.py`:98  (def)
+- `remettre` — `tests/test_textes.py`:99  (def)
 - `remettre` — `textes.py`:429  (async def)
 - `remettre_a_neuf` — `nettoyage.py`:171  (async def)
 - `remettre_a_zero` — `securite_site.py`:90  (def)
 - `FauxMembre.remove_roles` — `tests/test_rellseas.py`:172  (method)
-- `Membre.remove_roles` — `tests/banc_ticket_recrutement.py`:192  (method)
+- `Membre.remove_roles` — `tests/banc_ticket_recrutement.py`:193  (method)
 - `Membre.remove_roles` — `tests/test_metiers.py`:112  (method)
 - `Membre.remove_roles` — `tests/test_qui_peut_quoi.py`:130  (method)
 - `Membre.remove_roles` — `tests/test_revue_moderation.py`:147  (method)
@@ -5762,68 +5995,69 @@
 - `MembreR.remove_roles` — `tests/test_revue_reste.py`:529  (method)
 - `_FauxMembre.remove_roles` — `tests/test_roblox_pings.py`:231  (method)
 - `_Membre.remove_roles` — `tests/test_activite_demontage.py`:93  (method)
-- `SocialMediaManager.remove_subscription` — `social_media.py`:1274  (method)
+- `SocialMediaManager.remove_subscription` — `social_media.py`:1286  (method)
 - `remplacer_id` — `nettoyage.py`:183  (def)
 - `remplacer_salon` — `unified_logger.py`:271  (def)
 - `remplacer_unique` — `outils/retape_selecteurs.py`:276  (def)
 - `remplir` — `outils/banc_annees.py`:305  (def)
 - `remplir` — `outils/site_local_port.py`:319  (async def)
 - `remplir` — `textes.py`:162  (def)
-- `remplit` — `cadeaux.py`:604  (def)
-- `AltScanResultsPanelV2.render_after_defer` — `bot.py`:18679  (method)
-- `SuspectScanPanelV2.render_after_defer` — `bot.py`:18966  (method)
-- `render_template` — `social_media.py`:1623  (def)
-- `ActionConfigPanelV2.render_to` — `bot.py`:18335  (method)
-- `AltConfigPanelV2.render_to` — `bot.py`:18445  (method)
-- `AltDetectionsPanelV2.render_to` — `bot.py`:18792  (method)
-- `AltScanResultsPanelV2.render_to` — `bot.py`:18675  (method)
-- `AntiRaidPanelV2.render_to` — `bot.py`:12614  (method)
-- `BadwordsConfigPanelV2.render_to` — `bot.py`:17679  (method)
-- `EditPanelSelectViewV2.render_to` — `bot.py`:21079  (method)
-- `EntraidePanelV2.render_to` — `entraide.py`:1944  (method)
-- `ImageConfigPanelV2.render_to` — `bot.py`:17585  (method)
-- `ImmunePanelV2.render_to` — `bot.py`:19402  (method)
-- `ImmuneRemoveViewV2.render_to` — `bot.py`:19639  (method)
-- `LinkConfigPanelV2.render_to` — `bot.py`:18038  (method)
-- `LogLevelPanelV2.render_to` — `bot.py`:16690  (method)
-- `LogsCategoriesPanelV2.render_to` — `bot.py`:16879  (method)
-- `LogsEventRoutingPanelV2.render_to` — `bot.py`:16784  (method)
-- `LogsEventsPanelV2.render_to` — `bot.py`:16970  (method)
-- `LogsExclusionsPanelV2.render_to` — `bot.py`:17103  (method)
-- `LogsPanelV2.render_to` — `bot.py`:16197  (method)
-- `LogsRoutingPanelV2.render_to` — `bot.py`:16566  (method)
-- `MainPanelV2.render_to` — `bot.py`:12375  (method)
-- `ModerationPanelV2.render_to` — `bot.py`:19262  (method)
-- `PaginatedImmuneRemoveView.render_to` — `bot.py`:19744  (method)
-- `PanelBlacklistView.render_to` — `bot.py`:21446  (method)
-- `PanelEditViewV2.render_to` — `bot.py`:21109  (method)
-- `PanelQsView.render_to` — `bot.py`:21570  (method)
-- `ProtDetailV2.render_to` — `bot.py`:17310  (method)
-- `ProtPanelV2.render_to` — `bot.py`:17245  (method)
+- `remplit` — `cadeaux.py`:659  (def)
+- `AltScanResultsPanelV2.render_after_defer` — `bot.py`:18850  (method)
+- `SuspectScanPanelV2.render_after_defer` — `bot.py`:19137  (method)
+- `render_template` — `social_media.py`:1635  (def)
+- `ActionConfigPanelV2.render_to` — `bot.py`:18506  (method)
+- `AltConfigPanelV2.render_to` — `bot.py`:18616  (method)
+- `AltDetectionsPanelV2.render_to` — `bot.py`:18963  (method)
+- `AltScanResultsPanelV2.render_to` — `bot.py`:18846  (method)
+- `AntiRaidPanelV2.render_to` — `bot.py`:12786  (method)
+- `BadwordsConfigPanelV2.render_to` — `bot.py`:17850  (method)
+- `EditPanelSelectViewV2.render_to` — `bot.py`:21250  (method)
+- `EntraidePanelV2.render_to` — `entraide.py`:1957  (method)
+- `ImageConfigPanelV2.render_to` — `bot.py`:17756  (method)
+- `ImmunePanelV2.render_to` — `bot.py`:19573  (method)
+- `ImmuneRemoveViewV2.render_to` — `bot.py`:19810  (method)
+- `LinkConfigPanelV2.render_to` — `bot.py`:18209  (method)
+- `LogLevelPanelV2.render_to` — `bot.py`:16861  (method)
+- `LogsCategoriesPanelV2.render_to` — `bot.py`:17050  (method)
+- `LogsEventRoutingPanelV2.render_to` — `bot.py`:16955  (method)
+- `LogsEventsPanelV2.render_to` — `bot.py`:17141  (method)
+- `LogsExclusionsPanelV2.render_to` — `bot.py`:17274  (method)
+- `LogsPanelV2.render_to` — `bot.py`:16368  (method)
+- `LogsRoutingPanelV2.render_to` — `bot.py`:16737  (method)
+- `MainPanelV2.render_to` — `bot.py`:12547  (method)
+- `ModerationPanelV2.render_to` — `bot.py`:19433  (method)
+- `PaginatedImmuneRemoveView.render_to` — `bot.py`:19915  (method)
+- `PanelBlacklistView.render_to` — `bot.py`:21617  (method)
+- `PanelEditViewV2.render_to` — `bot.py`:21280  (method)
+- `PanelQsView.render_to` — `bot.py`:21748  (method)
+- `ProtDetailV2.render_to` — `bot.py`:17481  (method)
+- `ProtPanelV2.render_to` — `bot.py`:17416  (method)
 - `RellseasGestionV2.render_to` — `rellseas_panneau.py`:704  (method)
 - `RellseasPanelV2.render_to` — `rellseas_panneau.py`:148  (method)
-- `RgpdPanelV2.render_to` — `bot.py`:12115  (method)
+- `RgpdPanelV2.render_to` — `bot.py`:12287  (method)
 - `RobloxPanelV2.render_to` — `roblox_panneau.py`:433  (method)
-- `SecurityChannelsPanelV2.render_to` — `bot.py`:16412  (method)
-- `SendPanelPaginatedView.render_to` — `bot.py`:21709  (method)
+- `SecurityChannelsPanelV2.render_to` — `bot.py`:16583  (method)
+- `SendPanelPaginatedView.render_to` — `bot.py`:21887  (method)
 - `SocialAddPanel.render_to` — `admin_panels_v2.py`:286  (method)
 - `SocialEditPanel.render_to` — `admin_panels_v2.py`:447  (method)
 - `SocialManagePanel.render_to` — `admin_panels_v2.py`:392  (method)
 - `SocialMediaPanelV2.render_to` — `admin_panels_v2.py`:202  (method)
 - `SondagesPanelV2.render_to` — `sondages.py`:613  (method)
 - `SuggestionsPanelV2.render_to` — `suggestions.py`:808  (method)
-- `SuspectScanPanelV2.render_to` — `bot.py`:18962  (method)
-- `TicketMainPanelV2.render_to` — `bot.py`:20867  (method)
-- `V2GenericChannelPicker.render_to` — `bot.py`:20526  (method)
-- `V2GenericRolePicker.render_to` — `bot.py`:20642  (method)
-- `_AntiRaidActionPickerV2.render_to` — `bot.py`:12774  (method)
-- `_BadwordsSanctionActionView.render_to` — `bot.py`:17963  (method)
+- `SuspectScanPanelV2.render_to` — `bot.py`:19133  (method)
+- `TicketMainPanelV2.render_to` — `bot.py`:21038  (method)
+- `V2GenericChannelPicker.render_to` — `bot.py`:20697  (method)
+- `V2GenericRolePicker.render_to` — `bot.py`:20813  (method)
+- `_AntiRaidActionPickerV2.render_to` — `bot.py`:12946  (method)
+- `_BadwordsSanctionActionView.render_to` — `bot.py`:18134  (method)
 - `rendre` — `activite_demontage.py`:214  (async def)
 - `rendre_au_retour` — `activite_demontage.py`:239  (async def)
 - `rendu_entier` — `outils/icones_rellseas.py`:1120  (def)
 - `renforcer` — `outils/icones_rellseas.py`:1062  (def)
 - `renommer_role` — `textes.py`:477  (async def)
-- `Message.reply` — `tests/test_faq_tickets.py`:74  (method)
+- `_Asset.replace` — `tests/test_vitrine_portraits.py`:30  (method)
+- `Message.reply` — `tests/test_reponses_auto.py`:35  (method)
 - `CheminDuBot.repondre` — `outils/site_local_recrutement.py`:118  (method)
 - `Fil.repondre` — `tests/faux_serveur.py`:48  (method)
 - `repondre` — `evenements.py`:1488  (async def)
@@ -5833,13 +6067,14 @@
 - `Reponse` — `tests/test_qui_peut_quoi.py`:171  (class)
 - `Reponse` — `tests/test_revue_admin.py`:69  (class)
 - `Reponse` — `tests/test_sondages.py`:22  (class)
-- `reponse` — `faq.py`:255  (def)
+- `Reponse` — `tests/test_tickets_interdits.py`:214  (class)
+- `reponse` — `faq.py`:251  (def)
 - `ReponseV2` — `tests/faux_serveur.py`:365  (class)
-- `reposer_panneau` — `entraide.py`:1670  (async def)
+- `reposer_panneau` — `entraide.py`:1683  (async def)
 - `reposer_panneau` — `equipages.py`:846  (async def)
 - `reposer_panneau` — `suggestions.py`:145  (async def)
-- `reprendre_affiche` — `questionnaire.py`:2776  (async def)
-- `reprendre_fermetures` — `questionnaire.py`:4466  (async def)
+- `reprendre_affiche` — `questionnaire.py`:2812  (async def)
+- `reprendre_fermetures` — `questionnaire.py`:4513  (async def)
 - `reputation` — `entraide.py`:474  (async def)
 - `Local.requete` — `tests/test_candidature_site.py`:83  (method)
 - `Local.requete` — `tests/test_site_equipage.py`:66  (method)
@@ -5852,7 +6087,7 @@
 - `reserver_actu` — `roblox_news.py`:1157  (async def)
 - `resolve_channel_for_category` — `unified_logger.py`:440  (async def)
 - `resolve_channel_for_event` — `unified_logger.py`:490  (async def)
-- `resoudre` — `entraide.py`:1148  (async def)
+- `resoudre` — `entraide.py`:1161  (async def)
 - `restaurer` — `casier.py`:156  (async def)
 - `restaurer` — `config_salons.py`:258  (async def)
 - `resume` — `config_salons.py`:279  (def)
@@ -5860,25 +6095,25 @@
 - `resume` — `recrutements.py`:384  (def)
 - `resume_votes` — `suggestions.py`:306  (def)
 - `resume_vues` — `annonces.py`:160  (async def)
-- `retenir_noms` — `metiers.py`:389  (async def)
+- `retenir_noms` — `metiers.py`:432  (async def)
 - `retirer` — `boosts.py`:265  (async def)
 - `retirer` — `equipages.py`:674  (async def)
 - `retirer` — `sondages.py`:437  (async def)
 - `retirer` — `suggestions.py`:592  (async def)
 - `retirer` — `tickets_fils.py`:73  (async def)
-- `retirer_chef` — `questionnaire.py`:4359  (async def)
+- `retirer_chef` — `questionnaire.py`:4406  (async def)
 - `retirer_etiquettes` — `activite_demontage.py`:252  (async def)
 - `retirer_fiche` — `recrutements.py`:367  (async def)
-- `retirer_modele` — `questionnaire.py`:5669  (async def)
-- `retirer_question` — `questionnaire.py`:5523  (async def)
-- `retirer_question_chef` — `questionnaire.py`:4012  (async def)
-- `retirer_roles_clan` — `metiers.py`:672  (async def)
-- `RgpdPanelV2` — `bot.py`:12099  (class)
+- `retirer_modele` — `questionnaire.py`:5915  (async def)
+- `retirer_question` — `questionnaire.py`:5769  (async def)
+- `retirer_question_chef` — `questionnaire.py`:4059  (async def)
+- `retirer_roles_clan` — `metiers.py`:782  (async def)
+- `RgpdPanelV2` — `bot.py`:12271  (class)
 - `Rien` — `tests/test_revue_moderation.py`:63  (class)
 - `RobloxPanelV2` — `roblox_panneau.py`:422  (class)
-- `RobloxPingButton` — `bot.py`:32813  (class)
+- `RobloxPingButton` — `bot.py`:33025  (class)
 - `rogner` — `outils/icones_rellseas.py`:1045  (def)
-- `Role` — `tests/banc_ticket_recrutement.py`:154  (class)
+- `Role` — `tests/banc_ticket_recrutement.py`:155  (class)
 - `Role` — `tests/conftest_discord.py`:86  (class)
 - `Role` — `tests/faux_serveur.py`:255  (class)
 - `Role` — `tests/test_clan.py`:105  (class)
@@ -5889,47 +6124,48 @@
 - `Role` — `tests/test_site_moderation.py`:22  (class)
 - `Role` — `tests/test_site_v2_serveur.py`:53  (class)
 - `Role` — `tests/test_tableau.py`:38  (class)
-- `Role` — `tests/test_textes.py`:288  (class)
-- `Serveur.role` — `tests/banc_ticket_recrutement.py`:219  (method)
+- `Role` — `tests/test_textes.py`:289  (class)
+- `Serveur.role` — `tests/banc_ticket_recrutement.py`:220  (method)
 - `Serveur.role` — `tests/test_metiers.py`:131  (method)
 - `Serveur.role` — `tests/test_site_v2_serveur.py`:92  (method)
 - `role` — `notifs.py`:48  (async def)
 - `role_cree_par_le_systeme` — `activite_demontage.py`:156  (def)
 - `role_d_arrivee` — `visibilite_serveur.py`:48  (def)
 - `role_de` — `roblox_pings.py`:139  (async def)
-- `role_du_clan` — `metiers.py`:300  (async def)
-- `role_du_metier` — `metiers.py`:476  (async def)
-- `Banc.role_nomme` — `tests/test_metiers.py`:294  (method)
-- `role_zone` — `entraide.py`:558  (def)
+- `role_du_clan` — `metiers.py`:343  (async def)
+- `role_du_metier` — `metiers.py`:586  (async def)
+- `Banc.role_nomme` — `tests/test_metiers.py`:296  (method)
+- `role_zone` — `entraide.py`:571  (def)
 - `roles` — `acces_direction.py`:42  (def)
 - `roles_a_rendre` — `activite_demontage.py`:180  (async def)
 - `roles_autorises` — `rellseas_panneau.py`:110  (def)
 - `rose_des_vents` — `outils/affiche_recrutement.py`:74  (def)
-- `route_annuler` — `evenements.py`:2723  (async def)
+- `route_annuler` — `evenements.py`:2774  (async def)
 - `route_apercu` — `annonces_modifiables.py`:100  (async def)
-- `route_apercu` — `evenements.py`:2626  (async def)
-- `route_brouillon` — `evenements.py`:2479  (async def)
-- `route_evenements` — `evenements.py`:2424  (async def)
+- `route_apercu` — `evenements.py`:2677  (async def)
+- `route_brouillon` — `evenements.py`:2530  (async def)
+- `route_evenements` — `evenements.py`:2475  (async def)
 - `route_fermer_autres` — `securite_site.py`:429  (async def)
-- `route_installer` — `metiers.py`:1298  (async def)
+- `route_installer` — `metiers.py`:1467  (async def)
 - `route_lire` — `annonces_modifiables.py`:56  (async def)
 - `route_modifier` — `annonces_modifiables.py`:80  (async def)
-- `route_modifier` — `evenements.py`:2709  (async def)
-- `route_publier` — `evenements.py`:2689  (async def)
-- `route_reconcilier` — `metiers.py`:1334  (async def)
-- `route_reglages` — `metiers.py`:1258  (async def)
-- `route_regler` — `metiers.py`:1262  (async def)
+- `route_modifier` — `evenements.py`:2760  (async def)
+- `route_publier` — `evenements.py`:2740  (async def)
+- `route_reconcilier` — `metiers.py`:1503  (async def)
+- `route_reglages` — `metiers.py`:1421  (async def)
+- `route_regler` — `metiers.py`:1425  (async def)
+- `route_retirer` — `annonces_modifiables.py`:120  (async def)
 - `route_securite` — `securite_site.py`:380  (async def)
-- `route_supprimer_brouillon` — `evenements.py`:2543  (async def)
-- `RSSHubAdapter` — `social_media.py`:634  (class)
+- `route_supprimer_brouillon` — `evenements.py`:2594  (async def)
+- `RSSHubAdapter` — `social_media.py`:655  (class)
 - `run` — `tests/faux_serveur.py`:388  (def)
 - `run` — `tests/test_metiers.py`:181  (def)
 - `run` — `tests/test_revue_moderation.py`:59  (def)
 - `run` — `tests/test_sondages.py`:115  (def)
 - `run` — `tests/test_suggestions.py`:42  (def)
-- `run_cleanup` — `data_cleanup.py`:185  (async def)
+- `run_cleanup` — `data_cleanup.py`:187  (async def)
 - `run_lockdown` — `raid_detector.py`:439  (async def)
-- `run_retention` — `gdpr.py`:501  (async def)
+- `run_retention` — `gdpr.py`:509  (async def)
 - `Salon` — `tests/conftest_discord.py`:59  (class)
 - `Salon` — `tests/test_annonces_diffusion.py`:10  (class)
 - `Salon` — `tests/test_clan.py`:94  (class)
@@ -5941,69 +6177,69 @@
 - `Salon` — `tests/test_sondages.py`:38  (class)
 - `Salon` — `tests/test_tickets_dossier.py`:134  (class)
 - `Salon` — `tests/test_tickets_rellseas.py`:39  (class)
-- `salon` — `entraide.py`:509  (def)
+- `salon` — `entraide.py`:522  (def)
 - `salon` — `liens_jeux.py`:53  (async def)
 - `salon` — `tickets_fils.py`:143  (async def)
 - `salon_alertes` — `unified_logger.py`:302  (async def)
-- `salon_cadeaux` — `cadeaux.py`:1790  (async def)
+- `salon_cadeaux` — `cadeaux.py`:1846  (async def)
 - `salon_commu` — `zones.py`:295  (def)
 - `salon_de` — `boosts.py`:105  (async def)
 - `salon_de` — `sondages.py`:157  (async def)
 - `salon_de` — `suggestions.py`:101  (async def)
-- `salon_logs_task` — `bot.py`:13811  (async def)
+- `salon_logs_task` — `bot.py`:13983  (async def)
 - `salon_ouvert` — `salutations.py`:70  (def)
-- `salon_public` — `questions.py`:87  (def)
+- `salon_public` — `questions.py`:116  (def)
 - `SalonB` — `tests/test_boosts.py`:44  (class)
 - `SalonFlux` — `tests/test_revue_reste.py`:328  (class)
 - `salons_de_logs` — `unified_logger.py`:247  (def)
 - `Monde.salons_donnees` — `outils/site_maquette.py`:661  (method)
-- `salons_du_serveur` — `faq.py`:218  (def)
-- `sanction` — `bot.py`:4411  (async def)
+- `salons_du_serveur` — `faq.py`:214  (def)
+- `sanction` — `bot.py`:4413  (async def)
 - `SanctionDynamicButton` — `staff_sanction.py`:194  (class)
 - `Monde.sanctions_donnees` — `outils/site_maquette.py`:467  (method)
 - `Monde.sanctions_donnees_toutes` — `outils/site_maquette.py`:464  (method)
-- `sanitize_input` — `bot.py`:781  (def)
+- `sanitize_input` — `bot.py`:785  (def)
 - `sans_cadence` — `tests/test_candidature_site.py`:209  (def)
 - `sans_chaines` — `outils/controle_imports.py`:71  (def)
 - `sans_echec` — `tests/test_recrutement_ticket.py`:69  (def)
 - `sans_emoji` — `evenements.py`:552  (def)
-- `sans_emoji` — `site_equipage.py`:339  (def)
+- `sans_emoji` — `site_equipage.py`:340  (def)
 - `sans_interet` — `roblox_news.py`:824  (def)
-- `sans_liens_officiels` — `bot.py`:11279  (def)
-- `save_alt_detection` — `bot.py`:11914  (async def)
+- `sans_liens_officiels` — `bot.py`:11431  (def)
+- `save_alt_detection` — `bot.py`:12086  (async def)
 - `save_asset` — `transcript_store.py`:109  (def)
-- `save_avatar_cache` — `bot.py`:1445  (async def)
-- `save_ban_info` — `bot.py`:11787  (async def)
+- `save_avatar_cache` — `bot.py`:1449  (async def)
+- `save_ban_info` — `bot.py`:11939  (async def)
 - `save_html` — `transcript_store.py`:94  (def)
-- `save_live_state` — `bot.py`:19857  (async def)
-- `save_user_fingerprint` — `bot.py`:11766  (async def)
-- `scan` — `insult_filter.py`:308  (def)
+- `save_live_state` — `bot.py`:20028  (async def)
+- `save_user_fingerprint` — `bot.py`:11918  (async def)
+- `scan` — `insult_filter.py`:415  (def)
 - `scan` — `offtopic_filter.py`:76  (def)
-- `scan_all_members_for_alts` — `bot.py`:11953  (async def)
+- `scan_all_members_for_alts` — `bot.py`:12125  (async def)
 - `scan_guild` — `webhook_tracker.py`:91  (async def)
-- `SuspectScanPanel.scan_members` — `bot.py`:19021  (method)
-- `SuspectScanPanelV2.scan_members` — `bot.py`:18896  (method)
+- `SuspectScanPanel.scan_members` — `bot.py`:19192  (method)
+- `SuspectScanPanelV2.scan_members` — `bot.py`:19067  (method)
 - `scan_message` — `token_grabber.py`:225  (def)
 - `scan_message` — `webhook_leak.py`:97  (def)
 - `scan_scam` — `ocr_scan.py`:281  (def)
 - `sceau` — `outils/affiche_recrutement.py`:94  (def)
 - `score_message` — `compromised_detector.py`:186  (def)
-- `SecReportView` — `bot.py`:3671  (class)
+- `SecReportView` — `bot.py`:3675  (class)
 - `section` — `ui_v2.py`:150  (def)
-- `section_guide` — `metiers.py`:1079  (async def)
-- `section_guide` — `site_equipage.py`:1645  (async def)
-- `security_check` — `bot.py`:27192  (async def)
-- `SecurityChannelsPanelV2` — `bot.py`:16380  (class)
-- `selection` — `questionnaire.py`:1830  (async def)
+- `section_guide` — `metiers.py`:1191  (async def)
+- `section_guide` — `site_equipage.py`:1671  (async def)
+- `security_check` — `bot.py`:27398  (async def)
+- `SecurityChannelsPanelV2` — `bot.py`:16551  (class)
+- `selection` — `questionnaire.py`:1866  (async def)
 - `semaine` — `activite_calendrier.py`:94  (def)
-- `semer` — `questionnaire.py`:1339  (async def)
+- `semer` — `questionnaire.py`:1375  (async def)
 - `FauxFil.send` — `tests/test_tickets_fils.py`:49  (method)
 - `FauxSalon.send` — `tests/test_installation_auto.py`:135  (method)
 - `FauxSalon.send` — `tests/test_tickets_fils.py`:68  (method)
 - `Fil.send` — `tests/faux_serveur.py`:39  (method)
-- `FilTicket.send` — `tests/banc_ticket_recrutement.py`:106  (method)
+- `FilTicket.send` — `tests/banc_ticket_recrutement.py`:107  (method)
 - `FilTicket.send` — `tests/test_tickets_visibles.py`:36  (method)
-- `Membre.send` — `tests/banc_ticket_recrutement.py`:198  (method)
+- `Membre.send` — `tests/banc_ticket_recrutement.py`:199  (method)
 - `Membre.send` — `tests/test_clan.py`:88  (method)
 - `Membre.send` — `tests/test_qui_peut_quoi.py`:146  (method)
 - `Membre.send` — `tests/test_revue_moderation.py`:156  (method)
@@ -6014,11 +6250,11 @@
 - `SalonB.send` — `tests/test_boosts.py`:51  (method)
 - `Suivi.send` — `tests/test_qui_peut_quoi.py`:194  (method)
 - `Texte.send` — `tests/faux_serveur.py`:196  (method)
-- `Ticket.send` — `tests/test_metiers.py`:951  (method)
+- `Ticket.send` — `tests/test_metiers.py`:953  (method)
 - `_Fil.send` — `tests/test_revue_tickets.py`:160  (method)
 - `_Salon.send` — `tests/test_tickets_v2.py`:81  (method)
 - `send_export` — `owner_export.py`:125  (async def)
-- `send_log` — `bot.py`:4862  (async def)
+- `send_log` — `bot.py`:4884  (async def)
 - `FausseReponse.send_message` — `tests/test_configure_social.py`:149  (method)
 - `FausseReponse.send_message` — `tests/test_panneaux_interaction.py`:106  (method)
 - `FausseReponse.send_message` — `tests/test_rellseas.py`:230  (method)
@@ -6026,20 +6262,21 @@
 - `Reponse.send_message` — `tests/test_questionnaire.py`:163  (method)
 - `Reponse.send_message` — `tests/test_qui_peut_quoi.py`:178  (method)
 - `Reponse.send_message` — `tests/test_revue_admin.py`:83  (method)
+- `Reponse.send_message` — `tests/test_tickets_interdits.py`:218  (method)
 - `_Reponse.send_message` — `tests/test_candidature_site.py`:544  (method)
 - `_Reponse.send_message` — `tests/test_site_equipage.py`:604  (method)
-- `send_mod_log` — `bot.py`:19159  (async def)
+- `send_mod_log` — `bot.py`:19330  (async def)
 - `Reponse.send_modal` — `tests/conftest_discord.py`:140  (method)
 - `Reponse.send_modal` — `tests/test_questionnaire.py`:167  (method)
 - `_Reponse.send_modal` — `tests/test_candidature_site.py`:548  (method)
-- `send_ticket_log` — `bot.py`:7833  (async def)
-- `SendPanelPaginatedView` — `bot.py`:21621  (class)
-- `server_anomalies_cmd` — `bot.py`:23559  (async def)
-- `server_controls_task` — `bot.py`:8243  (async def)
-- `server_history_cmd` — `bot.py`:23521  (async def)
-- `server_report_cmd` — `bot.py`:23495  (async def)
-- `server_retention_cmd` — `bot.py`:23540  (async def)
-- `Serveur` — `tests/banc_ticket_recrutement.py`:208  (class)
+- `send_ticket_log` — `bot.py`:7979  (async def)
+- `SendPanelPaginatedView` — `bot.py`:21799  (class)
+- `server_anomalies_cmd` — `bot.py`:23761  (async def)
+- `server_controls_task` — `bot.py`:8389  (async def)
+- `server_history_cmd` — `bot.py`:23723  (async def)
+- `server_report_cmd` — `bot.py`:23697  (async def)
+- `server_retention_cmd` — `bot.py`:23742  (async def)
+- `Serveur` — `tests/banc_ticket_recrutement.py`:209  (class)
 - `Serveur` — `tests/test_boosts.py`:69  (class)
 - `Serveur` — `tests/test_bouclier.py`:12  (class)
 - `Serveur` — `tests/test_direct.py`:43  (class)
@@ -6056,17 +6293,16 @@
 - `serveur` — `tests/test_revue_reste.py`:99  (def)
 - `serveur_v2` — `tests/test_zones.py`:93  (def)
 - `service_worker` — `outils/site_maquette.py`:1329  (async def)
-- `service_worker` — `tableau.py`:2147  (async def)
+- `service_worker` — `tableau.py`:2152  (async def)
 - `Env.session` — `tests/test_tableau.py`:190  (method)
 - `Site.session` — `tests/test_revue_site.py`:111  (method)
 - `Site.session` — `tests/test_site_v2_serveur.py`:164  (method)
-- `ConfigCache.set` — `bot.py`:612  (method)
+- `ConfigCache.set` — `bot.py`:616  (method)
 - `set_category_channel` — `unified_logger.py`:426  (async def)
-- `SocialMediaManager.set_delete_callback` — `social_media.py`:1173  (method)
+- `SocialMediaManager.set_delete_callback` — `social_media.py`:1185  (method)
 - `set_disabled_events` — `unified_logger.py`:575  (async def)
 - `set_enabled_categories` — `unified_logger.py`:383  (async def)
 - `set_event_channel` — `unified_logger.py`:476  (async def)
-- `set_hooks` — `faq.py`:186  (def)
 - `set_installateur` — `entraide.py`:356  (def)
 - `set_log_channel` — `unified_logger.py`:360  (async def)
 - `FauxSalon.set_permissions` — `tests/test_off_radiation.py`:134  (method)
@@ -6076,11 +6312,11 @@
 - `Salon.set_permissions` — `tests/test_sondages.py`:70  (method)
 - `_Salon.set_permissions` — `tests/test_activite_demontage.py`:70  (method)
 - `_Salon.set_permissions` — `tests/test_bouclier.py`:89  (method)
-- `SocialMediaManager.set_post_callback` — `social_media.py`:1170  (method)
+- `SocialMediaManager.set_post_callback` — `social_media.py`:1182  (method)
 - `set_priority` — `tickets_enhance.py`:174  (async def)
 - `set_raid_callback` — `raid_detector.py`:65  (def)
 - `set_relever` — `roblox_panneau.py`:416  (def)
-- `SocialMediaManager.set_reservation` — `social_media.py`:1176  (method)
+- `SocialMediaManager.set_reservation` — `social_media.py`:1188  (method)
 - `set_retour` — `admin_panels_v2.py`:146  (def)
 - `set_retour` — `entraide.py`:348  (def)
 - `set_retour` — `rellseas_panneau.py`:94  (def)
@@ -6089,66 +6325,68 @@
 - `set_retour` — `suggestions.py`:55  (def)
 - `set_role_exclusions` — `unified_logger.py`:601  (async def)
 - `set_social_manager` — `admin_panels_v2.py`:118  (def)
-- `set_strikes` — `bot.py`:1319  (async def)
+- `set_strikes` — `bot.py`:1323  (async def)
 - `set_tags` — `tickets_enhance.py`:244  (async def)
 - `set_user_lang` — `i18n.py`:176  (async def)
 - `set_webhook_mode` — `unified_logger.py`:527  (async def)
-- `SetMaxModal` — `bot.py`:21539  (class)
-- `PlatformAdapter.setup` — `social_media.py`:278  (method)
-- `RSSHubAdapter.setup` — `social_media.py`:671  (method)
-- `TwitchAdapter.setup` — `social_media.py`:356  (method)
+- `SetMaxModal` — `bot.py`:21717  (class)
+- `PlatformAdapter.setup` — `social_media.py`:299  (method)
+- `RSSHubAdapter.setup` — `social_media.py`:692  (method)
+- `TwitchAdapter.setup` — `social_media.py`:377  (method)
 - `setup` — `activite.py`:84  (def)
 - `setup` — `activite_demontage.py`:66  (def)
-- `setup` — `affiches.py`:102  (def)
+- `setup` — `affiches.py`:103  (def)
 - `setup` — `annonces.py`:79  (def)
 - `setup` — `anti_token_leak.py`:49  (def)
 - `setup` — `boosts.py`:25  (def)
-- `setup` — `cadeaux.py`:143  (def)
+- `setup` — `cadeaux.py`:151  (def)
 - `setup` — `candidature_site.py`:287  (def)
 - `setup` — `casier.py`:39  (def)
 - `setup` — `clan.py`:28  (def)
 - `setup` — `compactage.py`:47  (def)
 - `setup` — `config_salons.py`:32  (def)
-- `setup` — `data_cleanup.py`:106  (def)
+- `setup` — `data_cleanup.py`:108  (def)
 - `setup` — `db_backup.py`:50  (def)
 - `setup` — `entraide.py`:335  (def)
 - `setup` — `equipages.py`:99  (def)
 - `setup` — `error_logger.py`:48  (def)
 - `setup` — `evenements.py`:325  (def)
-- `setup` — `faq.py`:176  (def)
+- `setup` — `hierarchie.py`:133  (def)
 - `setup` — `honeypot.py`:47  (def)
 - `setup` — `i18n.py`:138  (def)
 - `setup` — `impersonation_detector.py`:82  (def)
 - `setup` — `invitations.py`:35  (def)
 - `setup` — `liens_jeux.py`:34  (def)
 - `setup` — `longevite.py`:58  (def)
-- `setup` — `metiers.py`:219  (def)
+- `setup` — `metiers.py`:256  (def)
 - `setup` — `mod_dashboard.py`:59  (def)
 - `setup` — `notifs.py`:22  (def)
 - `setup` — `observability.py`:74  (def)
 - `setup` — `owner_export.py`:31  (def)
 - `setup` — `publications.py`:27  (def)
-- `setup` — `questionnaire.py`:669  (def)
-- `setup` — `questions.py`:50  (def)
+- `setup` — `questionnaire.py`:700  (def)
+- `setup` — `questions.py`:72  (def)
 - `setup` — `raid_detector.py`:99  (def)
 - `setup` — `rate_limiter.py`:59  (def)
 - `setup` — `recidivism.py`:66  (def)
 - `setup` — `recrutements.py`:58  (def)
 - `setup` — `registre.py`:59  (def)
 - `setup` — `rellseas_panneau.py`:78  (def)
+- `setup` — `reponses_auto.py`:248  (def)
 - `setup` — `roblox_news.py`:154  (def)
 - `setup` — `roblox_news_contenu.py`:61  (def)
 - `setup` — `roblox_panneau.py`:42  (def)
 - `setup` — `roblox_pings.py`:45  (def)
 - `setup` — `salutations.py`:39  (def)
 - `setup` — `securite_site.py`:79  (def)
-- `setup` — `site_equipage.py`:228  (def)
+- `setup` — `site_equipage.py`:229  (def)
 - `setup` — `sondages.py`:48  (def)
 - `setup` — `staff_sanction.py`:76  (def)
 - `setup` — `suggestions.py`:48  (def)
-- `setup` — `tableau.py`:331  (def)
+- `setup` — `tableau.py`:336  (def)
 - `setup` — `textes.py`:71  (def)
 - `setup` — `tickets_enhance.py`:78  (def)
+- `setup` — `tickets_interdits.py`:89  (def)
 - `setup` — `token_grabber.py`:144  (def)
 - `setup` — `vigilance.py`:37  (def)
 - `setup` — `visibilite_serveur.py`:42  (def)
@@ -6158,42 +6396,44 @@
 - `setup` — `webhook_tracker.py`:53  (def)
 - `setup` — `websub_youtube.py`:42  (def)
 - `setup` — `zones.py`:245  (def)
-- `SocialMediaManager.setup_all` — `social_media.py`:1154  (method)
-- `should_announce_live` — `bot.py`:19919  (async def)
+- `SocialMediaManager.setup_all` — `social_media.py`:1166  (method)
+- `should_announce_live` — `bot.py`:20090  (async def)
 - `show` — `mod_dashboard.py`:470  (async def)
 - `si_heure_creuse` — `compactage.py`:144  (async def)
 - `sig` — `outils/sonde_panneaux.py`:23  (def)
 - `signal_fort` — `securite_site.py`:232  (async def)
-- `signaler_cmd` — `bot.py`:3567  (async def)
-- `signaler_vocal_cmd` — `bot.py`:3615  (async def)
+- `signaler_cmd` — `bot.py`:3571  (async def)
+- `signaler_vocal_cmd` — `bot.py`:3619  (async def)
+- `silence` — `tests/test_tickets_interdits.py`:89  (def)
 - `Site` — `tests/test_revue_site.py`:82  (class)
 - `Site` — `tests/test_site_v2_serveur.py`:118  (class)
-- `Site` — `tests/test_textes.py`:305  (class)
+- `Site` — `tests/test_textes.py`:306  (class)
 - `site` — `tests/test_securite_site.py`:31  (def)
 - `site` — `tests/test_site_v2_serveur.py`:201  (def)
 - `sites` — `tests/test_evenements_site.py`:45  (def)
-- `_Asyncio.sleep` — `tests/banc_ticket_recrutement.py`:81  (method)
+- `_Asyncio.sleep` — `tests/banc_ticket_recrutement.py`:82  (method)
 - `SocialAddPanel` — `admin_panels_v2.py`:277  (class)
 - `SocialEditPanel` — `admin_panels_v2.py`:440  (class)
 - `SocialManagePanel` — `admin_panels_v2.py`:389  (class)
-- `SocialMediaManager` — `social_media.py`:1118  (class)
+- `SocialMediaManager` — `social_media.py`:1130  (class)
 - `SocialMediaPanelV2` — `admin_panels_v2.py`:194  (class)
-- `SocialPost` — `social_media.py`:102  (class)
+- `SocialPost` — `social_media.py`:123  (class)
 - `socle` — `tests/test_activite_observation.py`:115  (def)
 - `Sondage` — `tests/test_sondages.py`:27  (class)
 - `sondage` — `tests/test_revue_reste.py`:639  (def)
 - `SondagesPanelV2` — `sondages.py`:605  (class)
+- `sortie_direction` — `hierarchie.py`:546  (async def)
 - `sorties_presentes` — `outils/icones_rellseas.py`:1215  (def)
 - `sorties_prevues` — `outils/icones_rellseas.py`:1199  (def)
 - `sortir` — `outils/site_maquette.py`:1802  (async def)
-- `sortir` — `tableau.py`:1938  (async def)
+- `sortir` — `tableau.py`:1943  (async def)
 - `soumettre` — `annonces.py`:524  (async def)
-- `soumettre_page` — `questionnaire.py`:4990  (async def)
-- `source` — `tests/banc_ticket_recrutement.py`:67  (def)
+- `soumettre_page` — `questionnaire.py`:5236  (async def)
+- `source` — `tests/banc_ticket_recrutement.py`:68  (def)
 - `sources_a_telecharger` — `outils/icones_rellseas.py`:818  (def)
-- `sous_sanction` — `metiers.py`:331  (async def)
+- `sous_sanction` — `metiers.py`:374  (async def)
 - `spec` — `bannieres.py`:58  (def)
-- `Banc.sql` — `tests/test_metiers.py`:284  (method)
+- `Banc.sql` — `tests/test_metiers.py`:286  (method)
 - `Local.sql` — `tests/test_candidature_site.py`:106  (method)
 - `Local.sql` — `tests/test_longevite.py`:466  (method)
 - `Local.sql` — `tests/test_site_equipage.py`:83  (method)
@@ -6202,68 +6442,70 @@
 - `RellseasGestionV2.squelette` — `rellseas_panneau.py`:632  (method)
 - `FauxNatif.start` — `tests/test_evenements.py`:50  (method)
 - `start` — `health_server.py`:369  (async def)
-- `SocialMediaManager.start_background_tasks` — `social_media.py`:1587  (method)
+- `SocialMediaManager.start_background_tasks` — `social_media.py`:1599  (method)
 - `statique` — `outils/site_maquette.py`:1308  (async def)
-- `statique` — `tableau.py`:2108  (async def)
-- `stats` — `cadeaux.py`:486  (async def)
-- `stats_de_tous` — `cadeaux.py`:505  (async def)
+- `statique` — `tableau.py`:2113  (async def)
+- `stats` — `cadeaux.py`:541  (async def)
+- `stats_de_tous` — `cadeaux.py`:560  (async def)
 - `Status` — `vocabulary.py`:72  (class)
-- `BancTicket.statut` — `tests/banc_ticket_recrutement.py`:482  (method)
+- `BancTicket.statut` — `tests/banc_ticket_recrutement.py`:487  (method)
 - `statut_activite` — `rellseas_panneau.py`:1097  (def)
 - `Banc.statut_ticket` — `tests/test_questionnaire.py`:150  (method)
-- `SocialMediaManager.stop_background_tasks` — `social_media.py`:1593  (method)
+- `SocialMediaManager.stop_background_tasks` — `social_media.py`:1605  (method)
 - `stub_cfg` — `tests/conftest.py`:87  (def)
 - `stub_db` — `tests/conftest.py`:75  (def)
 - `StubDB` — `tests/conftest.py`:42  (class)
 - `style_de` — `annonces.py`:270  (def)
-- `Subscription` — `social_media.py`:143  (class)
+- `Subscription` — `social_media.py`:164  (class)
 - `subtitle` — `ui_v2.py`:117  (def)
 - `SuggestionsPanelV2` — `suggestions.py`:800  (class)
 - `Suivi` — `tests/test_qui_peut_quoi.py`:190  (class)
-- `suivi` — `questionnaire.py`:5802  (async def)
-- `Sujet` — `faq.py`:37  (class)
-- `sujet` — `entraide.py`:1737  (def)
+- `suivi` — `questionnaire.py`:6048  (async def)
+- `Sujet` — `faq.py`:38  (class)
+- `sujet` — `entraide.py`:1750  (def)
 - `sujet` — `websub_youtube.py`:55  (def)
+- `sujets_interdits_mod` — `tests/test_sujets_interdits.py`:88  (def)
 - `supprimer_archives` — `zones.py`:686  (async def)
 - `supprimer_salons` — `activite_demontage.py`:287  (async def)
 - `supprimer_vieux_fils` — `nettoyage.py`:65  (async def)
 - `sur_arrivee` — `invitations.py`:100  (async def)
-- `sur_depart` — `entraide.py`:1590  (async def)
+- `sur_depart` — `entraide.py`:1603  (async def)
 - `sur_depart` — `equipages.py`:751  (async def)
 - `sur_depart` — `invitations.py`:136  (async def)
 - `sur_entree_audit` — `securite_site.py`:346  (async def)
 - `sur_lien` — `invitations.py`:144  (def)
-- `sur_liste_noire` — `questionnaire.py`:3674  (async def)
+- `sur_liste_noire` — `questionnaire.py`:3710  (async def)
 - `sur_maj_membre` — `annonces.py`:814  (async def)
-- `sur_maj_membre` — `metiers.py`:736  (async def)
+- `sur_maj_membre` — `metiers.py`:846  (async def)
 - `sur_maj_serveur` — `boosts.py`:301  (async def)
-- `sur_message` — `cadeaux.py`:352  (def)
-- `sur_message` — `entraide.py`:1545  (async def)
-- `sur_message` — `faq.py`:326  (async def)
-- `sur_message` — `questions.py`:129  (async def)
+- `sur_message` — `cadeaux.py`:360  (def)
+- `sur_message` — `entraide.py`:1558  (async def)
+- `sur_message` — `questions.py`:158  (async def)
+- `sur_message` — `reponses_auto.py`:429  (async def)
 - `sur_message` — `salutations.py`:86  (async def)
 - `sur_message` — `sondages.py`:548  (async def)
 - `sur_message` — `suggestions.py`:760  (async def)
 - `sur_salon_supprime` — `sondages.py`:592  (async def)
 - `sur_salon_supprime` — `suggestions.py`:786  (async def)
-- `sur_suppression` — `cadeaux.py`:380  (def)
-- `sur_suppression` — `entraide.py`:1567  (async def)
+- `sur_suppression` — `cadeaux.py`:393  (def)
+- `sur_suppression` — `entraide.py`:1580  (async def)
 - `sur_suppression` — `sondages.py`:584  (async def)
 - `sur_suppression` — `suggestions.py`:642  (async def)
-- `sur_vocal` — `cadeaux.py`:416  (def)
+- `sur_vocal` — `cadeaux.py`:471  (def)
 - `sur_vote` — `sondages.py`:421  (async def)
-- `SuspectScanPanel` — `bot.py`:19010  (class)
-- `SuspectScanPanelV2` — `bot.py`:18881  (class)
-- `suspendre` — `tableau.py`:594  (async def)
-- `suspendu` — `tableau.py`:449  (async def)
+- `surveillance` — `reponses_auto.py`:582  (async def)
+- `SuspectScanPanel` — `bot.py`:19181  (class)
+- `SuspectScanPanelV2` — `bot.py`:19052  (class)
+- `suspendre` — `tableau.py`:599  (async def)
+- `suspendu` — `tableau.py`:454  (async def)
 - `svg_corps` — `outils/dessins_site.py`:647  (def)
 - `svg_document` — `outils/dessins_site.py`:652  (def)
 - `Client.sync` — `tests/test_evenements_site.py`:81  (method)
 - `_FauxArbre.sync` — `tests/test_commandes_en_double.py`:164  (method)
 - `_FauxArbreQuiCasse.sync` — `tests/test_commandes_en_double.py`:170  (method)
 - `sync` — `outils/site_maquette.py`:3043  (async def)
-- `sync` — `tableau.py`:2536  (async def)
-- `sync_cmd` — `bot.py`:23085  (async def)
+- `sync` — `tableau.py`:2559  (async def)
+- `sync_cmd` — `bot.py`:23287  (async def)
 - `synchroniser` — `boosts.py`:185  (async def)
 - `Monde.t` — `outils/site_maquette.py`:327  (method)
 - `t` — `i18n.py`:101  (def)
@@ -6274,13 +6516,13 @@
 - `taille` — `bannieres.py`:54  (def)
 - `taille` — `stockage.py`:74  (def)
 - `taille_dossier` — `outils/banc_annees.py`:783  (def)
-- `task_supervisor` — `bot.py`:16089  (async def)
-- `PlatformAdapter.teardown` — `social_media.py`:282  (method)
-- `TwitchAdapter.teardown` — `social_media.py`:363  (method)
-- `SocialMediaManager.teardown_all` — `social_media.py`:1161  (method)
+- `task_supervisor` — `bot.py`:16260  (async def)
+- `PlatformAdapter.teardown` — `social_media.py`:303  (method)
+- `TwitchAdapter.teardown` — `social_media.py`:384  (method)
+- `SocialMediaManager.teardown_all` — `social_media.py`:1173  (method)
 - `telecharger` — `outils/icones_rellseas.py`:825  (def)
-- `temp_voice_watchdog` — `bot.py`:31092  (async def)
-- `terminer` — `cadeaux.py`:1535  (async def)
+- `temp_voice_watchdog` — `bot.py`:31304  (async def)
+- `terminer` — `cadeaux.py`:1590  (async def)
 - `test_10_un_fil_archive_est_un_ticket_ouvert` — `tests/test_revue_tickets.py`:757  (def)
 - `test_10b_ajouter_un_staff_hors_cache_et_toujours_une_reponse` — `tests/test_revue_tickets.py`:768  (def)
 - `test_11_acquitte_d_abord_et_une_seule_prise_en_charge` — `tests/test_revue_tickets.py`:854  (def)
@@ -6311,39 +6553,41 @@
 - `test_8_le_menu_direction_tient_dans_les_limites_de_discord` — `tests/test_revue_tickets.py`:664  (def)
 - `test_9_lecture_prudente_des_anciens_motifs` — `tests/test_revue_tickets.py`:702  (def)
 - `test_9b_la_decision_des_boutons_est_enregistree_et_fait_foi` — `tests/test_revue_tickets.py`:715  (def)
-- `test_A10_les_medias_et_les_entetes_partout` — `tests/test_acces_site.py`:818  (def)
-- `test_A11_stats_sans_donnee_personnelle` — `tests/test_acces_site.py`:841  (def)
-- `test_A12_un_numero_ecrit_avec_d_autres_chiffres_est_refuse_proprement` — `tests/test_acces_site.py`:861  (def)
+- `test_A10_les_medias_et_les_entetes_partout` — `tests/test_acces_site.py`:840  (def)
+- `test_A11_stats_sans_donnee_personnelle` — `tests/test_acces_site.py`:863  (def)
+- `test_A12_un_numero_ecrit_avec_d_autres_chiffres_est_refuse_proprement` — `tests/test_acces_site.py`:883  (def)
 - `test_A1_battement_annule_pose_le_drapeau_d_arret` — `tests/test_arret_chien_de_garde.py`:33  (def)
 - `test_A1_ce_qui_est_une_salutation` — `tests/test_salutations.py`:13  (def)
 - `test_A1_deux_abonnements_au_meme_compte_recoivent_chacun_le_nouveau_post` — `tests/test_social_abonnements.py`:15  (def)
+- `test_A1_les_modeles_d_annonce_sont_ecrits_et_dans_les_limites` — `tests/test_modeles_annonces.py`:12  (def)
 - `test_A1_seul_un_flux_du_studio_rell_sans_salon_est_rattache` — `tests/test_autos.py`:29  (def)
-- `test_A1_toute_adresse_du_serveur_est_declaree` — `tests/test_acces_site.py`:353  (def)
+- `test_A1_toute_adresse_du_serveur_est_declaree` — `tests/test_acces_site.py`:374  (def)
 - `test_A1_une_ligne_de_texte_mention_bienvenue_nombre_de_membres` — `tests/test_accueil_court.py`:40  (def)
-- `test_A2_chaque_case_de_la_table` — `tests/test_acces_site.py`:435  (def)
+- `test_A2_chaque_case_de_la_table` — `tests/test_acces_site.py`:457  (def)
 - `test_A2_chien_de_garde_se_tait_et_se_termine_a_l_arret` — `tests/test_arret_chien_de_garde.py`:51  (def)
 - `test_A2_dans_un_post_de_forum_aussi_et_rien_si_l_accueil_est_coupe` — `tests/test_accueil_court.py`:60  (def)
+- `test_A2_la_barre_de_mise_en_forme_sur_le_site_de_l_equipage` — `tests/test_modeles_annonces.py`:25  (def)
 - `test_A2_le_salon_des_actualites_devient_un_salon_d_annonces_une_fois` — `tests/test_autos.py`:118  (def)
 - `test_A2_un_main_qui_salue_seulement_ou_tout_le_monde_ecrit` — `tests/test_salutations.py`:46  (def)
 - `test_A2_une_alerte_par_panne_puis_reamorcee_au_retablissement` — `tests/test_social_abonnements.py`:32  (def)
-- `test_A2b_le_bon_lien_ouvre_SA_page_et_aucune_autre` — `tests/test_acces_site.py`:482  (def)
-- `test_A3_chaque_fichier_du_site_a_ses_lecteurs` — `tests/test_acces_site.py`:499  (def)
+- `test_A2b_le_bon_lien_ouvre_SA_page_et_aucune_autre` — `tests/test_acces_site.py`:504  (def)
+- `test_A3_chaque_fichier_du_site_a_ses_lecteurs` — `tests/test_acces_site.py`:521  (def)
 - `test_A3_la_boucle_ne_lit_plus_rien_pour_rien` — `tests/test_social_abonnements.py`:63  (def)
 - `test_A3_la_traduction_dans_les_six_langues_et_le_reste_branche` — `tests/test_accueil_court.py`:76  (def)
 - `test_A3_le_releve_des_fils_suit_bot_run` — `tests/test_arret_chien_de_garde.py`:65  (def)
 - `test_A3_les_sneaks_ne_gardent_que_le_studio_rell_et_effacent_le_reste` — `tests/test_autos.py`:54  (def)
 - `test_A3_message_retire_entre_temps` — `tests/test_salutations.py`:63  (def)
 - `test_A4_la_boucle_rend_sa_connexion_et_garde_les_modifications_du_panneau` — `tests/test_social_abonnements.py`:72  (def)
-- `test_A4_la_websocket_du_direct_la_tete_seule` — `tests/test_acces_site.py`:532  (def)
+- `test_A4_la_websocket_du_direct_la_tete_seule` — `tests/test_acces_site.py`:554  (def)
 - `test_A4_membre_qui_a_bloque_le_bot_sans_bruit` — `tests/test_salutations.py`:73  (def)
-- `test_A5_la_vitrine_get_seulement_sans_cookie_noindex` — `tests/test_acces_site.py`:561  (def)
+- `test_A5_la_vitrine_get_seulement_sans_cookie_noindex` — `tests/test_acces_site.py`:583  (def)
 - `test_A5_le_post_chat_d_un_forum_recoit_son_salut` — `tests/test_salutations.py`:93  (def)
-- `test_A5b_la_vitrine_cadence_par_la_premiere_adresse_ip` — `tests/test_acces_site.py`:578  (def)
-- `test_A5c_la_vitrine_ne_montre_que_des_champs_publics` — `tests/test_acces_site.py`:605  (def)
-- `test_A6_une_ecriture_d_ailleurs_est_refusee_et_rien_n_est_ecrit` — `tests/test_acces_site.py`:665  (def)
-- `test_A7_corps_trop_gros_et_json_pieges_refuses_proprement` — `tests/test_acces_site.py`:699  (def)
-- `test_A8_aucun_pas_hors_du_dossier_ni_detour_vers_le_code` — `tests/test_acces_site.py`:752  (def)
-- `test_A9_les_images_au_dela_des_limites_sont_refusees` — `tests/test_acces_site.py`:778  (def)
+- `test_A5b_la_vitrine_cadence_par_la_premiere_adresse_ip` — `tests/test_acces_site.py`:600  (def)
+- `test_A5c_la_vitrine_ne_montre_que_des_champs_publics` — `tests/test_acces_site.py`:627  (def)
+- `test_A6_une_ecriture_d_ailleurs_est_refusee_et_rien_n_est_ecrit` — `tests/test_acces_site.py`:687  (def)
+- `test_A7_corps_trop_gros_et_json_pieges_refuses_proprement` — `tests/test_acces_site.py`:721  (def)
+- `test_A8_aucun_pas_hors_du_dossier_ni_detour_vers_le_code` — `tests/test_acces_site.py`:774  (def)
+- `test_A9_les_images_au_dela_des_limites_sont_refusees` — `tests/test_acces_site.py`:800  (def)
 - `test_actif_exige_interrupteur_ET_salon` — `tests/test_roblox_actualites.py`:53  (async def)
 - `test_actif_ne_tombe_pas_sur_une_config_partielle` — `tests/test_roblox_actualites.py`:72  (async def)
 - `test_annee_bissextile` — `tests/test_activite.py`:140  (def)
@@ -6389,8 +6633,10 @@
 - `test_B8_branche_dans_le_bot_et_plus_d_appel_public_a_l_arret` — `tests/test_boosts.py`:246  (def)
 - `test_B8_les_arrivants_jumeaux_sont_reperes_et_une_alerte_ignoree_ne_revient_pas` — `tests/test_bouclier.py`:210  (def)
 - `test_B9_le_plan_des_salons_le_garde_en_lecture_seule` — `tests/test_boosts.py`:259  (def)
+- `test_bloque` — `tests/test_sujets_interdits.py`:43  (def)
 - `test_bot_injecte_le_retour_du_panneau_social` — `tests/test_configure_social.py`:105  (def)
 - `test_bot_injecte_presence_et_force_une_semaine` — `tests/test_rellseas.py`:404  (def)
+- `test_branchement_texte_lien_et_titre_de_gif` — `tests/test_sujets_interdits.py`:92  (def)
 - `test_C10_cablage_page_et_rgpd` — `tests/test_candidature_site.py`:1099  (def)
 - `test_C10_la_duree_d_une_protection_s_ecrit_dans_la_cle_que_lisent_les_filtres` — `tests/test_commandes_moderation.py`:132  (def)
 - `test_C11_la_porte_refuse_le_candidat_partout_ou_on_ne_le_demande_pas` — `tests/test_candidature_site.py`:1344  (def)
@@ -6583,9 +6829,9 @@
 - `test_EV7_l_apercu_dit_tout_ce_que_discord_montrera` — `tests/test_evenements.py`:324  (def)
 - `test_EV8_publier_un_evenement_dans_infos` — `tests/test_evenements.py`:360  (def)
 - `test_EV9_un_double_clic_ne_publie_qu_une_fois` — `tests/test_evenements.py`:385  (def)
-- `test_F10_les_salons_reconnus_par_leur_nom` — `tests/test_faq_tickets.py`:281  (def)
+- `test_F10_les_salons_reconnus_par_leur_nom` — `tests/test_faq_tickets.py`:212  (def)
 - `test_F10_une_insulte_ne_vise_que_si_elle_s_adresse_a_quelqu_un` — `tests/test_faux_positifs.py`:157  (def)
-- `test_F11_branche_dans_le_bot` — `tests/test_faq_tickets.py`:291  (def)
+- `test_F11_branche_dans_le_bot` — `tests/test_faq_tickets.py`:222  (def)
 - `test_F11_rapporter_ce_qu_on_a_subi_n_est_pas_insulter` — `tests/test_faux_positifs.py`:165  (def)
 - `test_F12_menaces_dures_seulement_adresse_ville_ip_dox` — `tests/test_faux_positifs.py`:173  (def)
 - `test_F13_prenoms_et_mots_courants_hors_du_lexique` — `tests/test_faux_positifs.py`:182  (def)
@@ -6600,10 +6846,12 @@
 - `test_F1_fermer_ferme_vraiment_le_panneau` — `tests/test_revue_admin.py`:239  (def)
 - `test_F1_liens_officiels_et_phrases_de_jeu_jamais_pris_pour_du_phishing` — `tests/test_faux_positifs.py`:52  (def)
 - `test_F1_plus_une_ligne_des_fonctions_retirees` — `tests/test_fonctions_retirees.py`:32  (def)
+- `test_F1_trois_echecs_d_affilee_avant_l_alerte` — `tests/test_flux_echecs.py`:9  (def)
 - `test_F1_un_202_compte_comme_un_ECHEC` — `tests/test_forum_refus.py`:104  (async def)
 - `test_F1_une_vieille_video_n_est_JAMAIS_une_nouveaute` — `tests/test_youtube_chaine.py`:183  (async def)
 - `test_F20_bd_chemin_et_adresses_de_service_ne_sont_pas_des_coordonnees` — `tests/test_faux_positifs.py`:254  (def)
 - `test_F21_un_message_deja_supprime_n_annule_plus_le_log_ni_la_sanction` — `tests/test_faux_positifs.py`:271  (def)
+- `test_F2_jamais_averti_quand_l_appelant_demande_le_silence` — `tests/test_flux_echecs.py`:26  (def)
 - `test_F2_la_carte_mene_au_bon_endroit_dans_la_bonne_langue` — `tests/test_faq_tickets.py`:57  (def)
 - `test_F2_le_dernier_message_de_l_aide_automatique_est_efface_une_fois` — `tests/test_fonctions_retirees.py`:69  (def)
 - `test_F2_le_salon_porteur_lecture_seule_le_staff_voit_tout` — `tests/test_tickets_fils.py`:134  (def)
@@ -6615,53 +6863,62 @@
 - `test_F3_mots_rouges_en_mot_entier` — `tests/test_faux_positifs.py`:83  (def)
 - `test_F3_trois_refus_UNE_ligne_puis_UNE_ligne_a_la_reprise` — `tests/test_forum_refus.py`:172  (async def)
 - `test_F3_un_salon_par_equipe_cree_une_fois` — `tests/test_tickets_fils.py`:146  (def)
-- `test_F3_une_carte_en_reponse_qui_s_efface_et_ne_se_repete_pas` — `tests/test_faq_tickets.py`:109  (def)
 - `test_F4_aucun_ban_ni_renvoi_automatique_d_un_membre` — `tests/test_faux_positifs.py`:94  (def)
 - `test_F4_deux_refus_UN_avertissement_par_jour_pas_un_par_passage` — `tests/test_youtube_chaine.py`:214  (async def)
-- `test_F4_le_staff_les_salons_prives_et_les_destinations_manquantes_n_ont_rien` — `tests/test_faq_tickets.py`:123  (def)
 - `test_F4_un_fil_prive_non_invitable_archive_a_7_jours` — `tests/test_tickets_fils.py`:164  (def)
 - `test_F4_UNE_requete_par_passage` — `tests/test_forum_refus.py`:255  (def)
 - `test_F5_l_ancien_avertissement_a_chaque_refus_n_est_plus_emis_pour_YouTube` — `tests/test_youtube_chaine.py`:310  (def)
-- `test_F5_la_langue_du_membre_quand_la_question_ne_la_dit_pas` — `tests/test_faq_tickets.py`:134  (def)
 - `test_F5_rafale_une_heure_d_exclusion_qui_peut_revenir` — `tests/test_faux_positifs.py`:116  (def)
 - `test_F5_refuse_il_RALENTIT_puis_reprend_son_rythme` — `tests/test_forum_refus.py`:261  (def)
 - `test_F5_un_fil_archive_n_est_pas_un_ticket_disparu` — `tests/test_tickets_fils.py`:180  (def)
 - `test_F6_ajouter_un_membre` — `tests/test_tickets_fils.py`:192  (def)
 - `test_F6_des_refus_en_serie_allongent_la_pause_jusqu_au_plafond` — `tests/test_forum_refus.py`:276  (def)
-- `test_F6_six_langues_le_bon_sujet` — `tests/test_faq_tickets.py`:223  (def)
+- `test_F6_six_langues_le_bon_sujet` — `tests/test_faq_tickets.py`:154  (def)
 - `test_F6_tete_et_staff_jamais_sanctionnes_par_un_automatisme` — `tests/test_faux_positifs.py`:122  (def)
-- `test_F7_general_tous_les_jeux_un_jeu_nomme_son_salon` — `tests/test_faq_tickets.py`:244  (def)
+- `test_F7_general_tous_les_jeux_un_jeu_nomme_son_salon` — `tests/test_faq_tickets.py`:175  (def)
 - `test_F7_grooming_retire_et_alerte_et_garde_la_preuve_en_ticket` — `tests/test_faux_positifs.py`:130  (def)
-- `test_F8_les_annonces_d_un_jeu_de_roblox_du_serveur` — `tests/test_faq_tickets.py`:258  (def)
+- `test_F8_les_annonces_d_un_jeu_de_roblox_du_serveur` — `tests/test_faq_tickets.py`:189  (def)
 - `test_F8_un_raid_n_isole_que_les_comptes_recents` — `tests/test_faux_positifs.py`:139  (def)
-- `test_F9_les_liens_les_videos_l_aide` — `tests/test_faq_tickets.py`:267  (def)
+- `test_F9_les_liens_les_videos_l_aide` — `tests/test_faq_tickets.py`:198  (def)
 - `test_F9_ping_de_role_exclusion_seulement_avec_un_lien_d_arnaque` — `tests/test_faux_positifs.py`:145  (def)
 - `test_fin_de_semaine_est_le_lundi_suivant` — `tests/test_activite.py`:121  (def)
+- `test_G1_le_texte_insultant_du_gif_le_retire` — `tests/test_gif_texte.py`:116  (def)
 - `test_G1_une_idee_devient_une_carte_propre_et_sa_trace` — `tests/test_suggestions.py`:63  (def)
+- `test_G2_un_gif_normal_reste` — `tests/test_gif_texte.py`:123  (def)
 - `test_G2_un_vote_par_membre_modifiable` — `tests/test_suggestions.py`:77  (def)
+- `test_G3_jamais_l_hote_du_gif_directement` — `tests/test_gif_texte.py`:130  (def)
 - `test_G3_le_staff_tranche_l_auteur_est_prevenu_les_logs_suivent` — `tests/test_suggestions.py`:93  (def)
 - `test_G4_limites_et_filtres` — `tests/test_suggestions.py`:117  (def)
 - `test_G5_salon_cree_une_fois_sans_messages` — `tests/test_suggestions.py`:134  (def)
 - `test_G6_les_anciennes_cartes_sont_refaites_une_fois` — `tests/test_suggestions.py`:159  (def)
 - `test_get_honeypot_channel_id_default_zero` — `tests/test_honeypot.py`:43  (def)
+- `test_gif_titre_designe_l_image` — `tests/test_sujets_interdits.py`:53  (def)
 - `test_H1_chaque_bandeau_appele_existe` — `tests/test_habillage.py`:36  (def)
 - `test_H1_creer_son_vocal_n_est_jamais_un_saut` — `tests/test_vocal_hop.py`:72  (def)
 - `test_H1_la_page_de_RellGames_donne_RellGames_pas_CaribBros` — `tests/test_youtube_chaine.py`:62  (def)
+- `test_H1_les_rangs_de_depart_et_les_trois_rangs_verrouilles` — `tests/test_hierarchie.py`:72  (def)
 - `test_H2_chaque_icone_appelee_existe_et_a_un_repli` — `tests/test_habillage.py`:47  (def)
 - `test_H2_entrer_et_sortir_en_boucle_est_freine` — `tests/test_vocal_hop.py`:82  (def)
 - `test_H2_la_page_de_CaribBros_donne_CaribBros` — `tests/test_youtube_chaine.py`:66  (def)
+- `test_H2_la_tete_seule_attribue_version_journal_et_l_equipage_refuse` — `tests/test_hierarchie.py`:121  (def)
 - `test_H3_chaque_source_sure_suffit_seule` — `tests/test_youtube_chaine.py`:77  (def)
 - `test_H3_deplace_par_le_staff_jamais_sanctionne` — `tests/test_vocal_hop.py`:91  (def)
 - `test_H3_plus_de_titre_ni_de_bouton_en_emoji` — `tests/test_habillage.py`:60  (def)
+- `test_H3_roles_discord_exclusifs_refus_dangereux_et_rang_par_defaut_jamais_touche` — `tests/test_hierarchie.py`:164  (def)
+- `test_H4_la_reprise_des_anciens_grades_par_leur_nom` — `tests/test_hierarchie.py`:240  (def)
 - `test_H4_sauter_seul_de_salon_en_salon_est_freine` — `tests/test_vocal_hop.py`:100  (def)
 - `test_H4_un_channelId_ou_un_lien_d_une_AUTRE_chaine_ne_suffit_JAMAIS` — `tests/test_youtube_chaine.py`:81  (def)
 - `test_H4_une_icone_est_un_objet_partage_qui_devient_maison_sur_place` — `tests/test_habillage.py`:82  (def)
 - `test_H5_le_gestionnaire_social_resout_RellGames_correctement` — `tests/test_youtube_chaine.py`:132  (async def)
 - `test_H5_les_icones_connues_reviennent_au_demarrage` — `tests/test_habillage.py`:93  (def)
 - `test_H5_sans_journal_d_audit_seules_les_entrees_comptent` — `tests/test_vocal_hop.py`:108  (def)
+- `test_H5_un_depart_du_clan_le_rang_n_est_plus_montre_rien_n_est_efface` — `tests/test_hierarchie.py`:310  (def)
 - `test_H6_l_ANCIEN_chemin_aussi_et_c_est_lui_qui_PERSISTE` — `tests/test_youtube_chaine.py`:149  (async def)
+- `test_H6_le_cablage` — `tests/test_hierarchie.py`:328  (def)
 - `test_H6_les_sorties_seules_ne_comptent_pas` — `tests/test_vocal_hop.py`:120  (def)
 - `test_H6_logs_et_alertes_sans_emoji_decoratif` — `tests/test_habillage.py`:104  (def)
+- `test_I10_aucun_envoi_a_la_personne_sur_chaque_chemin` — `tests/test_tickets_interdits.py`:367  (def)
+- `test_I1_deux_familles_celles_du_site_un_nouveau_panneau_se_range_seul` — `tests/test_tickets_interdits.py`:97  (def)
 - `test_I1_le_bouton_de_langue_est_enregistre_avant_et_hors_de_l_init_i18n` — `tests/test_revue_admin.py`:258  (def)
 - `test_I1_le_lien_qui_a_servi_seulement_quand_c_est_sur` — `tests/test_invitations.py`:64  (def)
 - `test_I1_seul_le_ticket_muet_depuis_7_jours_est_ferme` — `tests/test_tickets_inactifs_combat.py`:67  (def)
@@ -6670,20 +6927,31 @@
 - `test_I2_la_fermeture_partagee_log_mp_base_puis_suppression` — `tests/test_tickets_inactifs_combat.py`:101  (def)
 - `test_I2_les_detecteurs_d_images_ne_se_chargent_jamais_sur_la_boucle` — `tests/test_infra_lot5.py`:44  (def)
 - `test_I2_les_deux_analyses_recoivent_le_lecteur` — `tests/test_image_une_fois.py`:36  (def)
+- `test_I2_serveur_seul_clan_seul_les_deux_puis_la_levee` — `tests/test_tickets_interdits.py`:110  (def)
 - `test_I2_seuls_les_vrais_invites_encore_la_comptent` — `tests/test_invitations.py`:74  (def)
 - `test_I3_branchements` — `tests/test_tickets_inactifs_combat.py`:153  (def)
 - `test_I3_la_retention_purge_vraiment` — `tests/test_infra_lot5.py`:59  (def)
 - `test_I3_une_rafale_n_interroge_pas_discord` — `tests/test_invitations.py`:99  (def)
 - `test_I3_une_reaction_ordinaire_ne_touche_pas_la_base` — `tests/test_image_une_fois.py`:43  (def)
+- `test_I3_une_version_perimee_est_refusee_et_rien_n_est_ecrit` — `tests/test_tickets_interdits.py`:156  (def)
 - `test_I4_cadeau_invitations_et_anciennete` — `tests/test_invitations.py`:111  (def)
 - `test_I4_la_deconnexion_efface_vraiment_le_cookie` — `tests/test_infra_lot5.py`:82  (def)
+- `test_I4_la_tete_seule_ecrit_et_le_fondateur_la_direction_le_bot_jamais_interdits` — `tests/test_tickets_interdits.py`:171  (def)
 - `test_I5_branche_dans_le_bot_et_le_bump_retire` — `tests/test_invitations.py`:136  (def)
+- `test_I5_la_commande_ticketblacklist_voit_et_modifie_les_memes_listes` — `tests/test_tickets_interdits.py`:225  (def)
 - `test_I5_une_base_occupee_n_est_pas_une_fiche_vide` — `tests/test_infra_lot5.py`:87  (def)
+- `test_I6_la_liste_noire_du_recrutement_et_la_fiche_disent_la_meme_chose` — `tests/test_tickets_interdits.py`:263  (def)
 - `test_I6_un_sondage_sans_salon_n_est_plus_relu_pour_toujours` — `tests/test_infra_lot5.py`:98  (def)
+- `test_I7_au_clic_un_refus_ephemere_et_l_autre_famille_reste_ouverte` — `tests/test_tickets_interdits.py`:284  (def)
+- `test_I8_le_refus_ne_dit_ni_qui_ni_pourquoi_ni_quand_meme_reecrit` — `tests/test_tickets_interdits.py`:312  (def)
+- `test_I9_les_messages_prives_de_refus_ne_parlent_jamais_de_liste_noire` — `tests/test_tickets_interdits.py`:341  (def)
 - `test_il_existe_un_chemin_SANS_RIEN_TAPER` — `tests/test_off_radiation.py`:314  (def)
 - `test_il_tourne_AUSSI_dans_les_tickets` — `tests/test_protection_mineurs.py`:216  (def)
+- `test_insulte_selon_la_langue` — `tests/test_sujets_interdits.py`:68  (def)
 - `test_J10_les_alertes_hors_except_du_depot_portent_leur_marqueur` — `tests/test_journal.py`:176  (def)
+- `test_J1_la_profondeur` — `tests/test_json_profond.py`:20  (def)
 - `test_J1_le_bruit_se_tait` — `tests/test_journal.py`:63  (def)
+- `test_J2_le_corps_trop_imbrique_est_illisible` — `tests/test_json_profond.py`:27  (def)
 - `test_J2_les_vraies_alarmes_passent` — `tests/test_journal.py`:68  (def)
 - `test_J3_tout_print_fait_pendant_une_exception_passe` — `tests/test_journal.py`:72  (def)
 - `test_J4_un_meme_message_une_fois_par_6_h_puis_il_dit_combien` — `tests/test_journal.py`:76  (def)
@@ -6692,6 +6960,7 @@
 - `test_J7_une_trace_d_erreur_sort_en_un_bloc_une_fois` — `tests/test_journal.py`:106  (def)
 - `test_J8_logging_meme_deduplication` — `tests/test_journal.py`:123  (def)
 - `test_J9_installe_seulement_en_production` — `tests/test_journal.py`:143  (def)
+- `test_jamais_d_exception` — `tests/test_sujets_interdits.py`:63  (def)
 - `test_jour_est_stable_dans_la_journee` — `tests/test_activite.py`:148  (def)
 - `test_journal_vide_ne_juge_personne` — `tests/test_activite_observation.py`:184  (def)
 - `test_jours_ecoules_aujourdhui` — `tests/test_activite.py`:27  (def)
@@ -6699,42 +6968,43 @@
 - `test_jours_ecoules_jamais_negatif` — `tests/test_activite.py`:42  (def)
 - `test_jours_ecoules_une_semaine` — `tests/test_activite.py`:31  (def)
 - `test_jours_entre_inconnu_renvoie_none` — `tests/test_activite.py`:144  (def)
-- `test_K10_branche_dans_le_bot` — `tests/test_cadeaux.py`:273  (def)
+- `test_K10_branche_dans_le_bot` — `tests/test_cadeaux.py`:274  (def)
 - `test_K10_un_futur_chef_qui_perd_le_role_du_clan` — `tests/test_candidat_ses_cases.py`:587  (def)
 - `test_K11_le_direct_de_la_direction_refuse_equipage_et_candidat` — `tests/test_candidat_ses_cases.py`:625  (def)
-- `test_K11_le_panneau_de_creation_de_bout_en_bout` — `tests/test_cadeaux.py`:289  (def)
-- `test_K12_ceux_qui_peuvent_et_ceux_qui_peuvent_pas` — `tests/test_cadeaux.py`:331  (def)
-- `test_K13_le_tirage_tombe_a_la_seconde` — `tests/test_cadeaux.py`:355  (def)
-- `test_K14_la_commande_giveaway` — `tests/test_cadeaux.py`:379  (def)
+- `test_K11_le_panneau_de_creation_de_bout_en_bout` — `tests/test_cadeaux.py`:290  (def)
+- `test_K12_ceux_qui_peuvent_et_ceux_qui_peuvent_pas` — `tests/test_cadeaux.py`:332  (def)
+- `test_K13_le_tirage_tombe_a_la_seconde` — `tests/test_cadeaux.py`:356  (def)
+- `test_K14_la_commande_giveaway` — `tests/test_cadeaux.py`:380  (def)
+- `test_K15_une_rafale_de_messages_courts_compte_pour_un` — `tests/test_cadeaux.py`:395  (def)
 - `test_K1_jamais_l_envoi_ni_le_ticket_d_un_autre` — `tests/test_candidat_ses_cases.py`:111  (def)
-- `test_K1_la_duree_se_lit_comme_on_la_dit` — `tests/test_cadeaux.py`:82  (def)
+- `test_K1_la_duree_se_lit_comme_on_la_dit` — `tests/test_cadeaux.py`:83  (def)
 - `test_K1_les_salons_de_combat_sont_retires_et_pas_le_reste` — `tests/test_tickets_inactifs_combat.py`:161  (def)
 - `test_K1_rappel_echu_revenu_retire_annule` — `tests/test_clan.py`:50  (def)
 - `test_K1_visible_sauf_reserve_logs_et_salon_piege` — `tests/test_config_salons.py`:64  (def)
 - `test_K2_appele_au_demarrage` — `tests/test_tickets_inactifs_combat.py`:207  (def)
 - `test_K2_chercher_dans_tout_le_serveur` — `tests/test_clan.py`:67  (def)
 - `test_K2_communautaire_on_parle_sauf_dans_les_salons_a_lire` — `tests/test_config_salons.py`:74  (def)
-- `test_K2_et_ou_le_role_demande_et_la_chance` — `tests/test_cadeaux.py`:97  (def)
+- `test_K2_et_ou_le_role_demande_et_la_chance` — `tests/test_cadeaux.py`:98  (def)
 - `test_K2_un_numero_d_etape_force` — `tests/test_candidat_ses_cases.py`:166  (def)
 - `test_K3_ajouter_au_clan_seulement_ce_role` — `tests/test_clan.py`:145  (def)
 - `test_K3_le_radie_ne_voit_plus_rien_partout` — `tests/test_config_salons.py`:83  (def)
 - `test_K3_une_etape_non_ouverte_ou_deja_envoyee` — `tests/test_candidat_ses_cases.py`:198  (def)
-- `test_K3_x2_c_est_deux_fois_plus_de_chances` — `tests/test_cadeaux.py`:109  (def)
-- `test_K4_les_messages_comptent_sans_le_spam` — `tests/test_cadeaux.py`:119  (def)
+- `test_K3_x2_c_est_deux_fois_plus_de_chances` — `tests/test_cadeaux.py`:110  (def)
+- `test_K4_les_messages_comptent_sans_le_spam` — `tests/test_cadeaux.py`:120  (def)
 - `test_K4_prevenir_par_message_prive_ou_ping` — `tests/test_clan.py`:157  (def)
 - `test_K4_tout_s_annule_a_l_identique` — `tests/test_config_salons.py`:92  (def)
 - `test_K4_un_double_envoi_ne_reecrit_rien` — `tests/test_candidat_ses_cases.py`:290  (def)
 - `test_K5_branchements` — `tests/test_clan.py`:178  (def)
 - `test_K5_des_champs_inconnus_ou_modifies_a_la_main` — `tests/test_candidat_ses_cases.py`:330  (def)
-- `test_K5_le_vocal_compte_hors_afk_casque_non_coupe` — `tests/test_cadeaux.py`:137  (def)
+- `test_K5_le_vocal_compte_hors_afk_casque_non_coupe` — `tests/test_cadeaux.py`:138  (def)
 - `test_K6_pas_de_badge_d_activite_hors_du_clan` — `tests/test_clan.py`:191  (def)
-- `test_K6_un_cadeau_de_bout_en_bout` — `tests/test_cadeaux.py`:165  (def)
+- `test_K6_un_cadeau_de_bout_en_bout` — `tests/test_cadeaux.py`:166  (def)
 - `test_K6_un_corps_trop_gros_ou_illisible` — `tests/test_candidat_ses_cases.py`:391  (def)
-- `test_K7_nouveau_tirage_et_annulation` — `tests/test_cadeaux.py`:233  (def)
+- `test_K7_nouveau_tirage_et_annulation` — `tests/test_cadeaux.py`:234  (def)
 - `test_K7_une_reponse_en_html_ou_en_script_reste_du_texte_partout` — `tests/test_candidat_ses_cases.py`:446  (def)
-- `test_K8_la_boucle_tire_a_l_heure_meme_apres_un_redemarrage` — `tests/test_cadeaux.py`:249  (def)
+- `test_K8_la_boucle_tire_a_l_heure_meme_apres_un_redemarrage` — `tests/test_cadeaux.py`:250  (def)
 - `test_K8_un_lien_reutilise_ou_expire` — `tests/test_candidat_ses_cases.py`:499  (def)
-- `test_K9_la_gestion_reservee_au_fondateur_et_a_la_direction` — `tests/test_cadeaux.py`:263  (def)
+- `test_K9_la_gestion_reservee_au_fondateur_et_a_la_direction` — `tests/test_cadeaux.py`:264  (def)
 - `test_K9_une_session_apres_la_fermeture_du_ticket` — `tests/test_candidat_ses_cases.py`:555  (def)
 - `test_L10_le_panneau_principal_dit_ou_sont_les_logs` — `tests/test_logs_site.py`:501  (def)
 - `test_L11_le_limiteur_du_site_compte_par_client_et_ne_se_vide_plus_d_un_coup` — `tests/test_logs_site.py`:509  (def)
@@ -6973,58 +7243,58 @@
 - `test_LV7_memoire_bornee_et_empreinte_une_fois_par_version` — `tests/test_longevite.py`:401  (def)
 - `test_LV8_journal_pages_filtres_comptes_et_jours_de_paris` — `tests/test_longevite.py`:539  (def)
 - `test_LV9_tickets_fermes_par_mois_date_recherche_et_donnees_bornees` — `tests/test_longevite.py`:612  (def)
-- `test_M10_le_guide_du_clan_porte_le_choix_du_metier` — `tests/test_metiers.py`:864  (def)
-- `test_M10b_un_metier_change_sur_le_site_le_guide_suit` — `tests/test_metiers.py`:916  (def)
-- `test_M10c_le_selecteur_est_capte_au_demarrage_et_le_detecteur_est_vert` — `tests/test_metiers.py`:926  (def)
-- `test_M10d_installer_la_zone_du_clan_pose_le_guide_avec_le_choix_du_metier` — `tests/test_metiers.py`:1167  (def)
-- `test_M11_accepte_au_clan_la_carte_du_metier_avant_la_fermeture` — `tests/test_metiers.py`:990  (def)
-- `test_M11b_sans_guide_rien_n_est_promis_et_une_panne_ne_bloque_pas` — `tests/test_metiers.py`:1007  (def)
-- `test_M12_cablage_etape_ecouteur_boucle_supervisee` — `tests/test_metiers.py`:1027  (def)
-- `test_M13_membres_sanctionnes_par_la_base_ou_par_le_role` — `tests/test_metiers.py`:1074  (def)
-- `test_M14_affiche_du_site_et_appliquer_suivent_le_clan` — `tests/test_metiers.py`:1100  (def)
-- `test_M15_le_role_du_clan_n_est_jamais_le_role_d_un_metier` — `tests/test_metiers.py`:1135  (def)
-- `test_M15b_le_fondateur_et_la_direction_ne_sont_jamais_depouilles` — `tests/test_metiers.py`:1152  (def)
+- `test_M10_le_guide_du_clan_porte_le_choix_du_metier` — `tests/test_metiers.py`:866  (def)
+- `test_M10b_un_metier_change_sur_le_site_le_guide_suit` — `tests/test_metiers.py`:918  (def)
+- `test_M10c_le_selecteur_est_capte_au_demarrage_et_le_detecteur_est_vert` — `tests/test_metiers.py`:928  (def)
+- `test_M10d_installer_la_zone_du_clan_pose_le_guide_avec_le_choix_du_metier` — `tests/test_metiers.py`:1169  (def)
+- `test_M11_accepte_au_clan_la_carte_du_metier_avant_la_fermeture` — `tests/test_metiers.py`:992  (def)
+- `test_M11b_sans_guide_rien_n_est_promis_et_une_panne_ne_bloque_pas` — `tests/test_metiers.py`:1009  (def)
+- `test_M12_cablage_etape_ecouteur_boucle_supervisee` — `tests/test_metiers.py`:1029  (def)
+- `test_M13_membres_sanctionnes_par_la_base_ou_par_le_role` — `tests/test_metiers.py`:1076  (def)
+- `test_M14_affiche_du_site_et_appliquer_suivent_le_clan` — `tests/test_metiers.py`:1102  (def)
+- `test_M15_le_role_du_clan_n_est_jamais_le_role_d_un_metier` — `tests/test_metiers.py`:1137  (def)
+- `test_M15b_le_fondateur_et_la_direction_ne_sont_jamais_depouilles` — `tests/test_metiers.py`:1154  (def)
 - `test_M1_la_capture_du_14_10_damn_est_une_exclamation` — `tests/test_mots_vocaux_stockage.py`:42  (def)
 - `test_M1_le_message_est_edite_en_place_jamais_envoye` — `tests/test_annonces_modifiables.py`:201  (def)
 - `test_M1_mod_stats_acquitte_avant_les_lectures` — `tests/test_revue_admin.py`:383  (def)
-- `test_M1_premier_choix_cree_le_role_sous_le_clan_sans_permission_et_le_donne` — `tests/test_metiers.py`:347  (def)
+- `test_M1_premier_choix_cree_le_role_sous_le_clan_sans_permission_et_le_donne` — `tests/test_metiers.py`:349  (def)
 - `test_M1_un_fil_par_jour_et_par_salon` — `tests/test_menage.py`:95  (def)
-- `test_M1b_le_rangement_tient_aussi_quand_discord_ne_decale_pas_les_roles` — `tests/test_metiers.py`:379  (def)
-- `test_M1c_noms_et_couleurs_des_metiers` — `tests/test_metiers.py`:391  (def)
+- `test_M1b_le_rangement_tient_aussi_quand_discord_ne_decale_pas_les_roles` — `tests/test_metiers.py`:381  (def)
+- `test_M1c_noms_et_couleurs_des_metiers` — `tests/test_metiers.py`:393  (def)
 - `test_M2_aucun_mot_recolle_ni_mot_dans_un_mot` — `tests/test_mots_vocaux_stockage.py`:58  (def)
-- `test_M2_icone_officielle_si_le_serveur_a_les_icones_de_role` — `tests/test_metiers.py`:419  (def)
+- `test_M2_icone_officielle_si_le_serveur_a_les_icones_de_role` — `tests/test_metiers.py`:421  (def)
 - `test_M2_le_message_disparu_est_dit_rien_ne_se_republie` — `tests/test_annonces_modifiables.py`:229  (def)
 - `test_M2_les_fils_de_plus_de_30_jours_partent_d_un_coup` — `tests/test_menage.py`:107  (def)
-- `test_M3_changer_de_metier_retire_l_ancien_role_et_jamais_un_autre` — `tests/test_metiers.py`:461  (def)
+- `test_M3_changer_de_metier_retire_l_ancien_role_et_jamais_un_autre` — `tests/test_metiers.py`:463  (def)
 - `test_M3_la_version_perimee_ne_touche_a_rien` — `tests/test_annonces_modifiables.py`:243  (def)
 - `test_M3_les_vrais_mots_et_leurs_contournements_restent_vus` — `tests/test_mots_vocaux_stockage.py`:69  (def)
 - `test_M3_seuls_les_vieux_messages_du_bot_partent` — `tests/test_menage.py`:116  (def)
-- `test_M3b_choisir_garde_les_autres_attributs_et_suit_les_versions` — `tests/test_metiers.py`:486  (def)
+- `test_M3b_choisir_garde_les_autres_attributs_et_suit_les_versions` — `tests/test_metiers.py`:488  (def)
 - `test_M4_jamais_un_message_de_plus` — `tests/test_annonces_modifiables.py`:254  (def)
 - `test_M4_la_liste_blanche_gagne_toujours` — `tests/test_mots_vocaux_stockage.py`:74  (def)
-- `test_M4_limite_de_metiers_liste_et_site` — `tests/test_metiers.py`:506  (def)
+- `test_M4_limite_de_metiers_liste_et_site` — `tests/test_metiers.py`:508  (def)
 - `test_M4_remise_a_neuf_seulement_d_un_salon_de_logs_pur` — `tests/test_menage.py`:135  (def)
 - `test_M5_l_identite_d_un_salon_recree_remplacee_partout` — `tests/test_menage.py`:144  (def)
-- `test_M5_la_liste_est_reservee_au_clan` — `tests/test_metiers.py`:538  (def)
+- `test_M5_la_liste_est_reservee_au_clan` — `tests/test_metiers.py`:540  (def)
 - `test_M5_les_liens_sont_verifies` — `tests/test_annonces_modifiables.py`:296  (def)
 - `test_M5_un_message_hostile_ne_gele_pas_le_bot` — `tests/test_mots_vocaux_stockage.py`:78  (def)
-- `test_M5b_deux_choix_d_affilee_et_une_panne_repondent_toujours` — `tests/test_metiers.py`:554  (def)
+- `test_M5b_deux_choix_d_affilee_et_une_panne_repondent_toujours` — `tests/test_metiers.py`:556  (def)
 - `test_M6_branchement_dans_le_bot` — `tests/test_mots_vocaux_stockage.py`:89  (def)
 - `test_M6_l_apercu_d_une_modification_n_ecrit_rien` — `tests/test_annonces_modifiables.py`:303  (def)
 - `test_M6_le_journal_ecrit_dans_le_fil_du_jour` — `tests/test_menage.py`:152  (def)
-- `test_M6_perdre_le_role_du_clan_retire_tous_les_roles_du_clan` — `tests/test_metiers.py`:581  (def)
-- `test_M6b_attribution_automatique_non_rien_n_est_rendu_mais_tout_part` — `tests/test_metiers.py`:605  (def)
-- `test_M6c_discord_refuse_le_retrait_c_est_dit_au_journal` — `tests/test_metiers.py`:618  (def)
+- `test_M6_perdre_le_role_du_clan_retire_tous_les_roles_du_clan` — `tests/test_metiers.py`:583  (def)
+- `test_M6b_attribution_automatique_non_rien_n_est_rendu_mais_tout_part` — `tests/test_metiers.py`:607  (def)
+- `test_M6c_discord_refuse_le_retrait_c_est_dit_au_journal` — `tests/test_metiers.py`:620  (def)
 - `test_M7_menage_unique_roles_salon_des_accessoires_et_logs` — `tests/test_menage.py`:163  (def)
-- `test_M7_sanction_en_cours_rien_n_est_retire_ni_rendu` — `tests/test_metiers.py`:630  (def)
+- `test_M7_sanction_en_cours_rien_n_est_retire_ni_rendu` — `tests/test_metiers.py`:632  (def)
 - `test_M8_branchements` — `tests/test_menage.py`:219  (def)
-- `test_M8_reconciliation_rattrape_ce_qu_un_redemarrage_a_manque` — `tests/test_metiers.py`:661  (def)
-- `test_M8b_reconciliation_attribution_non_et_sans_role_du_clan` — `tests/test_metiers.py`:696  (def)
-- `test_M8c_une_panne_persistante_n_ecrit_qu_une_ligne` — `tests/test_metiers.py`:711  (def)
-- `test_M9_adresses_reglages_installer_reconcilier_et_droits` — `tests/test_metiers.py`:725  (def)
+- `test_M8_reconciliation_rattrape_ce_qu_un_redemarrage_a_manque` — `tests/test_metiers.py`:663  (def)
+- `test_M8b_reconciliation_attribution_non_et_sans_role_du_clan` — `tests/test_metiers.py`:698  (def)
+- `test_M8c_une_panne_persistante_n_ecrit_qu_une_ligne` — `tests/test_metiers.py`:713  (def)
+- `test_M9_adresses_reglages_installer_reconcilier_et_droits` — `tests/test_metiers.py`:727  (def)
 - `test_M9_la_base_rend_la_place` — `tests/test_menage.py`:225  (def)
-- `test_M9b_sans_role_du_clan_ni_module_les_adresses_le_disent` — `tests/test_metiers.py`:794  (def)
-- `test_M9c_installer_et_creer_un_role_donnent_aussitot_a_ceux_qui_ont_le_metier` — `tests/test_metiers.py`:811  (def)
+- `test_M9b_sans_role_du_clan_ni_module_les_adresses_le_disent` — `tests/test_metiers.py`:796  (def)
+- `test_M9c_installer_et_creer_un_role_donnent_aussitot_a_ceux_qui_ont_le_metier` — `tests/test_metiers.py`:813  (def)
 - `test_membre_qui_avait_deja_le_role_est_signale_pas_compte_comme_fait` — `tests/test_rellseas.py`:321  (async def)
 - `test_module_has_init_db` — `tests/test_imports.py`:81  (def)
 - `test_module_has_setup` — `tests/test_imports.py`:49  (def)
@@ -7070,6 +7340,7 @@
 - `test_P1_chaque_action_de_la_page_existe_et_chaque_champ_est_lu` — `tests/test_site_v2_port.py`:66  (def)
 - `test_P1_la_date_relative_de_YouTube_est_lue` — `tests/test_youtube_chaine.py`:256  (def)
 - `test_P1_les_actions_humaines_sont_journalisees_celles_du_bot_non` — `tests/test_audit_pousse.py`:37  (def)
+- `test_P1_les_reglages_par_defaut_et_lus` — `tests/test_metiers_places.py`:18  (def)
 - `test_P1_un_meme_mp_au_plus_une_fois_par_6_h` — `tests/test_mp_sans_spam.py`:20  (def)
 - `test_P1_une_seule_publication_meme_a_plusieurs` — `tests/test_publications.py`:47  (def)
 - `test_P1_une_vue_qui_expire_ne_retire_plus_un_bouton_persistant` — `tests/test_persistants.py`:34  (def)
@@ -7077,20 +7348,26 @@
 - `test_P2_deux_instances_partagent_la_base` — `tests/test_publications.py`:78  (def)
 - `test_P2_garde_installee_une_fois_avant_la_creation_du_bot` — `tests/test_persistants.py`:58  (def)
 - `test_P2_la_page_rend_les_videos_DATEES_avec_l_identifiant_du_flux` — `tests/test_youtube_chaine.py`:268  (def)
+- `test_P2_le_metier_retrouve_dans_les_reponses_de_la_fiche` — `tests/test_metiers_places.py`:25  (def)
 - `test_P2_les_actions_du_port_et_de_l_equipage_sur_le_vrai_serveur` — `tests/test_site_v2_port.py`:166  (def)
 - `test_P2_plus_de_lecture_du_journal_d_audit_par_changement_de_membre` — `tests/test_audit_pousse.py`:55  (def)
 - `test_P2_plus_de_mp_pour_un_probleme_de_staff_ni_en_double` — `tests/test_mp_sans_spam.py`:42  (def)
 - `test_P3_ce_que_la_page_lit_dans_les_reponses_du_serveur` — `tests/test_site_v2_port.py`:267  (def)
+- `test_P3_les_places_se_valident` — `tests/test_metiers_places.py`:33  (def)
 - `test_P3_notification_instantanee_signee` — `tests/test_publications.py`:105  (def)
 - `test_P3_une_page_ILLISIBLE_rend_None_pas_une_liste_vide` — `tests/test_youtube_chaine.py`:283  (def)
 - `test_P4_abonnements_entretenus` — `tests/test_publications.py`:148  (def)
 - `test_P4_deux_flux_REFUSES_la_page_prend_le_relais_sans_bruit` — `tests/test_youtube_chaine.py`:290  (async def)
+- `test_P4_la_fiche_accepte_le_champ_metier` — `tests/test_metiers_places.py`:43  (def)
 - `test_P4_la_maquette_rend_les_memes_formes_que_le_serveur` — `tests/test_site_v2_port.py`:342  (def)
 - `test_P5_annonce_unique_et_envoi_incertain_verifie` — `tests/test_publications.py`:185  (def)
+- `test_P5_la_fiche_propose_seulement_les_places_libres` — `tests/test_metiers_places.py`:49  (def)
 - `test_P5_la_page_d_1_Mo_n_est_lue_qu_une_fois_par_demi_heure` — `tests/test_youtube_chaine.py`:301  (async def)
+- `test_P6_branche_dans_le_bot_et_le_guide` — `tests/test_metiers_places.py`:68  (def)
 - `test_P6_le_gestionnaire_reserve_aussi` — `tests/test_publications.py`:244  (def)
 - `test_P7_historique_ecrit_d_un_bloc` — `tests/test_publications.py`:276  (def)
 - `test_P8_les_adresses_websub_par_http` — `tests/test_publications.py`:291  (def)
+- `test_permis` — `tests/test_sujets_interdits.py`:31  (def)
 - `test_plus_aucun_panneau_ne_repond_en_direct` — `tests/test_panneaux_interaction.py`:63  (def)
 - `test_public_api_exported` — `tests/test_honeypot.py`:34  (def)
 - `test_Q01_ancienne_carte_de_l_etape_1_pour_les_tickets_d_avant_l_affiche` — `tests/test_questionnaire.py`:247  (def)
@@ -7125,12 +7402,12 @@
 - `test_Q1_bouclier_reserve_aux_administrateurs_dans_le_code` — `tests/test_qui_peut_quoi.py`:240  (def)
 - `test_Q1_deux_factions_un_formulaire_court_dans_les_deux_langues` — `tests/test_equipages.py`:78  (def)
 - `test_Q1_une_vraie_question_pas_du_bavardage` — `tests/test_questions.py`:53  (def)
-- `test_Q20_l_affiche_d_un_ticket_du_clan_dans_le_bot` — `tests/test_questionnaire.py`:1185  (def)
-- `test_Q21_phrases_du_journal_du_site_et_regle_de_nettoyage` — `tests/test_questionnaire.py`:1221  (def)
+- `test_Q20_l_affiche_d_un_ticket_du_clan_dans_le_bot` — `tests/test_questionnaire.py`:1187  (def)
+- `test_Q21_phrases_du_journal_du_site_et_regle_de_nettoyage` — `tests/test_questionnaire.py`:1223  (def)
 - `test_Q2_publier_une_carte_dans_le_post_crews_le_bouton_redescend` — `tests/test_equipages.py`:96  (def)
 - `test_Q2_radiation_hierarchie_des_administrateurs_et_direction_protegee` — `tests/test_qui_peut_quoi.py`:292  (def)
 - `test_Q2_releve_et_fermeture_automatique` — `tests/test_questions.py`:63  (def)
-- `test_Q30_le_site_range_chaque_candidature_a_son_etape` — `tests/test_questionnaire.py`:1267  (def)
+- `test_Q30_le_site_range_chaque_candidature_a_son_etape` — `tests/test_questionnaire.py`:1269  (def)
 - `test_Q3_fil_ouvert_sur_la_question_et_gestes_du_site` — `tests/test_questions.py`:99  (def)
 - `test_Q3_rejoindre_un_mot_sous_la_carte_qui_previent_le_capitaine` — `tests/test_equipages.py`:128  (def)
 - `test_Q3_undirection_ne_rend_que_des_roles_plus_bas_que_le_sien` — `tests/test_qui_peut_quoi.py`:327  (def)
@@ -7187,7 +7464,10 @@
 - `test_R15_le_module_de_la_page_web_trouve_par_sys_modules` — `tests/test_recrutement_ticket.py`:709  (def)
 - `test_R15b_sans_page_web_les_formulaires_de_discord` — `tests/test_recrutement_ticket.py`:731  (def)
 - `test_R16_chef_d_equipe_proposer_corriger_nommer_retirer` — `tests/test_recrutement_ticket.py`:752  (def)
+- `test_R16_questionnaire_abandonne_rappel_puis_fermeture_sans_liste_noire` — `tests/test_recrutement_ticket.py`:1440  (def)
 - `test_R16b_chef_refuse_sans_liste_noire_attente_et_sans_page_web` — `tests/test_recrutement_ticket.py`:845  (def)
+- `test_R16b_il_reprend_le_compte_repart` — `tests/test_recrutement_ticket.py`:1474  (def)
+- `test_R17_les_reglages_des_relances_et_la_liste_du_site` — `tests/test_recrutement_ticket.py`:1481  (def)
 - `test_R17_purge_exceptionnelle_exhaustive_et_idempotente` — `tests/test_recrutement_ticket.py`:960  (def)
 - `test_R17b_la_purge_n_est_jamais_lancee_au_demarrage` — `tests/test_recrutement_ticket.py`:1011  (def)
 - `test_R18_nettoyage_regles_et_maintenant` — `tests/test_recrutement_ticket.py`:1024  (def)
@@ -7203,11 +7483,12 @@
 - `test_R1_le_site_n_est_qu_aux_deux_comptes_de_la_tete` — `tests/test_revue_site.py`:117  (def)
 - `test_R1_le_transcript_html_lit_les_cartes_v2_et_le_site_le_relit` — `tests/test_recours_v2.py`:99  (def)
 - `test_R1_les_liens_honnetes_ne_sont_plus_du_phishing` — `tests/test_revue_moderation.py`:243  (def)
-- `test_R1_les_reponses_sous_une_carte_gardent_la_demande_vivante` — `tests/test_revue_entraide.py`:49  (def)
+- `test_R1_les_reponses_sous_une_carte_gardent_la_demande_vivante` — `tests/test_revue_entraide.py`:47  (def)
 - `test_R1_les_vrais_pieges_sont_toujours_pris` — `tests/test_revue_moderation.py`:249  (def)
 - `test_R1_seul_un_domaine_piege_connu_presume_un_compte_vole` — `tests/test_revue_moderation.py`:255  (def)
 - `test_R1_tri_par_statut_puis_nom_et_identifiants_alignes` — `tests/test_rellseas_liste.py`:27  (def)
 - `test_R1_une_erreur_apres_l_envoi_ne_fait_pas_republier` — `tests/test_revue_reste.py`:155  (def)
+- `test_R1_une_question_frequente_une_carte_qui_s_efface` — `tests/test_reponses_auto.py`:99  (def)
 - `test_R1b_l_export_des_erreurs_ne_sort_jamais_celles_des_autres_serveurs` — `tests/test_revue_site.py`:138  (def)
 - `test_R1b_publication_refusee_rien_ne_reste_on_peut_reessayer` — `tests/test_revue_cadeaux.py`:166  (def)
 - `test_R20_decidees_paginees_avec_transcript_et_auteur` — `tests/test_recrutement_ticket.py`:1092  (def)
@@ -7230,7 +7511,8 @@
 - `test_R2_un_membre_isole_par_le_raid_ne_poursuit_pas_son_arrivee` — `tests/test_verrou_raid.py`:70  (def)
 - `test_R2_un_modo_n_est_plus_exclu_pour_une_phrase_que_l_automod_croit_menacante` — `tests/test_revue_moderation.py`:321  (def)
 - `test_R2_un_role_du_clan_rendu_ne_dit_pas_bienvenue` — `tests/test_revue_reste.py`:211  (def)
-- `test_R2_une_carte_supprimee_par_un_moderateur_part_avec_ses_mots_et_ses_reponses` — `tests/test_revue_entraide.py`:71  (def)
+- `test_R2_une_carte_supprimee_par_un_moderateur_part_avec_ses_mots_et_ses_reponses` — `tests/test_revue_entraide.py`:69  (def)
+- `test_R2_une_fois_puis_rien_puis_un_seul_rappel_sans_demande` — `tests/test_reponses_auto.py`:109  (def)
 - `test_R2b_double_clic_sur_oui_tirer_un_seul_geste` — `tests/test_revue_cadeaux.py`:222  (def)
 - `test_R3_des_mots_ENTIERS_guide_n_attrape_pas_guidelines` — `tests/test_actus_sans_interet.py`:121  (def)
 - `test_R3_le_bouton_est_enregistre_et_affiche_le_compte` — `tests/test_rellseas_liste.py`:84  (def)
@@ -7238,14 +7520,15 @@
 - `test_R3_le_tirage_s_ecrit_d_un_seul_coup` — `tests/test_revue_cadeaux.py`:239  (def)
 - `test_R3_le_transcript_texte_et_le_dossier_de_recrutement_lisent_les_cartes_v2` — `tests/test_recours_v2.py`:122  (def)
 - `test_R3_les_roles_retires_sont_gardes_puis_rendus` — `tests/test_revue_moderation.py`:367  (def)
+- `test_R3_sa_demande_d_aide_existe_plus_rien` — `tests/test_reponses_auto.py`:118  (def)
 - `test_R3_un_autre_site_ne_deconnecte_plus_de_force` — `tests/test_revue_site.py`:219  (def)
 - `test_R3_un_compte_recent_toujours_la_poursuit_son_arrivee` — `tests/test_verrou_raid.py`:79  (def)
 - `test_R3_une_amnistie_defaite_ne_revient_pas_le_lendemain` — `tests/test_revue_reste.py`:295  (def)
-- `test_R3_une_carte_n_est_relue_sur_discord_qu_une_fois_par_demi_heure` — `tests/test_revue_entraide.py`:91  (def)
+- `test_R3_une_carte_n_est_relue_sur_discord_qu_une_fois_par_demi_heure` — `tests/test_revue_entraide.py`:89  (def)
 - `test_R3b_une_annonce_interrompue_est_refaite_une_seule_fois` — `tests/test_revue_cadeaux.py`:258  (def)
 - `test_R3c_annonce_impossible_un_seul_nouvel_essai_puis_c_est_dit` — `tests/test_revue_cadeaux.py`:286  (def)
 - `test_R3d_un_tirage_ancien_n_est_jamais_annonce_de_nouveau` — `tests/test_revue_cadeaux.py`:304  (def)
-- `test_R4_certifier_ni_soi_meme_ni_un_echange_dont_on_est_partie` — `tests/test_revue_entraide.py`:112  (def)
+- `test_R4_certifier_ni_soi_meme_ni_un_echange_dont_on_est_partie` — `tests/test_revue_entraide.py`:110  (def)
 - `test_R4_couper_son_micro_dans_le_hub_ne_cree_pas_de_salon` — `tests/test_verrou_raid.py`:88  (def)
 - `test_R4_fermer_toutes_mes_sessions_et_session_relue_en_base` — `tests/test_revue_site.py`:239  (def)
 - `test_R4_isolement_et_restriction_aussi_mais_pas_une_restriction_echue` — `tests/test_revue_moderation.py`:483  (def)
@@ -7254,11 +7537,12 @@
 - `test_R4_le_clic_envoie_l_apercu_et_le_fichier_complet` — `tests/test_rellseas_liste.py`:92  (def)
 - `test_R4_le_filtre_nomme_son_motif` — `tests/test_actus_sans_interet.py`:127  (def)
 - `test_R4_le_menage_epargne_les_annonces` — `tests/test_revue_reste.py`:342  (def)
+- `test_R4_le_staff_le_bavardage_et_l_aide_proposee_n_ont_rien` — `tests/test_reponses_auto.py`:125  (def)
 - `test_R4_le_ticket_de_recours_en_v2_la_direction_le_voit` — `tests/test_recours_v2.py`:199  (def)
 - `test_R4_un_radie_qui_revient_retrouve_sa_radiation_et_aucun_role` — `tests/test_revue_moderation.py`:464  (def)
 - `test_R5_l_anti_nuke_vise_la_bonne_entree_d_audit` — `tests/test_verrou_raid.py`:94  (def)
 - `test_R5_la_decision_prend_la_place_des_boutons` — `tests/test_recours_v2.py`:215  (def)
-- `test_R5_la_faq_se_tait_dans_help_et_trade_et_un_membre_retenu_ne_bloque_pas_le_salon` — `tests/test_revue_entraide.py`:134  (def)
+- `test_R5_la_question_n_attend_plus_le_staff` — `tests/test_reponses_auto.py`:133  (def)
 - `test_R5_le_vocal_suit_l_etat_reel_apres_une_reconnexion` — `tests/test_revue_cadeaux.py`:336  (def)
 - `test_R5_modifier_une_annonce_aux_longs_liens` — `tests/test_revue_reste.py`:385  (def)
 - `test_R5_par_defaut_on_supprime_sans_exclure` — `tests/test_revue_moderation.py`:532  (def)
@@ -7267,34 +7551,38 @@
 - `test_R6_ferme_la_seulement_dans_un_message_court` — `tests/test_revue_moderation.py`:550  (def)
 - `test_R6_l_activite_par_jour_suit_le_changement_d_heure` — `tests/test_revue_site.py`:324  (def)
 - `test_R6_la_liste_des_cadeaux_en_cours_suit_la_base` — `tests/test_revue_cadeaux.py`:372  (def)
+- `test_R6_la_tete_coupe_les_reponses_ici` — `tests/test_reponses_auto.py`:141  (def)
 - `test_R6_le_bouton_de_decision_inscrit_la_decision` — `tests/test_recours_v2.py`:234  (def)
 - `test_R6_le_lexique_de_haine_n_a_plus_ces_mots_de_jeu` — `tests/test_revue_moderation.py`:560  (def)
-- `test_R6_les_motifs_trop_larges` — `tests/test_revue_entraide.py`:157  (def)
+- `test_R6_les_motifs_trop_larges` — `tests/test_revue_entraide.py`:135  (def)
 - `test_R6_trois_passages_simultanes_une_seule_actualite` — `tests/test_revue_reste.py`:438  (def)
 - `test_R6b_la_carte_publiee_compte_meme_si_sa_note_echoue` — `tests/test_revue_cadeaux.py`:394  (def)
+- `test_R7_branche_dans_le_bot_et_le_site` — `tests/test_reponses_auto.py`:149  (def)
 - `test_R7_le_bouton_de_notification_dit_qu_il_bascule_et_repond_toujours` — `tests/test_revue_reste.py`:448  (def)
 - `test_R7_le_message_prive_du_recours_en_v2` — `tests/test_recours_v2.py`:255  (def)
 - `test_R7_les_boutons_de_la_carte_repondent_avant_la_base` — `tests/test_revue_cadeaux.py`:428  (def)
 - `test_R7_un_faux_cookie_ne_touche_pas_la_base_et_compte_comme_un_essai` — `tests/test_revue_site.py`:362  (def)
-- `test_R7_un_post_supprime_ne_laisse_plus_de_bouton_qui_ment` — `tests/test_revue_entraide.py`:170  (def)
+- `test_R7_un_post_supprime_ne_laisse_plus_de_bouton_qui_ment` — `tests/test_revue_entraide.py`:148  (def)
 - `test_R7_une_image_seule_dans_le_salon_piege_passe_par_le_piege` — `tests/test_revue_moderation.py`:574  (def)
 - `test_R7b_le_refus_pour_soi_s_efface_toujours` — `tests/test_revue_cadeaux.py`:478  (def)
 - `test_R7c_une_erreur_apres_l_acquittement_repond_quand_meme` — `tests/test_revue_cadeaux.py`:463  (def)
 - `test_R8_health_et_stats_ne_disent_jamais_le_texte_d_une_exception` — `tests/test_revue_site.py`:392  (def)
 - `test_R8_la_hierarchie_compte_les_roles_d_avant_la_radiation` — `tests/test_revue_moderation.py`:617  (def)
 - `test_R8_la_mention_du_clan_qui_ne_partira_pas_est_annoncee` — `tests/test_revue_reste.py`:471  (def)
-- `test_R8_le_panneau_aide_ne_depasse_jamais_quarante_composants` — `tests/test_revue_entraide.py`:189  (def)
+- `test_R8_le_panneau_aide_ne_depasse_jamais_quarante_composants` — `tests/test_revue_entraide.py`:167  (def)
 - `test_R8_le_tirage_attend_les_compteurs_en_route` — `tests/test_revue_cadeaux.py`:499  (def)
 - `test_R8_rien_a_lever_sans_radiation` — `tests/test_revue_moderation.py`:605  (def)
+- `test_R8_silence_dans_help_et_trade_et_effacement_qui_survit` — `tests/test_reponses_auto.py`:160  (def)
 - `test_R8_stats_les_roles_de_zone_manquants_par_jeu` — `tests/test_recours_v2.py`:270  (def)
 - `test_R8b_un_clic_a_la_derniere_seconde_n_est_pas_un_faux_tu_participes` — `tests/test_revue_cadeaux.py`:519  (def)
-- `test_R9_branche_dans_le_bot` — `tests/test_revue_entraide.py`:211  (def)
+- `test_R9_branche_dans_le_bot` — `tests/test_revue_entraide.py`:189  (def)
 - `test_R9_hierarchie_et_radiation` — `tests/test_revue_moderation.py`:439  (def)
 - `test_R9_l_arrivee_d_apres_n_est_pas_creditee_au_mauvais_lien` — `tests/test_revue_cadeaux.py`:563  (def)
 - `test_R9_le_journal_garde_chaque_suppression_et_son_contenu` — `tests/test_revue_site.py`:402  (def)
 - `test_R9_le_mute_permanent_des_recidivistes_reste_levable_par_le_staff` — `tests/test_revue_moderation.py`:425  (def)
 - `test_R9_un_depart_sans_carte_ne_relit_pas_le_salon_des_boosts` — `tests/test_revue_reste.py`:488  (def)
 - `test_R9_un_isolement_de_securite_n_est_leve_que_par_la_tete` — `tests/test_revue_moderation.py`:407  (def)
+- `test_reglages_couper_une_categorie` — `tests/test_sujets_interdits.py`:59  (def)
 - `test_rendre_edite_quand_linteraction_est_neuve` — `tests/test_configure_social.py`:178  (async def)
 - `test_rendre_passe_par_edit_original_quand_deja_repondu` — `tests/test_configure_social.py`:185  (async def)
 - `test_rendre_passe_par_followup_en_envoi_quand_deja_repondu` — `tests/test_configure_social.py`:193  (async def)
@@ -7313,6 +7601,7 @@
 - `test_S1_apres_le_choix_le_vrai_panneau_revient_avec_le_salon` — `tests/test_revue_admin.py`:311  (def)
 - `test_S1_chaque_fichier_a_ses_seuls_lecteurs` — `tests/test_securite_site.py`:52  (def)
 - `test_S1_chaque_salon_de_la_configuration_ce_que_le_bot_ne_peut_pas_y_faire` — `tests/test_sante_salons.py`:43  (def)
+- `test_S1_comptes_doubles_une_ligne_par_compte_principal_et_par_jour` — `tests/test_alertes_sans_rafale.py`:27  (def)
 - `test_S1_fondateur_et_direction_intouchables_le_staff_sanctionnable` — `tests/test_site_moderation.py`:127  (def)
 - `test_S1_la_duree_moyenne_vient_du_journal_des_tickets` — `tests/test_stats_tickets.py`:10  (def)
 - `test_S1_la_portee_equipage_et_toute_autre_personne_sont_refusees` — `tests/test_annonces_modifiables.py`:346  (def)
@@ -7330,6 +7619,7 @@
 - `test_S2_la_page_affiche_ces_sections` — `tests/test_site_entraide.py`:75  (def)
 - `test_S2_la_tete_modifie_depuis_l_accueil_le_meme_message_partout` — `tests/test_annonces_modifiables.py`:366  (def)
 - `test_S2_le_sondage_d_un_membre_est_suivi_sans_un_mot_du_bot` — `tests/test_sondages.py`:142  (def)
+- `test_S2_les_cartes_de_protection_sans_rafale` — `tests/test_alertes_sans_rafale.py`:37  (def)
 - `test_S2_les_copies_bak_tiennent_dans_leur_part_du_volume` — `tests/test_mots_vocaux_stockage.py`:149  (def)
 - `test_S2_les_erreurs_des_commandes_slash_comptent` — `tests/test_sante_salons.py`:58  (def)
 - `test_S2_les_lectures_nettoient_tout_ce_qu_une_affiche_ne_montre_pas` — `tests/test_site_equipage.py`:264  (def)
@@ -7340,6 +7630,7 @@
 - `test_S3_le_signalement_vocal_suit_les_memes_regles` — `tests/test_signalements.py`:71  (def)
 - `test_S3_le_verrou_est_celui_de_l_administration` — `tests/test_annonces_modifiables.py`:414  (def)
 - `test_S3_les_transcripts_aussi` — `tests/test_mots_vocaux_stockage.py`:161  (def)
+- `test_S3_profil_a_surveiller_au_journal_jamais_en_alerte` — `tests/test_alertes_sans_rafale.py`:46  (def)
 - `test_S3_retirer_le_role_du_clan_seulement_et_par_lots` — `tests/test_site_moderation.py`:156  (def)
 - `test_S3_role_du_clan_retire_acces_coupe_tout_de_suite` — `tests/test_site_equipage.py`:300  (def)
 - `test_S3_stats_publique_sans_nom_ni_identifiant` — `tests/test_securite_site.py`:193  (def)
@@ -7379,6 +7670,7 @@
 - `test_S9_journal_d_audit_permission_dangereuse_hors_de_la_tete` — `tests/test_securite_site.py`:458  (def)
 - `test_S9_passage_unique_aux_sondages_discord` — `tests/test_sondages.py`:218  (def)
 - `test_S9_refus_par_defaut_d_une_portee_non_demandee` — `tests/test_site_equipage.py`:813  (def)
+- `test_S9_retirer_une_ancienne_annonce_depuis_le_site_de_l_equipage` — `tests/test_annonces_modifiables.py`:538  (def)
 - `test_S9b_bot_py_branche_l_audit_et_l_alerte_forte` — `tests/test_securite_site.py`:511  (def)
 - `test_S9b_migration_douce_des_sessions` — `tests/test_site_equipage.py`:860  (def)
 - `test_sans_categorie_la_fiche_reste_publiable` — `tests/test_roblox_pings.py`:357  (def)
@@ -7399,78 +7691,80 @@
 - `test_seuls_les_roles_qui_voient_le_salon_sont_refermes` — `tests/test_honeypot.py`:49  (def)
 - `test_six_sources_declarees` — `tests/test_activite.py`:155  (def)
 - `test_source_inconnue_est_ignoree` — `tests/test_activite.py`:181  (def)
+- `test_symetrie_religions` — `tests/test_sujets_interdits.py`:47  (def)
 - `test_T10_actions_verifiees_origine_droits_cadence` — `tests/test_tableau.py`:423  (def)
-- `test_T10_les_evenements_emploient_les_textes_enregistres` — `tests/test_textes.py`:498  (def)
-- `test_T10b_les_annonces_publiees_sont_rangees_a_part` — `tests/test_textes.py`:545  (def)
-- `test_T11_le_guide_du_clan_et_l_acceptation` — `tests/test_textes.py`:587  (def)
+- `test_T10_les_evenements_emploient_les_textes_enregistres` — `tests/test_textes.py`:499  (def)
+- `test_T10b_les_annonces_publiees_sont_rangees_a_part` — `tests/test_textes.py`:546  (def)
+- `test_T11_le_guide_du_clan_et_l_acceptation` — `tests/test_textes.py`:588  (def)
 - `test_T11_trop_d_actions_graves_suspend_l_acces` — `tests/test_tableau.py`:462  (def)
 - `test_T12_export_propre_et_reserve` — `tests/test_tableau.py`:544  (def)
-- `test_T12_renommer_un_role_droits_refus_et_nom_garde` — `tests/test_textes.py`:623  (def)
+- `test_T12_renommer_un_role_droits_refus_et_nom_garde` — `tests/test_textes.py`:624  (def)
 - `test_T13_les_adresses_du_site_par_http` — `tests/test_tableau.py`:563  (def)
-- `test_T13_les_noms_du_site_sont_ceux_de_la_page` — `tests/test_textes.py`:878  (def)
-- `test_T14_chaque_cle_ecrite_dans_le_code_est_declaree` — `tests/test_textes.py`:929  (def)
+- `test_T13_les_noms_du_site_sont_ceux_de_la_page` — `tests/test_textes.py`:879  (def)
+- `test_T14_chaque_cle_ecrite_dans_le_code_est_declaree` — `tests/test_textes.py`:930  (def)
 - `test_T14_la_tete_n_est_jamais_suspendue` — `tests/test_tableau.py`:487  (def)
-- `test_T15_cablage_bot_site_local_et_page` — `tests/test_textes.py`:942  (def)
+- `test_T15_cablage_bot_site_local_et_page` — `tests/test_textes.py`:943  (def)
 - `test_T15_la_fiche_montre_les_sondages_du_membre` — `tests/test_tableau.py`:523  (def)
-- `test_T16_la_carte_de_l_equipe_ses_boutons_et_le_formulaire_du_refus` — `tests/test_textes.py`:670  (def)
-- `test_T17_les_reponses_au_choix_du_metier` — `tests/test_textes.py`:710  (def)
-- `test_T18_le_listing_et_l_annonce_des_metiers` — `tests/test_textes.py`:725  (def)
-- `test_T19_le_guide_du_clan_a_la_sauce_de_la_direction` — `tests/test_textes.py`:755  (def)
-- `test_T1_declarer_refuse_les_fautes_de_cablage` — `tests/test_textes.py`:134  (def)
-- `test_T1_la_direction_ferme_un_type_le_panneau_suit` — `tests/test_faq_tickets.py`:166  (def)
+- `test_T16_la_carte_de_l_equipe_ses_boutons_et_le_formulaire_du_refus` — `tests/test_textes.py`:671  (def)
+- `test_T17_les_reponses_au_choix_du_metier` — `tests/test_textes.py`:711  (def)
+- `test_T18_le_listing_et_l_annonce_des_metiers` — `tests/test_textes.py`:726  (def)
+- `test_T19_le_guide_du_clan_a_la_sauce_de_la_direction` — `tests/test_textes.py`:756  (def)
+- `test_T1_declarer_refuse_les_fautes_de_cablage` — `tests/test_textes.py`:135  (def)
+- `test_T1_la_direction_ferme_un_type_le_panneau_suit` — `tests/test_faq_tickets.py`:97  (def)
 - `test_T1_le_bilan_sante_ne_parle_plus_d_ugc_ni_d_un_ecran_qui_ne_gere_pas_ces_flux` — `tests/test_revue_admin.py`:346  (def)
 - `test_T1_le_lien_est_signe_personnel_expire_et_unique` — `tests/test_tableau.py`:65  (def)
 - `test_T1_le_transcript_porte_le_nom_et_se_retrouve_par_membre` — `tests/test_transcripts_nommes.py`:35  (def)
 - `test_T1_les_roles_pris_au_palier_2_sont_rendus_en_un_appel` — `tests/test_activite_demontage.py`:213  (def)
-- `test_T1_liste_noire_en_v2_avec_pages_ajout_et_retrait` — `tests/test_tickets_sous_menus.py`:54  (def)
+- `test_T1_liste_noire_en_v2_avec_pages_ajout_et_retrait` — `tests/test_tickets_sous_menus.py`:66  (def)
 - `test_T1_ticket_rellseas_dans_son_salon_avec_le_dossier_complet` — `tests/test_tickets_rellseas.py`:81  (def)
 - `test_T1_un_bouton_ENFOUI_en_V2_est_bien_trouve` — `tests/test_installation_auto.py`:180  (def)
 - `test_T1b_logs_sur_le_site_rien_sur_discord_tout_au_journal` — `tests/test_tickets_rellseas.py`:210  (def)
 - `test_T1bis_un_role_au_dessus_du_bot_reste_note_et_rien_n_est_marque` — `tests/test_activite_demontage.py`:223  (def)
-- `test_T20_les_sous_onglets_renommes_et_une_famille_nommee` — `tests/test_textes.py`:805  (def)
-- `test_T21_un_texte_en_cours_de_modification_ailleurs_est_refuse_423` — `tests/test_textes.py`:821  (def)
-- `test_T2_branche_dans_le_bot` — `tests/test_faq_tickets.py`:190  (def)
+- `test_T20_les_sous_onglets_renommes_et_une_famille_nommee` — `tests/test_textes.py`:806  (def)
+- `test_T21_un_texte_en_cours_de_modification_ailleurs_est_refuse_423` — `tests/test_textes.py`:822  (def)
+- `test_T2_branche_dans_le_bot` — `tests/test_faq_tickets.py`:121  (def)
 - `test_T2_choix_explicite_dans_configure_prime_sur_le_nom` — `tests/test_tickets_rellseas.py`:215  (def)
 - `test_T2_le_panneau_social_ne_promet_plus_un_nettoyage_qui_n_existe_pas` — `tests/test_revue_admin.py`:364  (def)
 - `test_T2_le_panneau_unifie_est_POSTE_avant_que_l_ancien_parte` — `tests/test_installation_auto.py`:190  (def)
 - `test_T2_les_etiquettes_du_bot_sont_supprimees_et_le_masquage_part_avec` — `tests/test_activite_demontage.py`:232  (def)
-- `test_T2_questions_en_v2_cinq_au_plus` — `tests/test_tickets_sous_menus.py`:78  (def)
-- `test_T2_seules_les_variables_declarees_sont_remplacees` — `tests/test_textes.py`:156  (def)
+- `test_T2_questions_en_v2_cinq_au_plus` — `tests/test_tickets_sous_menus.py`:94  (def)
+- `test_T2_seules_les_variables_declarees_sont_remplacees` — `tests/test_textes.py`:157  (def)
 - `test_T2_staff_et_au_dessus_seulement` — `tests/test_tableau.py`:84  (def)
 - `test_T2bis_un_role_du_serveur_seulement_DESIGNE_n_est_pas_supprime` — `tests/test_activite_demontage.py`:244  (def)
 - `test_T2quater_une_ancienne_etiquette_designee_est_retrouvee_par_l_historique` — `tests/test_activite_demontage.py`:261  (def)
 - `test_T2ter_une_etiquette_au_dessus_du_bot_est_signalee_pas_forcee` — `tests/test_activite_demontage.py`:278  (def)
-- `test_T3_plus_aucun_sous_menu_des_tickets_en_embed` — `tests/test_tickets_sous_menus.py`:90  (def)
-- `test_T3_sans_base_le_texte_d_origine` — `tests/test_textes.py`:168  (def)
+- `test_T3_plus_aucun_sous_menu_des_tickets_en_embed` — `tests/test_tickets_sous_menus.py`:106  (def)
+- `test_T3_sans_base_le_texte_d_origine` — `tests/test_textes.py`:169  (def)
 - `test_T3_seuls_les_salons_du_systeme_partent_jamais_un_salon_general` — `tests/test_activite_demontage.py`:286  (def)
 - `test_T3_si_l_envoi_RATE_on_ne_supprime_RIEN` — `tests/test_installation_auto.py`:203  (def)
 - `test_T3_tickets_tries_par_type_et_direction_a_part` — `tests/test_tableau.py`:196  (def)
 - `test_T3bis_un_salon_qui_sert_ailleurs_reste` — `tests/test_activite_demontage.py`:297  (def)
 - `test_T3ter_la_porte_propre_a_un_role_part_aussi` — `tests/test_activite_demontage.py`:308  (def)
-- `test_T4_ecrire_nettoie_borne_et_garde` — `tests/test_textes.py`:181  (def)
+- `test_T4_ecrire_nettoie_borne_et_garde` — `tests/test_textes.py`:182  (def)
 - `test_T4_lien_a_usage_unique_puis_session` — `tests/test_tableau.py`:215  (def)
-- `test_T4_un_clic_sur_ouvrir_un_ticket_ne_repond_qu_une_fois` — `tests/test_tickets_sous_menus.py`:100  (def)
+- `test_T4_un_clic_sur_ouvrir_un_ticket_ne_repond_qu_une_fois` — `tests/test_tickets_sous_menus.py`:116  (def)
 - `test_T4_un_salon_qui_a_DEJA_le_panneau_unifie_n_en_recoit_pas_un_second` — `tests/test_installation_auto.py`:214  (def)
 - `test_T4_une_fois_fait_plus_rien_ne_bouge` — `tests/test_activite_demontage.py`:317  (def)
 - `test_T5_aucun_type_de_ticket_configure_on_NE_TOUCHE_A_RIEN` — `tests/test_installation_auto.py`:227  (def)
-- `test_T5_conflit_par_version_et_retour_a_l_origine` — `tests/test_textes.py`:205  (def)
+- `test_T5_conflit_par_version_et_retour_a_l_origine` — `tests/test_textes.py`:206  (def)
 - `test_T5_le_bouton_ne_donne_le_lien_qu_au_fondateur_et_a_la_direction` — `tests/test_tableau.py`:255  (def)
-- `test_T5_retirer_une_seule_immunite_en_v2` — `tests/test_tickets_sous_menus.py`:108  (def)
+- `test_T5_retirer_une_seule_immunite_en_v2` — `tests/test_tickets_sous_menus.py`:124  (def)
 - `test_T5_un_membre_parti_recupere_ses_roles_a_son_retour` — `tests/test_activite_demontage.py`:335  (def)
-- `test_T5b_un_module_prevenu_apres_l_ecriture` — `tests/test_textes.py`:225  (def)
-- `test_T6_cache_relu_au_demarrage_et_base_en_panne` — `tests/test_textes.py`:242  (def)
+- `test_T5b_un_module_prevenu_apres_l_ecriture` — `tests/test_textes.py`:226  (def)
+- `test_T6_cache_relu_au_demarrage_et_base_en_panne` — `tests/test_textes.py`:243  (def)
 - `test_T6_la_migration_n_a_lieu_QU_UNE_FOIS` — `tests/test_installation_auto.py`:239  (def)
 - `test_T6_la_page_n_injecte_jamais_de_donnees_en_html` — `tests/test_tableau.py`:272  (def)
 - `test_T6_un_serveur_sans_table_ni_reglage_ne_casse_rien` — `tests/test_activite_demontage.py`:349  (def)
 - `test_T7_casier_par_membre_direction_a_part` — `tests/test_tableau.py`:281  (def)
 - `test_T7_le_nom_dit_si_c_est_un_salon_du_systeme` — `tests/test_activite_demontage.py`:372  (def)
 - `test_T7_les_messages_des_AUTRES_ne_sont_jamais_touches` — `tests/test_installation_auto.py`:250  (def)
-- `test_T7_rgpd_l_auteur_est_neutralise_le_texte_reste` — `tests/test_textes.py`:269  (def)
+- `test_T7_rgpd_l_auteur_est_neutralise_le_texte_reste` — `tests/test_textes.py`:270  (def)
 - `test_T8_le_bilan_dit_ce_qui_a_ete_fait` — `tests/test_activite_demontage.py`:376  (def)
-- `test_T8_les_adresses_du_site` — `tests/test_textes.py`:367  (def)
+- `test_T8_les_adresses_du_site` — `tests/test_textes.py`:368  (def)
 - `test_T8_un_seul_salon_de_logs_le_menu_epingle_toujours_a_jour` — `tests/test_tableau.py`:326  (def)
-- `test_T9_le_recrutement_emploie_les_textes_enregistres` — `tests/test_textes.py`:430  (def)
+- `test_T9_le_recrutement_emploie_les_textes_enregistres` — `tests/test_textes.py`:431  (def)
 - `test_T9_seuls_le_fondateur_et_la_direction_agissent` — `tests/test_tableau.py`:410  (def)
+- `test_tous_les_chemins_passent_par_le_nouveau_filtre` — `tests/test_sujets_interdits.py`:103  (def)
 - `test_tout_le_corpus_hostile_est_attrape` — `tests/test_protection_mineurs.py`:120  (def)
 - `test_toutes_les_sources_ont_un_format_connu_et_un_rythme` — `tests/test_roblox_sources_officielles.py`:334  (def)
 - `test_traduire_ne_leve_jamais_quand_tout_echoue` — `tests/test_roblox_news_contenu.py`:186  (async def)
@@ -7563,6 +7857,7 @@
 - `test_V1_bandeau_anime_ou_titre_si_rien_n_est_servi` — `tests/test_notifs_visuels.py`:79  (def)
 - `test_V1_ce_que_voit_un_nouveau_avec_son_role_d_arrivee` — `tests/test_visibilite_serveur.py`:87  (def)
 - `test_V1_incidents_et_points` — `tests/test_vigilance.py`:20  (def)
+- `test_V1_l_avatar_discord_garde_est_une_image_du_site` — `tests/test_vitrine_portraits.py`:17  (def)
 - `test_V1_la_page_publique_ses_entetes_et_son_apercu` — `tests/test_vitrine_equipes.py`:73  (def)
 - `test_V1_le_fondateur_la_direction_et_l_equipe_entrent_sans_notification` — `tests/test_tickets_visibles.py`:87  (def)
 - `test_V1_lecture_seule_parole_et_bouton` — `tests/test_salons_v2.py`:62  (def)
@@ -7582,6 +7877,7 @@
 - `test_V2_onboarding_actif_tous_les_salons_publics_deviennent_par_defaut` — `tests/test_visibilite_serveur.py`:113  (def)
 - `test_V2_seulement_des_champs_publics` — `tests/test_vitrine_equipes.py`:92  (def)
 - `test_V2_si_la_mention_ne_suffit_pas_chacun_est_ajoute_un_par_un` — `tests/test_tickets_visibles.py`:101  (def)
+- `test_V2_un_avatar_illisible_ne_casse_rien` — `tests/test_vitrine_portraits.py`:37  (def)
 - `test_V2_une_carte_mise_a_jour_puis_retiree_par_gere` — `tests/test_vigilance.py`:90  (def)
 - `test_V2_vocaux_join_et_vitrines` — `tests/test_salons_v2.py`:76  (def)
 - `test_V2bis_un_salon_que_everyone_ne_voit_pas_n_est_jamais_propose` — `tests/test_visibilite_serveur.py`:121  (def)
@@ -7590,6 +7886,7 @@
 - `test_V3_l_adresse_publique_est_verifiee_avant_d_afficher` — `tests/test_notifs_visuels.py`:104  (def)
 - `test_V3_la_direction_retire_une_affiche_de_la_vitrine` — `tests/test_vitrine_equipes.py`:121  (def)
 - `test_V3_le_journal_previent_pour_le_grave_seulement` — `tests/test_vigilance.py`:125  (def)
+- `test_V3_le_portrait_roblox_sans_pseudo_valide_n_appelle_pas_roblox` — `tests/test_vitrine_portraits.py`:46  (def)
 - `test_V3_le_proprietaire_choisit_le_but_le_nom_suit_discord_limite_a_deux` — `tests/test_vocaux.py`:54  (def)
 - `test_V3_les_deux_vocaux_crees_par_le_bot_les_recoivent` — `tests/test_mots_vocaux_stockage.py`:127  (def)
 - `test_V3_onboarding_inactif_ou_illisible_rien_n_est_ecrit` — `tests/test_visibilite_serveur.py`:133  (def)
@@ -7597,6 +7894,7 @@
 - `test_V3_un_ticket_en_salon_classique_n_est_pas_touche_et_c_est_branche` — `tests/test_tickets_visibles.py`:110  (def)
 - `test_V4_le_bot_garde_ses_droits_sauf_s_il_est_administrateur` — `tests/test_salons_v2.py`:101  (def)
 - `test_V4_les_blocs_publics_et_la_migration` — `tests/test_vitrine_equipes.py`:149  (def)
+- `test_V4_les_metiers_de_la_vitrine_restent_ouverts` — `tests/test_vitrine_portraits.py`:57  (def)
 - `test_V4_un_corps_envoye_par_morceaux_est_borne` — `tests/test_site_v2_serveur.py`:390  (def)
 - `test_V4_un_join_par_jeu_et_une_demande_pour_le_clan_avec_les_droits_du_voisin` — `tests/test_vocaux.py`:83  (def)
 - `test_V4_un_refus_de_discord_est_dit_pas_avale` — `tests/test_visibilite_serveur.py`:140  (def)
@@ -7695,9 +7993,9 @@
 - `texte` — `textes.py`:194  (async def)
 - `texte_cache` — `textes.py`:185  (def)
 - `texte_centre` — `outils/affiche_recrutement.py`:59  (def)
-- `texte_conditions` — `cadeaux.py`:851  (def)
-- `texte_des_liens` — `questionnaire.py`:1686  (def)
-- `texte_discord` — `site_equipage.py`:344  (def)
+- `texte_conditions` — `cadeaux.py`:906  (def)
+- `texte_des_liens` — `questionnaire.py`:1722  (def)
+- `texte_discord` — `site_equipage.py`:345  (def)
 - `texte_fichier` — `rellseas_panneau.py`:1148  (def)
 - `texte_journal` — `securite_site.py`:200  (def)
 - `texte_message` — `tests/test_recrutement_ticket.py`:79  (def)
@@ -7708,7 +8006,7 @@
 - `textes` — `tests/faux_serveur.py`:396  (def)
 - `textes` — `tests/test_boosts.py`:100  (def)
 - `textes_page` — `candidature_site.py`:279  (def)
-- `textes_page` — `site_equipage.py`:223  (def)
+- `textes_page` — `site_equipage.py`:224  (def)
 - `texture` — `outils/affiche_recrutement.py`:31  (def)
 - `texture_bois` — `outils/dessins_site.py`:2547  (def)
 - `texture_carte_marine` — `outils/dessins_site.py`:2682  (def)
@@ -7717,45 +8015,45 @@
 - `texture_parchemin` — `outils/dessins_site.py`:2525  (def)
 - `texture_vignette` — `outils/dessins_site.py`:2670  (def)
 - `Salon.threads` — `tests/test_menage.py`:58  (method)
-- `threat_hit` — `insult_filter.py`:384  (def)
-- `threat_soft_hit` — `insult_filter.py`:410  (def)
+- `threat_hit` — `insult_filter.py`:496  (def)
+- `threat_soft_hit` — `insult_filter.py`:522  (def)
 - `thumb` — `ui_v2.py`:145  (def)
-- `tic` — `cadeaux.py`:1706  (async def)
+- `tic` — `cadeaux.py`:1761  (async def)
 - `tic` — `evenements.py`:2220  (async def)
 - `Local.ticket` — `tests/test_candidature_site.py`:115  (method)
-- `Ticket` — `tests/test_metiers.py`:947  (class)
-- `ticket_auto_close_cmd` — `bot.py`:23448  (async def)
-- `ticket_ferme` — `tableau.py`:1027  (def)
+- `Ticket` — `tests/test_metiers.py`:949  (class)
+- `ticket_auto_close_cmd` — `bot.py`:23650  (async def)
+- `ticket_ferme` — `tableau.py`:1032  (def)
 - `Banc.ticket_ouvert` — `tests/test_questionnaire.py`:110  (method)
-- `ticket_priority_cmd` — `bot.py`:23297  (async def)
-- `ticket_queue_cmd` — `bot.py`:23250  (async def)
-- `ticket_reply_cmd` — `bot.py`:23347  (async def)
-- `ticket_search_cmd` — `bot.py`:23207  (async def)
-- `ticket_stats_cmd` — `bot.py`:23427  (async def)
-- `ticket_template_add_cmd` — `bot.py`:23374  (async def)
-- `ticket_template_remove_cmd` — `bot.py`:23409  (async def)
-- `ticket_templates_cmd` — `bot.py`:23327  (async def)
-- `ticket_transcripts_cmd` — `bot.py`:23175  (async def)
-- `ticketblacklist_cmd` — `bot.py`:29251  (async def)
-- `TicketCloseModal` — `bot.py`:10329  (class)
-- `TicketCloseReasonSelect` — `bot.py`:10990  (class)
-- `TicketCloseReasonView` — `bot.py`:10978  (class)
-- `TicketConfirmCreateView` — `bot.py`:8983  (class)
-- `TicketControlView` — `bot.py`:10364  (class)
-- `TicketCreateDynamic` — `bot.py`:9125  (class)
-- `TicketFeedbackButton` — `bot.py`:12903  (class)
-- `TicketHubGererDynamic` — `bot.py`:9253  (class)
-- `TicketHubOpenDynamic` — `bot.py`:9397  (class)
-- `TicketHubTypeDynamic` — `bot.py`:9452  (class)
-- `TicketHubTypeView` — `bot.py`:9513  (class)
-- `TicketMainPanelV2` — `bot.py`:20856  (class)
-- `TicketNoteModal` — `bot.py`:10922  (class)
-- `TicketPrioritySelect` — `bot.py`:10866  (class)
-- `TicketPriorityView` — `bot.py`:10856  (class)
-- `TicketQuestionnaireModal` — `bot.py`:8955  (class)
+- `ticket_priority_cmd` — `bot.py`:23499  (async def)
+- `ticket_queue_cmd` — `bot.py`:23452  (async def)
+- `ticket_reply_cmd` — `bot.py`:23549  (async def)
+- `ticket_search_cmd` — `bot.py`:23409  (async def)
+- `ticket_stats_cmd` — `bot.py`:23629  (async def)
+- `ticket_template_add_cmd` — `bot.py`:23576  (async def)
+- `ticket_template_remove_cmd` — `bot.py`:23611  (async def)
+- `ticket_templates_cmd` — `bot.py`:23529  (async def)
+- `ticket_transcripts_cmd` — `bot.py`:23377  (async def)
+- `ticketblacklist_cmd` — `bot.py`:29457  (async def)
+- `TicketCloseModal` — `bot.py`:10478  (class)
+- `TicketCloseReasonSelect` — `bot.py`:11142  (class)
+- `TicketCloseReasonView` — `bot.py`:11130  (class)
+- `TicketConfirmCreateView` — `bot.py`:9129  (class)
+- `TicketControlView` — `bot.py`:10513  (class)
+- `TicketCreateDynamic` — `bot.py`:9274  (class)
+- `TicketFeedbackButton` — `bot.py`:13075  (class)
+- `TicketHubGererDynamic` — `bot.py`:9402  (class)
+- `TicketHubOpenDynamic` — `bot.py`:9546  (class)
+- `TicketHubTypeDynamic` — `bot.py`:9601  (class)
+- `TicketHubTypeView` — `bot.py`:9662  (class)
+- `TicketMainPanelV2` — `bot.py`:21027  (class)
+- `TicketNoteModal` — `bot.py`:11074  (class)
+- `TicketPrioritySelect` — `bot.py`:11018  (class)
+- `TicketPriorityView` — `bot.py`:11008  (class)
+- `TicketQuestionnaireModal` — `bot.py`:9101  (class)
 - `Monde.tickets_donnees` — `outils/site_maquette.py`:533  (method)
-- `tickets_inactifs_task` — `bot.py`:25467  (async def)
-- `TicketToggleDynamic` — `bot.py`:9631  (class)
+- `tickets_inactifs_task` — `bot.py`:25668  (async def)
+- `TicketToggleDynamic` — `bot.py`:9780  (class)
 - `tier_of` — `recidivism.py`:123  (def)
 - `Horloge.time` — `tests/test_verrou_raid.py`:22  (method)
 - `FauxMembre.timeout` — `tests/test_off_radiation.py`:91  (method)
@@ -7763,17 +8061,17 @@
 - `Membre.timeout` — `tests/test_qui_peut_quoi.py`:134  (method)
 - `Membre.timeout` — `tests/test_revue_moderation.py`:139  (method)
 - `Membre.timeout` — `tests/test_site_moderation.py`:49  (method)
-- `tirer` — `cadeaux.py`:637  (def)
+- `tirer` — `cadeaux.py`:692  (def)
 - `tirets` — `outils/dessins_site.py`:758  (def)
 - `title` — `ui_v2.py`:111  (def)
-- `titre_de` — `entraide.py`:599  (def)
-- `Announcement.to_dict` — `social_media.py`:238  (method)
-- `SocialPost.to_dict` — `social_media.py`:120  (method)
-- `Subscription.to_dict` — `social_media.py`:190  (method)
+- `titre_de` — `entraide.py`:612  (def)
+- `Announcement.to_dict` — `social_media.py`:259  (method)
+- `SocialPost.to_dict` — `social_media.py`:141  (method)
+- `Subscription.to_dict` — `social_media.py`:211  (method)
 - `Piece.to_file` — `tests/test_zones.py`:493  (method)
 - `Dessin.ton` — `outils/dessins_site.py`:518  (method)
 - `Dessin.ton_trait` — `outils/dessins_site.py`:521  (method)
-- `Membre.top_role` — `tests/banc_ticket_recrutement.py`:183  (method)
+- `Membre.top_role` — `tests/banc_ticket_recrutement.py`:184  (method)
 - `Membre.top_role` — `tests/test_qui_peut_quoi.py`:123  (method)
 - `Membre.top_role` — `tests/test_revue_moderation.py`:133  (method)
 - `total` — `invitations.py`:182  (async def)
@@ -7783,7 +8081,7 @@
 - `tout_retirer` — `equipages.py`:713  (async def)
 - `tout_texte` — `tests/test_evenements.py`:169  (def)
 - `tr` — `annonces.py`:66  (def)
-- `tr` — `cadeaux.py`:113  (def)
+- `tr` — `cadeaux.py`:120  (def)
 - `tr` — `entraide.py`:118  (def)
 - `tr` — `equipages.py`:60  (def)
 - `tr` — `evenements.py`:315  (def)
@@ -7797,126 +8095,131 @@
 - `traiter` — `evenements.py`:1924  (async def)
 - `transcript_path` — `transcript_store.py`:60  (def)
 - `transcript_url` — `transcript_store.py`:327  (def)
-- `TicketControlView.transfer` — `bot.py`:10508  (method)
-- `TransferTicketSelect` — `bot.py`:10768  (class)
-- `TransferTicketView` — `bot.py`:10760  (class)
+- `TicketControlView.transfer` — `bot.py`:10657  (method)
+- `TransferTicketSelect` — `bot.py`:10920  (class)
+- `TransferTicketView` — `bot.py`:10912  (class)
 - `tres_agressif` — `casier.py`:61  (def)
 - `trier_liste` — `mots_interdits.py`:67  (def)
 - `tuile` — `outils/visuels.py`:207  (def)
-- `TwitchAdapter` — `social_media.py`:333  (class)
-- `type_equipe` — `site_equipage.py`:850  (def)
-- `type_image` — `tableau.py`:2582  (def)
+- `TwitchAdapter` — `social_media.py`:354  (class)
+- `type_equipe` — `site_equipage.py`:861  (def)
+- `type_image` — `tableau.py`:2605  (def)
 - `type_reel` — `outils/icones_rellseas.py`:688  (def)
 - `types_du_salon` — `entraide.py`:316  (def)
-- `Banc.types_journal` — `tests/test_metiers.py`:301  (method)
+- `Banc.types_journal` — `tests/test_metiers.py`:303  (method)
 - `uc_du_sujet` — `websub_youtube.py`:63  (def)
 - `Base.un` — `outils/banc_annees.py`:212  (method)
-- `undirection_cmd` — `bot.py`:28362  (async def)
+- `undirection_cmd` — `bot.py`:28568  (async def)
 - `une_taille` — `outils/banc_annees.py`:1137  (async def)
-- `Announcement.unique_key` — `social_media.py`:235  (method)
-- `SocialPost.unique_key` — `social_media.py`:117  (method)
-- `unmute_cmd` — `bot.py`:28160  (async def)
-- `unwarn_cmd` — `bot.py`:27990  (async def)
-- `UnwarnSelect` — `bot.py`:28032  (class)
-- `UnwarnSelectView` — `bot.py`:28027  (class)
-- `update_alt_status` — `bot.py`:11941  (async def)
+- `Announcement.unique_key` — `social_media.py`:256  (method)
+- `SocialPost.unique_key` — `social_media.py`:138  (method)
+- `unmute_cmd` — `bot.py`:28366  (async def)
+- `unwarn_cmd` — `bot.py`:28196  (async def)
+- `UnwarnSelect` — `bot.py`:28238  (class)
+- `UnwarnSelectView` — `bot.py`:28233  (class)
+- `update_alt_status` — `bot.py`:12113  (async def)
 - `update_channel_name_for_priority` — `tickets_enhance.py`:193  (async def)
-- `update_realsy_activity` — `bot.py`:21818  (async def)
-- `SocialMediaManager.update_subscription` — `social_media.py`:1282  (method)
+- `update_realsy_activity` — `bot.py`:21996  (async def)
+- `SocialMediaManager.update_subscription` — `social_media.py`:1294  (method)
 - `url` — `visuels.py`:83  (def)
 - `url_image` — `visuels.py`:117  (def)
-- `username_similarity` — `bot.py`:11726  (def)
+- `username_similarity` — `bot.py`:11878  (def)
 - `utilise_ailleurs` — `activite_demontage.py`:150  (def)
-- `V2GenericChannelPicker` — `bot.py`:20392  (class)
-- `V2GenericRolePicker` — `bot.py`:20530  (class)
-- `vacuum_db` — `data_cleanup.py`:220  (async def)
+- `V2GenericChannelPicker` — `bot.py`:20563  (class)
+- `V2GenericRolePicker` — `bot.py`:20701  (class)
+- `vacuum_db` — `data_cleanup.py`:222  (async def)
 - `vague` — `outils/dessins_site.py`:785  (def)
-- `FormulaireFiche.valeurs` — `questionnaire.py`:3854  (method)
+- `FormulaireFiche.valeurs` — `questionnaire.py`:3901  (method)
 - `valeurs_site` — `textes.py`:340  (def)
-- `validate_config_value` — `bot.py`:844  (def)
-- `validate_id` — `bot.py`:800  (def)
-- `validate_map` — `gdpr.py`:463  (async def)
+- `validate_config_value` — `bot.py`:848  (def)
+- `validate_id` — `bot.py`:804  (def)
+- `validate_map` — `gdpr.py`:471  (async def)
+- `validisme_en_contexte` — `insult_filter.py`:280  (def)
 - `veille_branchee` — `tests/test_panneaux_interaction.py`:154  (def)
-- `veille_roblox_task` — `bot.py`:15710  (async def)
+- `veille_roblox_task` — `bot.py`:15881  (async def)
+- `veiller_relances` — `questionnaire.py`:4950  (async def)
 - `verification` — `websub_youtube.py`:121  (async def)
-- `verifier` — `entraide.py`:607  (def)
+- `verifier` — `entraide.py`:620  (def)
 - `verifier` — `suggestions.py`:89  (def)
 - `verifier` — `visuels.py`:89  (async def)
 - `verifier_image` — `outils/icones_rellseas.py`:698  (def)
 - `verifier_svg` — `outils/dessins_site.py`:3575  (def)
 - `verifier_tout` — `outils/icones_rellseas.py`:1476  (def)
-- `vers_equipage` — `tableau.py`:3362  (async def)
+- `vers_equipage` — `tableau.py`:3388  (async def)
 - `vers_espace` — `outils/site_maquette.py`:3152  (async def)
-- `vers_espace` — `tableau.py`:1719  (async def)
+- `vers_espace` — `tableau.py`:1724  (async def)
 - `vers_page` — `candidature_site.py`:955  (async def)
-- `vers_vitrine` — `site_vitrine.py`:395  (async def)
-- `version_page` — `tableau.py`:2020  (def)
-- `videos_de_la_page` — `social_media.py`:570  (def)
-- `vider` — `cadeaux.py`:443  (async def)
+- `vers_vitrine` — `site_vitrine.py`:492  (async def)
+- `version_page` — `tableau.py`:2025  (def)
+- `videos_de_la_page` — `social_media.py`:591  (def)
+- `vider` — `cadeaux.py`:498  (async def)
 - `View` — `ui_v2.py`:82  (class)
 - `Fil.visibles` — `tests/faux_serveur.py`:56  (method)
-- `FilTicket.visibles` — `tests/banc_ticket_recrutement.py`:145  (method)
+- `FilTicket.visibles` — `tests/banc_ticket_recrutement.py`:146  (method)
 - `visuel` — `outils/site_maquette.py`:3142  (async def)
-- `vitrine_masquees` — `site_equipage.py`:1267  (async def)
+- `vitrine_masquees` — `site_equipage.py`:1293  (async def)
 - `Vocal` — `tests/faux_serveur.py`:229  (class)
 - `voit` — `visibilite_serveur.py`:56  (def)
 - `volume` — `stockage.py`:91  (def)
 - `voter` — `suggestions.py`:477  (async def)
-- `FilTicket.vue` — `tests/banc_ticket_recrutement.py`:148  (method)
+- `FilTicket.vue` — `tests/banc_ticket_recrutement.py`:149  (method)
 - `vue` — `evenements.py`:1051  (def)
-- `vue` — `faq.py`:307  (def)
-- `vue_accueil` — `cadeaux.py`:1763  (def)
-- `vue_affiche` — `questionnaire.py`:2784  (async def)
+- `vue` — `faq.py`:305  (def)
+- `vue_accueil` — `cadeaux.py`:1818  (def)
+- `vue_affiche` — `questionnaire.py`:2820  (async def)
+- `vue_aide` — `reponses_auto.py`:332  (def)
 - `vue_annonce` — `annonces.py`:361  (def)
 - `vue_carte` — `boosts.py`:67  (def)
-- `vue_carte` — `cadeaux.py`:929  (def)
-- `vue_carte` — `entraide.py`:645  (def)
+- `vue_carte` — `cadeaux.py`:984  (def)
+- `vue_carte` — `entraide.py`:658  (def)
 - `vue_carte` — `equipages.py`:250  (def)
 - `vue_carte` — `liens_jeux.py`:75  (def)
 - `vue_carte` — `suggestions.py`:314  (def)
-- `vue_confirmer` — `entraide.py`:1308  (def)
-- `vue_corriger` — `entraide.py`:856  (def)
+- `vue_confirmer` — `entraide.py`:1321  (def)
+- `vue_corriger` — `entraide.py`:869  (def)
 - `vue_corriger` — `suggestions.py`:405  (def)
 - `vue_de` — `tests/test_recrutement_ticket.py`:75  (def)
-- `vue_direction` — `questionnaire.py`:2754  (async def)
+- `vue_direction` — `questionnaire.py`:2790  (async def)
 - `vue_entete` — `boosts.py`:53  (def)
-- `vue_gagnants` — `cadeaux.py`:1444  (def)
-- `vue_gestion` — `cadeaux.py`:2235  (async def)
+- `vue_equipage` — `hierarchie.py`:589  (async def)
+- `vue_gagnants` — `cadeaux.py`:1499  (def)
+- `vue_gestion` — `cadeaux.py`:2291  (async def)
 - `vue_guide` — `zones.py`:832  (def)
 - `vue_guide_clan` — `zones.py`:1121  (def)
 - `vue_invitation` — `candidature_site.py`:895  (def)
 - `vue_journal` — `suggestions.py`:699  (def)
 - `vue_liste` — `rellseas_panneau.py`:1169  (def)
-- `vue_panneau` — `entraide.py`:676  (def)
+- `vue_panneau` — `entraide.py`:689  (def)
 - `vue_panneau` — `equipages.py`:272  (def)
 - `vue_panneau` — `suggestions.py`:125  (def)
 - `vue_panneau` — `vocaux.py`:125  (def)
-- `vue_participants` — `cadeaux.py`:1210  (async def)
-- `vue_reponse` — `faq.py`:298  (def)
-- `vue_stats` — `cadeaux.py`:980  (def)
-- `vue_un_cadeau` — `cadeaux.py`:2276  (async def)
+- `vue_participants` — `cadeaux.py`:1265  (async def)
+- `vue_publique` — `hierarchie.py`:607  (async def)
+- `vue_reponse` — `faq.py`:295  (def)
+- `vue_stats` — `cadeaux.py`:1035  (def)
+- `vue_un_cadeau` — `cadeaux.py`:2332  (async def)
 - `VueApercu` — `annonces.py`:573  (class)
-- `VueCadeau` — `cadeaux.py`:2018  (class)
-- `VueCertifier` — `entraide.py`:1200  (class)
-- `VueCloturer` — `entraide.py`:1245  (class)
+- `VueCadeau` — `cadeaux.py`:2074  (class)
+- `VueCertifier` — `entraide.py`:1213  (class)
+- `VueCloturer` — `entraide.py`:1258  (class)
 - `VueComposer` — `annonces.py`:475  (class)
-- `Inter.vues` — `tests/banc_ticket_recrutement.py`:273  (method)
+- `Inter.vues` — `tests/banc_ticket_recrutement.py`:274  (method)
 - `Inter.vues` — `tests/test_questionnaire.py`:191  (method)
-- `VueTypesTickets` — `bot.py`:9275  (class)
+- `VueTypesTickets` — `bot.py`:9424  (class)
 - `warn` — `diag.py`:88  (def)
-- `warn_cmd` — `bot.py`:27844  (async def)
+- `warn_cmd` — `bot.py`:28050  (async def)
 - `was_posted` — `tracking_layer.py`:146  (async def)
-- `webhook_send` — `bot.py`:20260  (async def)
+- `webhook_send` — `bot.py`:20431  (async def)
 - `Salon.webhooks` — `tests/test_menage.py`:78  (method)
 - `SalonFlux.webhooks` — `tests/test_revue_reste.py`:332  (method)
 - `webhooks_du_bot` — `nettoyage.py`:91  (async def)
-- `websub_task` — `bot.py`:30215  (async def)
-- `weekly_cleanup_task` — `data_cleanup.py`:251  (async def)
+- `websub_task` — `bot.py`:30427  (async def)
+- `weekly_cleanup_task` — `data_cleanup.py`:253  (async def)
 - `weekly_scan_task` — `webhook_tracker.py`:350  (async def)
-- `weekly_security_report` — `bot.py`:3818  (async def)
-- `welcome_cleanup_task` — `bot.py`:24711  (async def)
-- `WelcomeMessageModalSimple` — `bot.py`:21387  (class)
-- `YouTubeRSSAdapter` — `social_media.py`:831  (class)
+- `weekly_security_report` — `bot.py`:3822  (async def)
+- `welcome_cleanup_task` — `bot.py`:24910  (async def)
+- `WelcomeMessageModalSimple` — `bot.py`:21558  (class)
+- `YouTubeRSSAdapter` — `social_media.py`:843  (class)
 - `Zone` — `entraide.py`:151  (class)
 
 ## Per-file detail
@@ -8019,88 +8322,91 @@
 
 ### `affiches.py`
 
-- L102  `def setup(*, get_db, log, actions_staff)`
-- L112  `def brancher_metiers(module)`
-- L119  `def _verrou_ecriture()`
-- L129  `async def init_db()`
-- L184  `def _texte(v, champ, maxi, *, requis, lignes)`
-- L202  `def _entier(v, champ, mini, maxi, defaut)`
-- L218  `def _booleen(v, champ, defaut)`
-- L228  `def _cle(v, champ)`
-- L234  `def _cle_ou_nom(d, nom)`
-- L242  `def _identifiant(v, champ, requis)`
-- L253  `def _source(v)`
-- L261  `def _icone(v)`
-- L268  `async def _icone_existe(icone)`
-- L277  `def _couleur(v)`
-- L285  `def _empreinte(d)`
-- L289  `def _personne(g, uid)`
-- L307  `def _oublier_catalogue()`
-- L311  `async def _catalogue()`
-- L323  `def _valider_type(d)`
-- L333  `def _valider_element(d, types)`
-- L353  `def _sortie_type(t)`
-- L362  `def _icone_servie(icone)`
-- L373  `def _sortie_element(e)`
-- L381  `def _meme(avant, apres, champs)`
-- L385  `async def catalogue()`
-- L395  `async def charger_depart(chemin)`
-- L479  `async def _route_catalogue(g, auteur, requete, corps)`
-- L483  `async def _route_type(g, auteur, requete, corps)`
-- L517  `async def _route_element(g, auteur, requete, corps)`
-- L559  `async def _route_retirer_element(g, auteur, requete, corps)`
-- L598  `def _ligne_affiche(r)`
-- L608  `async def _affiches(guild_id, ident)`
-- L618  `async def _affiche(guild_id, ident)`
-- L623  `async def _affiche_du_membre(guild_id, membre_id, sauf)`
-- L631  `def _avatar_roblox(roblox_id)`
-- L638  `def _sortie_affiche(g, a)`
-- L650  `def _attributs(v, types, elements)`
-- L675  `def _valider_affiche(g, corps, types, elements, deja)`
-- L702  `def _court(x)`
-- L708  `def _changements(avant, apres)`
-- L717  `async def _noter_historique(db, guild_id, ident, par, action, changements, t)`
-- L723  `def _titre(a)`
-- L727  `async def _route_affiches(g, auteur, requete, corps)`
-- L748  `async def _route_affiche_lire(g, auteur, requete, corps)`
-- L779  `def _quoi(action, changements)`
-- L801  `async def _route_affiche(g, auteur, requete, corps)`
-- L866  `async def _route_affiche_retirer(g, auteur, requete, corps)`
-- L899  `async def _route_affiche_restaurer(g, auteur, requete, corps)`
-- L927  `async def definir_metiers(g, membre, metiers, par)`
-- L979  `async def _lire_borne(r, maximum)`
-- L989  `async def _http_json(methode, url, *, params, json_)`
-- L1001  `async def _http_octets(url, maximum)`
-- L1012  `def _adresse_cdn(url)`
-- L1026  `async def _portrait(roblox_id)`
-- L1060  `async def _route_avatar(g, auteur, requete, corps)`
-- L1115  `def refus_role(g, role)`
-- L1136  `def _peut_gerer_roles(g)`
-- L1140  `def protege_de(g, auteur, membre)`
-- L1149  `def _couleur_role(role)`
-- L1154  `async def _liens(guild_id, seulement_auto)`
-- L1161  `def _sortie_lien(g, lien, elements)`
-- L1170  `async def _route_roles(g, auteur, requete, corps)`
-- L1180  `async def _route_role(g, auteur, requete, corps)`
-- L1245  `async def appliquer_roles(g, auteur, membre, attributs, seulement_auto, *, types, exclure, raison, trace, sauf_roles)`
-- L1296  `def _phrase_roles(nom, res)`
-- L1301  `def _fusion(a, b)`
-- L1310  `async def _roles_automatiques(g, auteur, affiche)`
-- L1336  `async def _route_appliquer(g, auteur, requete, corps)`
-- L1369  `async def medias_utilises(guild_id)`
-- L1375  `def _premier(attributs, *types)`
-- L1382  `async def fiches_clan(g)`
-- L1398  `def _emoji_jeu(type_, cle)`
-- L1408  `def brancher_evenements(module)`
-- L1432  `async def catalogue_clan(g)`
-- L1443  `async def _nettoyer_corbeille(gid, jours, t)`
-- L1456  `async def _compter_corbeille(gid, jours, t)`
-- L1462  `async def _nettoyer_historique(gid, jours, t)`
-- L1471  `async def _compter_historique(gid, jours, t)`
-- L1486  `def _par_metiers(nom)`
-- L173  `class Invalide(Exception)`
-    - L176  `def __init__(self, champ, message)`
-    - L180  `def corps(self)`
+- L103  `def setup(*, get_db, log, actions_staff)`
+- L114  `def brancher_hierarchie(module)`
+- L121  `def brancher_metiers(module)`
+- L128  `def _verrou_ecriture()`
+- L138  `async def init_db()`
+- L193  `def _texte(v, champ, maxi, *, requis, lignes)`
+- L211  `def _entier(v, champ, mini, maxi, defaut)`
+- L227  `def _booleen(v, champ, defaut)`
+- L237  `def _cle(v, champ)`
+- L243  `def _cle_ou_nom(d, nom)`
+- L251  `def _identifiant(v, champ, requis)`
+- L262  `def _source(v)`
+- L270  `def _icone(v)`
+- L277  `async def _icone_existe(icone)`
+- L286  `def _couleur(v)`
+- L294  `def _empreinte(d)`
+- L298  `def _personne(g, uid)`
+- L316  `def _oublier_catalogue()`
+- L320  `async def _catalogue()`
+- L332  `def _valider_type(d)`
+- L342  `def _valider_element(d, types)`
+- L362  `def _sortie_type(t)`
+- L371  `def _icone_servie(icone)`
+- L382  `def _sortie_element(e)`
+- L390  `def _meme(avant, apres, champs)`
+- L394  `async def catalogue()`
+- L404  `async def charger_depart(chemin)`
+- L488  `async def _route_catalogue(g, auteur, requete, corps)`
+- L492  `async def _route_type(g, auteur, requete, corps)`
+- L526  `async def _route_element(g, auteur, requete, corps)`
+- L568  `async def _route_retirer_element(g, auteur, requete, corps)`
+- L607  `def _ligne_affiche(r)`
+- L617  `async def _affiches(guild_id, ident)`
+- L627  `async def _affiche(guild_id, ident)`
+- L632  `async def _affiche_du_membre(guild_id, membre_id, sauf)`
+- L640  `def _avatar_roblox(roblox_id)`
+- L647  `def _sortie_affiche(g, a)`
+- L654  `def _sortie_affiche_seule(g, a)`
+- L666  `def _attributs(v, types, elements)`
+- L691  `def _valider_affiche(g, corps, types, elements, deja)`
+- L718  `def _court(x)`
+- L724  `def _changements(avant, apres)`
+- L733  `async def _noter_historique(db, guild_id, ident, par, action, changements, t)`
+- L739  `def _titre(a)`
+- L743  `async def _route_affiches(g, auteur, requete, corps)`
+- L766  `async def _route_affiche_lire(g, auteur, requete, corps)`
+- L799  `def _quoi(action, changements)`
+- L821  `async def _route_affiche(g, auteur, requete, corps)`
+- L888  `async def _route_affiche_retirer(g, auteur, requete, corps)`
+- L923  `async def _route_affiche_restaurer(g, auteur, requete, corps)`
+- L953  `async def definir_metiers(g, membre, metiers, par)`
+- L1005  `async def _lire_borne(r, maximum)`
+- L1015  `async def _http_json(methode, url, *, params, json_)`
+- L1027  `async def _http_octets(url, maximum)`
+- L1038  `def _adresse_cdn(url)`
+- L1052  `async def _portrait(roblox_id)`
+- L1086  `async def _route_avatar(g, auteur, requete, corps)`
+- L1137  `async def completer_portrait(guild_id, a)`
+- L1174  `def refus_role(g, role)`
+- L1195  `def _peut_gerer_roles(g)`
+- L1199  `def protege_de(g, auteur, membre)`
+- L1208  `def _couleur_role(role)`
+- L1213  `async def _liens(guild_id, seulement_auto)`
+- L1220  `def _sortie_lien(g, lien, elements)`
+- L1229  `async def _route_roles(g, auteur, requete, corps)`
+- L1239  `async def _route_role(g, auteur, requete, corps)`
+- L1304  `async def appliquer_roles(g, auteur, membre, attributs, seulement_auto, *, types, exclure, raison, trace, sauf_roles)`
+- L1355  `def _phrase_roles(nom, res)`
+- L1360  `def _fusion(a, b)`
+- L1369  `async def _roles_automatiques(g, auteur, affiche)`
+- L1395  `async def _route_appliquer(g, auteur, requete, corps)`
+- L1428  `async def medias_utilises(guild_id)`
+- L1434  `def _premier(attributs, *types)`
+- L1441  `async def fiches_clan(g)`
+- L1457  `def _emoji_jeu(type_, cle)`
+- L1467  `def brancher_evenements(module)`
+- L1491  `async def catalogue_clan(g)`
+- L1502  `async def _nettoyer_corbeille(gid, jours, t)`
+- L1515  `async def _compter_corbeille(gid, jours, t)`
+- L1521  `async def _nettoyer_historique(gid, jours, t)`
+- L1530  `async def _compter_historique(gid, jours, t)`
+- L1545  `def _par_metiers(nom)`
+- L182  `class Invalide(Exception)`
+    - L185  `def __init__(self, champ, message)`
+    - L189  `def corps(self)`
 
 ### `annonces.py`
 
@@ -8181,6 +8487,7 @@
 - L56  `async def route_lire(g, auteur, requete, corps)`
 - L80  `async def route_modifier(g, auteur, requete, corps)`
 - L100  `async def route_apercu(g, auteur, requete, corps)`
+- L120  `async def route_retirer(g, auteur, requete, corps)`
 
 ### `anti_token_leak.py`
 
@@ -8235,1384 +8542,1394 @@
 
 ### `bot.py`
 
-- L149  `async def _global_view_on_error(self, interaction, error, item)`
-- L167  `async def _global_modal_on_error(self, interaction, error)`
-- L220  `async def _loop_heartbeat()`
-- L234  `def _stall_watchdog()`
-- L294  `def _logerr(where, ex, *, context, guild_id)`
-- L330  `def _matches_keyword_filter(title, keyword_filter)`
-- L350  `def _compter_serie(msg)`
-- L424  `def _insulte_visee(msg, parle)`
-- L584  `def get_db()`
-- L645  `def _get_config_lock(gid)`
-- L674  `def now()`
-- L677  `def _evict_if_big(d, max_keys)`
-- L726  `async def _mp_une_fois(membre, cle, texte, heures)`
-- L742  `def check_rate_limit(guild_id, user_id, action)`
-- L764  `def is_blacklisted(user_id)`
-- L773  `def blacklist_user(user_id, duration_minutes, reason)`
-- L781  `def sanitize_input(text, max_length)`
-- L800  `def validate_id(value)`
-- L812  `def detect_injection_attempt(text)`
-- L832  `async def log_security_event(guild_id, user_id, action, details)`
-- L844  `def validate_config_value(key, value)`
-- L871  `async def db_init()`
-- L1279  `async def get_strikes(gid, uid)`
-- L1319  `async def set_strikes(gid, uid, count, last_at)`
-- L1345  `async def _d4_migrate_blob_to_tables()`
-- L1406  `def _avatar_cache_set(key, url)`
-- L1419  `async def get_cached_avatar(platform, username)`
-- L1445  `async def save_avatar_cache(platform, username, avatar_url)`
-- L1461  `async def fetch_avatar_url(platform, username, session)`
-- L1535  `async def _lire_config(gid)`
-- L1570  `async def db_get(gid)`
-- L1578  `async def db_set(gid, key, val)`
-- L1665  `async def cfg(gid)`
-- L1858  `def _invalidate_immunity(gid)`
-- L1866  `async def _get_immunity(gid)`
-- L1892  `async def is_immune(m, key, channel)`
-- L1949  `async def is_channel_immune(guild_id, channel_id)`
-- L1960  `async def is_ticket_channel(channel)`
-- L2006  `async def _is_chatty_channel(channel, *, allow_announce)`
-- L2081  `async def is_fully_immune(member)`
-- L2155  `def _is_sensitive_role(role)`
-- L2192  `def _radie_pseudo(membre)`
-- L2207  `def _radie_overwrite()`
-- L2240  `async def _verrouiller_salons_radie(guild, role, membre_id)`
-- L2270  `async def _radier_membre(guild, membre, auteur, raison)`
-- L2421  `async def _autorise_radiation(i, cible)`
-- L2470  `def _refus_radiation(guild, membre, auteur)`
-- L2501  `def _compte_rendu_radiation(membre, res)`
-- L2546  `async def _journal_radiation(guild, membre, auteur, raison, res)`
-- L2594  `async def _panneau_ticket_serveur(guild)`
-- L2615  `async def _recours_deja_utilise(guild_id, user_id)`
-- L2714  `async def _ouvrir_ticket_recours(guild, membre, pourquoi, conteste)`
-- L2929  `async def _fermer_recours(i, raison)`
-- L2945  `async def _carte_recours_decidee(message, ligne)`
-- L2962  `async def _prevenir_radie(guild, user_id, texte)`
-- L2973  `async def _envoyer_recours_radie(guild, membre, raison)`
-- L3006  `async def off_on_cmd(i, membre, raison)` @off_group.command
-- L3036  `async def radier_menu_contextuel(i, membre)` @bot.tree.context_menu
-- L3079  `async def _fiche_sanction(table, guild_id, user_id, db)`
-- L3107  `async def _confier_roles(table, guild_id, user_id, roles_ids, sans, db)`
-- L3125  `def _refus_rang_radie(guild, membre, auteur, saved_ids, geste, membre_id)`
-- L3152  `async def _lever_radiation(guild, membre, auteur, raison)`
-- L3224  `async def off_off_cmd(i, membre, raison)` @off_group.command
-- L3255  `async def off_list_cmd(i)` @off_group.command
-- L3297  `async def _bouclier_lire(gid)`
-- L3309  `async def _bouclier_ecrire(gid, donnees)`
-- L3321  `async def _shield_lock(guild)`
-- L3360  `async def _shield_unlock(guild)`
-- L3392  `def _refus_bouclier(i)`
-- L3406  `async def bouclier_on(i)` @bouclier_group.command
-- L3437  `async def bouclier_off(i)` @bouclier_group.command
-- L3467  `async def bouclier_secours(i)` @bouclier_group.command
-- L3548  `def _signalement_recent(registre, gid, uid, delai)`
-- L3552  `def _signalement_note(registre, gid, uid)`
-- L3567  `async def signaler_cmd(i, description)` @bot.tree.command
-- L3615  `async def signaler_vocal_cmd(i, membre, raison)` @bot.tree.command
-- L3719  `async def _purge_old_sec_reports(channel)`
-- L3738  `async def _post_weekly_security_report(guild)`
-- L3818  `async def weekly_security_report()` @tasks.loop
-- L3830  `async def _before_weekly_security_report()` @weekly_security_report.before_loop
-- L3835  `def _quarantaine_overwrite()`
-- L3848  `async def _verrouiller_salons_quarantaine(guild, role)`
-- L3870  `def _lancer_verrou_quarantaine(guild, role)`
-- L3876  `async def _ensure_quarantine_role(guild)`
-- L3905  `async def _noter_isolement(guild_id, user_id, roles_ids, raison, genre, par)`
-- L3934  `async def _isolement_actif(guild_id, user_id)`
-- L3950  `async def _rendre_roles_isolement(member)`
-- L3976  `async def _record_infraction(guild_id, user_id, typ, reason, duration)`
-- L4007  `async def _recidivism_log_escalation(guild, member, tier, palier, reason)`
-- L4051  `def _mot_entier(terme)`
-- L4058  `def _scan_red_keywords(text, extra)`
-- L4080  `def _scan_profile_text(*texts)`
-- L4104  `async def _flag_dangerous_profile(member, *, on_join)`
-- L4161  `async def _kick_young_account(member, log_reason)`
-- L4207  `async def isolate_member(member, reason, *, actor)`
-- L4321  `async def lift_isolation(member)`
-- L4370  `async def _check_staff_sanction_rate(g, actor_id, action)`
-- L4411  `async def sanction(m, action, dur, reason, g, actor_id)`
-- L4543  `async def _infractions_recap(guild_id, user_id, limit, lang)`
-- L4593  `async def _dm_sanction(member, guild, action_label, reason, duration_text)`
-- L4653  `async def _announce_sanction_public(interaction, embed)`
-- L4683  `async def log_staff_action(guild_id, actor_id, target_id, action, detail, surface)`
-- L4725  `async def _badword_strike(msg, c)`
-- L4862  `async def send_log(g, key, m, msg, reason, extra)`
-- L5008  `def get_gif_type(msg)`
-- L5020  `def check_badwords(ct, words, whitelist)`
-- L5035  `def _strip_media_urls(text)`
-- L5058  `def check_link(ct, wl)`
-- L5127  `def check_invite(ct)`
-- L5141  `def _normalize_for_scan(text)`
-- L5172  `def _deobfuscate_for_insult(text)`
-- L5194  `def analyse_phishing(ct)`
-- L5222  `def check_phishing(ct)`
-- L5227  `def check_scam(ct)`
-- L5257  `def check_caps(ct, pct)`
-- L5262  `def check_mass_mention(msg, max_mentions)`
-- L5269  `def check_image(msg, allowed)`
-- L5315  `def _msg_has_image(msg)`
-- L5348  `def check_image_scam(msg)`
-- L5407  `def _spam_content_kind(guild_id, user_id, content)`
-- L5448  `async def check_spam(msg, mx, intv)`
-- L5466  `def _register_protection_strike(guild_id, user_id, kind)`
-- L5489  `async def _warn_calm_down(channel, text)`
-- L5514  `async def _trust_block_notice(msg, kind, *, fresh_escalate, fresh_minutes)`
-- L5563  `def _msg_url_slugs(text)`
-- L5587  `async def _offense_tick(guild, member, channel)`
-- L5634  `async def _burst_timeout(guild, member, channel, count, window)`
-- L5658  `async def _isoler_par_securite(member, guild, channel, reason, heures)`
-- L5692  `async def _lockdown_role_mentions(guild)`
-- L5726  `async def _ocr_scam_check(msg, immune, lire)`
-- L5800  `async def _retirer_image_arnaque(msg, titre, detail, immune)`
-- L5814  `async def _ocr_alert_compromised(msg, detail)`
-- L5841  `def _lecteur_partage(lecteurs)`
-- L5862  `async def _supprimer_filtre(msg)`
-- L5875  `async def _retirer_fichier_dangereux(msg)`
-- L5901  `def _spawn_bg_scan(coro)`
-- L5914  `async def _nsfw_image_check(msg, lire)`
-- L6004  `def _email_perso(ct)`
-- L6010  `async def _doxxing_check(msg, ct)`
-- L6066  `async def _note_attack(msg, kind, term)`
-- L6119  `async def _harass_respond(guild, victim_id, aggressor_ids, mode, aggressor)`
-- L6151  `async def _cumulative_insult_sanction(msg, iterm)`
-- L6156  `async def _cumulative_offense_sanction(guild, member, channel, label)`
-- L6250  `def check_channel_cfg(msg, conf)`
-- L6278  `async def get_ticket(ch_id)`
-- L6291  `async def count_user_tickets(g, uid, pid)`
-- L6315  `def _ticket_event_parts(lt, user, extra, closer)`
-- L6339  `def _ticket_timeline_line(kind, actor_id, detail, ts)`
-- L6356  `def _staff_ou_plus(g, membre, c)`
-- L6384  `def _a_la_tete(g, membre, c)`
-- L6391  `def _direction_ou_plus(g, membre, c)`
-- L6403  `async def _au_journal(g, categorie, type_, texte, **kw)`
-- L6408  `async def _journal_rellseas(g, texte, membre_id, auteur_id)`
-- L6422  `async def _questions_hook(msg)`
-- L6432  `async def _ticket_ouvert(g, ticket_id)`
-- L6447  `async def _decision_recrutement(g, ticket_id, auteur, accepte, motif, *, annonce, mp)`
-- L6513  `async def _accueil_recrutement(g, ch, tid, candidat_id, pnl, pid)`
-- L6531  `async def _recrutement_extras(g, tid, pris_par)`
-- L6551  `async def _liste_noire_recrutement(g, membre_id, ajouter)`
-- L6575  `async def _role_clan_de(g)`
-- L6580  `async def _metiers_catalogue(g)`
-- L6585  `async def _fiche_recue(i, pid, champs, reponses)`
-- L6607  `async def _peut_decider(i)`
-- L6614  `async def _action_ticket_fermer(g, auteur, d)`
-- L6628  `async def _action_candidature(g, auteur, d)`
-- L6640  `async def _cible_site(g, auteur, membre_id, c)`
-- L6663  `async def _retirer_du_clan(g, auteur, membre_id, c, role)`
-- L6684  `async def _action_clan_ajouter(g, auteur, d)`
-- L6710  `async def _action_clan_prevenir(g, auteur, d)`
-- L6770  `async def _action_clan_rappel_annuler(g, auteur, d)`
-- L6779  `async def _action_clan_retirer(g, auteur, d)`
-- L6787  `async def _action_clan_retirer_lot(g, auteur, d)`
-- L6811  `async def _inscrire_sanction(g, membre_id, mod_id, typ, raison, duree)`
-- L6820  `async def _action_moderer(g, auteur, d)`
-- L6895  `async def _action_question(g, auteur, d)`
-- L6910  `async def _action_alerte_geree(g, auteur, d)`
-- L6928  `async def _action_fiche_retirer(g, auteur, d)`
-- L6939  `async def _apres_casier(g, membres, *, lever_mute, motif)`
-- L6959  `async def _action_sanction_retirer(g, auteur, d)`
-- L6991  `async def _action_casier_effacer(g, auteur, d)`
-- L7011  `async def _action_casier_serveur(g, auteur, d)`
-- L7034  `async def _action_casier_restaurer(g, auteur, d)`
-- L7047  `async def _action_debannir(g, auteur, d)`
-- L7063  `async def _dates_de_depart(guild_id)`
-- L7081  `async def amnistie_task()` @tasks.loop
-- L7105  `async def _amnistie_attente()` @amnistie_task.before_loop
-- L7110  `async def _action_suggestion_repondre(g, auteur, d)`
-- L7120  `async def _action_suggestion_retirer(g, auteur, d)`
-- L7124  `async def _action_sondage_retirer(g, auteur, d)`
-- L7141  `async def nettoyage_site_task()` @tasks.loop
-- L7157  `async def _nettoyage_site_attente()` @nettoyage_site_task.before_loop
-- L7162  `async def _salon_alertes_site(g)`
-- L7168  `async def _epargne_vigilance(g, membre_id)`
-- L7174  `def _heure_courte(t)`
-- L7181  `def _carte_vigilance(g, membre_id, incidents, points, evenements)`
-- L7199  `def _vue_alerte(membre_id)`
-- L7211  `async def _carte_alerte_decidee(message, ligne)`
-- L7267  `async def _alerte_securite_site(g, membre, raison, suspendu)`
-- L7286  `async def _alerte_forte_site(g, titre, texte)`
-- L7364  `async def _anciens_salons(g, c)`
-- L7375  `async def _salon_de_logs_pur(ch)`
-- L7388  `async def _menu_logs(g, c)`
-- L7422  `async def _salon_tableau(g)`
-- L7480  `async def _logs_direction_seule(g)`
-- L7536  `async def _passer_logs_sur_site(g)`
-- L7694  `async def _salon_transcripts_rellseas(g, c, ref)`
-- L7726  `def _heure_paris(d)`
-- L7732  `def _nom_et_id(g, uid)`
-- L7742  `async def _dossier_recrutement(ch, g, tid, uid, panel_name, answers, events)`
-- L7798  `def _vue_recrutement(g, tid, uid, qui, panel_name, answers, events, participants, nom_fichier, url)`
-- L7833  `async def send_ticket_log(g, lt, user, ti, extra, closer, ch)`
-- L8082  `def _ticket_hours_status()`
-- L8102  `def _ticket_hours_blocked_message(now_label, next_label)`
-- L8111  `async def _ticket_hours_allows(user_id, guild)`
-- L8137  `async def _access_gate_reason(member, c)`
-- L8165  `async def count_user_tickets_today(g, uid)`
-- L8179  `async def _update_support_status(g, c)`
-- L8205  `async def _apply_night_slowmode(g, c)`
-- L8243  `async def server_controls_task()` @tasks.loop
-- L8261  `async def _server_controls_task_wait()` @server_controls_task.before_loop
-- L8270  `async def gdpr_retention_task()` @tasks.loop
-- L8324  `async def _gdpr_retention_wait()` @gdpr_retention_task.before_loop
-- L8335  `async def _salon_panneau_tickets(g)`
-- L8350  `async def _ranger_tickets(g, cat)`
-- L8382  `async def _categorie_tickets(g)`
-- L8414  `async def _contexte_ticket(g, uid, tid)`
-- L8435  `async def _vue_dossier_ticket(g, tid, uid, panel_name, ans, ouvert, pris_par)`
-- L8470  `async def _vue_dossier_ticket_de(g, tk, pris_par)`
-- L8487  `async def _rafraichir_dossier(g, ch, tk, pris_par)`
-- L8511  `def _ticket_sans_limite(g, membre, c)`
-- L8517  `def _equipe_direction(g, c)`
-- L8530  `def _au_dessus_de_la_direction(g, c)`
-- L8544  `def _equipe_du_type(g, c, pid)`
-- L8558  `async def _droit_ticket(i, tk, c)`
-- L8576  `def _equipe_disponible(g, c, tk)`
-- L8595  `def _equipe_a_voir(g, c, pid, ouvreur_id)`
-- L8613  `def _carte_equipe(texte)`
-- L8619  `def _echec(ex, quoi, qui)`
-- L8625  `async def _faire_voir_ticket(g, fil, pid, ouvreur_id, carte, ticket)`
-- L8701  `def _faire_voir_plus_tard(g, fil, pid, ouvreur_id, tid)`
-- L8714  `async def _verifier_tickets_ouverts(g, carte, cle)`
-- L8777  `async def create_ticket(i, pid, ans)`
-- L8790  `async def _create_ticket_corps(i, pid, ans)`
-- L8937  `def _vue_ticket_message(texte, couleur)`
-- L8944  `def _carte_ticket(titre, texte, couleur, avatar)`
-- L9026  `async def _ticket_ouvrir(i, pid)`
-- L9167  `def _types_tickets(cfg_guild, tous)`
-- L9186  `def _resume_type(pnl)`
-- L9194  `async def _build_ticket_hub_view(guild)`
-- L9367  `async def _rafraichir_hub_tickets(g, types, sauf)`
-- L9524  `async def _build_ticket_panel_view(guild, pid)`
-- L9589  `async def _ticket_toggle_click(i, pid)`
-- L9648  `def _resolve_transcript_text(text, guild)`
-- L9686  `def _cartes_v2(composants, guild)`
-- L9752  `def _texte_v2(composants, guild, sep)`
-- L9761  `def _html_lignes_v2(lignes)`
-- L9775  `def _html_carte_v2(carte)`
-- L9793  `async def _ticket_transcript_file(ch, tid)`
-- L9878  `async def _historique_ticket(ch, plafond)`
-- L9885  `def _note_tronque(n)`
-- L9890  `def _image_sure(media)`
-- L9903  `def _message_en_donnees(m, guild)`
-- L9953  `async def _suivi_ticket(g, ticket_id)`
-- L9972  `async def _conversation_ticket(g, ticket_id)`
-- L9981  `async def _conversation_seule(g, ticket_id)`
-- L10016  `async def _render_ticket_transcript_html(ch, tid, token, base_url, titre)`
-- L10163  `async def _ticket_transcript_html(ch, tid)`
-- L10179  `def _fermer_en_fond(coro)`
-- L10188  `async def _repondre_ticket(i, texte)`
-- L10196  `async def _fermer_ticket(guild, ch, tk, closer, reason, inactif_jours, **options)`
-- L10212  `async def _garder_ticket_sans_transcript(guild, ch, tid, prevenir)`
-- L10241  `async def _fermer_ticket_corps(guild, ch, tk, closer, reason, inactif_jours, *, public, mp, prevenir)`
-- L11209  `def check_masked_links(content)`
-- L11241  `def _domaine_de_confiance(hote)`
-- L11267  `def _hote(url)`
-- L11275  `def domaine_officiel(hote)`
-- L11279  `def sans_liens_officiels(texte)`
-- L11342  `def _texte_lisible(texte)`
-- L11350  `def _hote_lisible(hote)`
-- L11361  `def _squelette(texte)`
-- L11373  `def _distance_osa(a, b)`
-- L11393  `def _domaine_enregistrable(hote)`
-- L11402  `def _service_legitime(hote)`
-- L11406  `def _imitation_de_marque(hote)`
-- L11442  `def _analyse_hote(hote)`
-- L11470  `def _domaines_pieges_cites(texte)`
-- L11483  `def _normaliser_liens(texte)`
-- L11494  `def _phrase_de_phishing(texte_min)`
-- L11498  `def _vol_de_compte_prouve(ct)`
-- L11511  `def advanced_phishing_check(content)`
-- L11553  `def advanced_scam_check(content)`
-- L11616  `def check_dangerous_file(filename)`
-- L11641  `def check_shortener(ct)`
-- L11662  `def check_qr_code_scam(content, image)`
-- L11690  `def normalize_username(name)`
-- L11706  `def levenshtein_distance(s1, s2)`
-- L11726  `def username_similarity(name1, name2)`
-- L11744  `def _nom_peut_ressembler(nom, autre)`
-- L11760  `def get_avatar_hash(member)`
-- L11766  `async def save_user_fingerprint(guild_id, member)`
-- L11787  `async def save_ban_info(guild_id, user_id, username, avatar_hash, reason)`
-- L11799  `async def detect_alt_account(guild, new_member)`
-- L11914  `async def save_alt_detection(guild_id, main_id, alt_id, confidence, reasons)`
-- L11928  `async def get_alt_accounts(guild_id)`
-- L11941  `async def update_alt_status(guild_id, alt_id, status, action)`
-- L11953  `async def scan_all_members_for_alts(guild)`
-- L12070  `async def _afficher_panneau(vue, interaction, edit)`
-- L12492  `def mark_welcome_raid(guild_id)`
-- L12509  `def _welcome_raid_active(guild_id)`
-- L12519  `async def _flush_welcome_raid_recap(guild_id)`
-- L12565  `def _defer_welcome_during_raid(guild_id, channel, member_id)`
-- L12836  `def _in_night_window(c)`
-- L12890  `async def _ensure_ticket_feedback_table()`
-- L12956  `def _ticket_feedback_view(gid, tid, sid)`
-- L12976  `async def _ensure_entraide_ratings_table()`
-- L13029  `async def help_cmd(i)` @bot.tree.command
-- L13230  `async def _init_sentinelle()`
-- L13248  `async def _battre_sentinelle()`
-- L13283  `async def _enfiler_billets(guildes, rel)`
-- L13369  `async def _publier_file_actualites(guildes, etiquette)`
-- L13430  `def _custom_ids_du_message(msg)`
-- L13455  `async def _migrer_panneaux_tickets(guild)`
-- L13529  `async def _bilan_sante_serveur(guild)`
-- L13589  `async def _publier_bilan_sante(guild)`
-- L13639  `async def _demonter_activite(guild)`
-- L13674  `async def _verifier_visibilite(guild)`
-- L13695  `async def _rendre_roles_au_retour(member)`
-- L13717  `async def _salons_de_logs(g, c)`
-- L13726  `async def _salons_de_flux(g, c)`
-- L13738  `async def _remplacer_salon_partout(g, ancien, nouveau)`
-- L13746  `async def _menage_unique(g)`
-- L13782  `async def menage_salons_task()` @tasks.loop
-- L13805  `async def _menage_salons_wait()` @menage_salons_task.before_loop
-- L13811  `async def salon_logs_task()` @tasks.loop
-- L13826  `async def _salon_logs_wait()` @salon_logs_task.before_loop
-- L13831  `async def _retirer_salons_combat(g)`
-- L13861  `async def _retirer_exclamations(g)`
-- L13952  `def _ids_configures(valeur, out)`
-- L13968  `def _role_supprimable(r, me, configures)`
-- L13975  `async def _retirer_fonctions_mortes(g)`
-- L14009  `async def _menage_v2(g)`
-- L14053  `async def _faq_hook(msg)`
-- L14063  `def _dans_entraide(ch, c)`
-- L14075  `async def _entraide_message(msg)`
-- L14082  `async def _entraide_effacement(payload)`
-- L14089  `async def _entraide_effacement_masse(payload)`
-- L14102  `async def _invitations_lien(invite)`
-- L14109  `async def _invitations_arrivee(membre)`
-- L14116  `async def _invitations_depart(membre)`
-- L14130  `async def _cadeaux_message(msg)`
-- L14137  `async def _cadeaux_vocal(membre, avant, apres)`
-- L14144  `async def _cadeaux_effacement(payload)`
-- L14151  `async def _cadeaux_effacement_masse(payload)`
-- L14195  `async def _actus_en_annonces(g)`
-- L14216  `def _flux_du_studio(f)`
-- L14224  `def _cle_de_suivi(reseau, f)`
-- L14231  `async def _titre_youtube(uc)`
-- L14253  `async def _flux_studio_rell(g)`
-- L14317  `async def _rattacher_flux_orphelins(g)`
-- L14347  `async def _configurer_salons(g)`
-- L14387  `def _roles_staff_et_plus(g, c)`
-- L14397  `async def _configurer_salons_v2(g)`
-- L14459  `async def _automod_invitations(g)`
-- L14505  `def _salon_des_tickets(g)`
-- L14513  `def _salon_par_nom(g, *mots, exclus)`
-- L14521  `async def _vue_aide(g, c)`
-- L14565  `async def _retirer_recherche_de_groupe(salon)`
-- L14582  `async def _salon_aide(g)`
-- L14627  `async def entraide_task()` @tasks.loop
-- L14727  `def _faq_trouves(g, c)`
-- L14736  `async def _lire_commandes(g)`
-- L14746  `async def _installer_zones(g, c)`
-- L14769  `async def _reporter_immunites(g, c)`
-- L14787  `async def _tickets_visibilite(g)`
-- L14837  `async def _retirer_equipages(g)`
-- L14867  `async def _supprimer_toutes_archives(g)`
-- L14880  `def _lecteurs_archives(g, c)`
-- L14959  `async def _installer_clan(g, c)`
-- L14976  `async def _demenager_clan(g, c)`
-- L14990  `def _faq_destinations(g, c)`
-- L15026  `async def _langue_de_membre(m)`
-- L15038  `async def giveaway_lancer(i)` @giveaway_group.command
-- L15043  `async def giveaway_gerer(i)` @giveaway_group.command
-- L15082  `async def _vocal_info(salon)`
-- L15098  `async def _vocaux_par_contexte(g)`
-- L15146  `def _installer_arret_propre()`
-- L15158  `async def _arret_propre()`
-- L15168  `async def _cadeaux_autorise(g, membre)`
-- L15173  `async def _liens_journal(g, type_, texte, **kw)`
-- L15177  `async def _cadeaux_journal(g, type_, texte, **kw)`
-- L15182  `async def cadeaux_task()` @tasks.loop
-- L15239  `async def _annonces_journal(g, type_, texte, **kw)`
-- L15244  `async def evenements_task()` @tasks.loop
-- L15256  `async def _menage_categories(g)`
-- L15298  `async def _langue_membre(i)`
-- L15305  `async def _archiver_fil(fil, titre)`
-- L15316  `async def _entraide_task_attente()` @entraide_task.before_loop
-- L15351  `async def _salon_logs_dedie(g, cle, nom)`
-- L15380  `async def _ping_social(salon)`
-- L15389  `async def _publier_social(salon, profil, embed)`
-- L15402  `async def _publier_reserve(guild, plateforme, post_id, salon, profil, embed, chemin)`
-- L15420  `async def _texte_refuse_pour(g, texte, dans, ton)`
-- L15438  `async def _texte_sondage_refuse(g, texte)`
-- L15442  `async def _texte_demande_refusee(g, texte)`
-- L15446  `async def _entraide_staff(g, membre)`
-- L15451  `async def _entraide_journal(g, type_, texte, **kw)`
-- L15457  `async def _retirer_tables_mortes()`
-- L15476  `async def _etat_public()`
-- L15551  `async def _roles_zones_manquants()`
-- L15564  `def _chemins_ids(valeur, chemin, out)`
-- L15590  `def _sante_salons(g, c)`
-- L15608  `def _porteurs_sans_direction(g, c)`
-- L15619  `def _anciens_salons_clan(g, c)`
-- L15629  `async def _recrutement_rellseas(g)`
-- L15637  `async def _boosts_au_demarrage(g)`
-- L15653  `async def _alerte_sauvegarde(titre, detail)`
-- L15660  `async def _travaux_de_demarrage()`
-- L15679  `async def _relever_actus(forcer)`
-- L15710  `async def veille_roblox_task()` @tasks.loop
-- L15730  `async def _veille_roblox_wait()` @veille_roblox_task.before_loop
-- L15764  `def _age_s(quand)`
-- L15800  `async def eclaireur_actu_task()` @tasks.loop
-- L15866  `async def _eclaireur_actu_wait()` @eclaireur_actu_task.before_loop
-- L15965  `def _capture_loop_death_cause(label, lo)`
-- L15994  `def _iter_supervised_loops()`
-- L16089  `async def task_supervisor()` @tasks.loop
-- L16120  `async def _task_supervisor_wait()` @task_supervisor.before_loop
-- L16133  `async def _membres_sanctionnes(g)`
-- L16153  `async def _metiers_membre(before, after)`
-- L16165  `async def metiers_task()` @tasks.loop
-- L16177  `async def _metiers_attente()` @metiers_task.before_loop
-- L17221  `def _resolve_event_type(value)`
-- L18295  `def get_prot_action_key(key)`
-- L18299  `def get_prot_duration_key(key)`
-- L18303  `def get_prot_default_action(key)`
-- L18307  `def get_prot_default_duration(key)`
-- L19159  `async def send_mod_log(guild, action, mod, target, reason, duration, extra)`
-- L19834  `async def load_live_state_from_db()`
-- L19857  `async def save_live_state(cache_key, guild_id, platform, username)`
-- L19880  `async def mark_live_announced(cache_key, guild_id, platform, username, message_id, live_channel_id)`
-- L19893  `async def check_live_ended(cache_key, guild_id, platform, username)`
-- L19919  `async def should_announce_live(cache_key)`
-- L19952  `def mark_live_still_active(cache_key)`
-- L19986  `def _api_warning_state_file_path()`
-- L20004  `async def _purger_commandes_globales()`
-- L20041  `def _sync_hash_file_path()`
-- L20059  `def _compute_tree_hash(tree)`
-- L20110  `def _load_api_warning_state()`
-- L20125  `def _save_api_warning_state()`
-- L20136  `def _api_retablie(guild, platform)`
-- L20143  `async def _warn_api_dead(guild, platform, reason)`
-- L20205  `async def get_webhook(channel, platform)`
-- L20231  `async def _deja_poste(channel, kw, depuis, cle)`
-- L20260  `async def webhook_send(channel, platform, embed, content, file, files, embeds, view, allowed_mentions, cle)`
-- L20669  `def _dossier_vue(uid, *, eteinte)`
-- L20680  `async def _dossier_agir(i, act, uid)`
-- L20721  `async def _dossier_traite(i, fait, uid)`
-- L20813  `async def cleanup_old_db_data()` @tasks.loop
-- L20847  `async def _cleanup_old_db_wait()` @cleanup_old_db_data.before_loop
-- L21818  `async def update_realsy_activity(guild_id, user_id)`
-- L21844  `async def _tree_dm_guard(interaction)`
-- L21859  `async def on_app_command_error(interaction, error)` @bot.tree.error
-- L21930  `async def _activite_boot()`
-- L22212  `async def on_ready()` @bot.event
-- L23007  `async def on_guild_join(guild)` @bot.event
-- L23029  `async def on_thread_create(thread)` @bot.event
-- L23042  `async def on_raw_poll_vote_add(payload)` @bot.event
-- L23059  `async def on_interaction(interaction)` @bot.event
-- L23085  `async def sync_cmd(i)` @owner_group.command
-- L23113  `async def owner_mod_stats_cmd(i, jours)` @owner_group.command
-- L23139  `async def _tix_staff(i)`
-- L23149  `async def _tix_direction(i)`
-- L23158  `async def _tix_is_in_ticket(channel)`
-- L23175  `async def ticket_transcripts_cmd(i, membre)` @ticket_group.command
-- L23207  `async def ticket_search_cmd(i, non_pris)` @ticket_group.command
-- L23250  `async def ticket_queue_cmd(i)` @ticket_group.command
-- L23297  `async def ticket_priority_cmd(i, niveau)` @ticket_group.command
-- L23327  `async def ticket_templates_cmd(i)` @ticket_group.command
-- L23347  `async def ticket_reply_cmd(i, template_name)` @ticket_group.command
-- L23374  `async def ticket_template_add_cmd(i)` @ticket_group.command
-- L23409  `async def ticket_template_remove_cmd(i, name)` @ticket_group.command
-- L23427  `async def ticket_stats_cmd(i)` @ticket_group.command
-- L23448  `async def ticket_auto_close_cmd(i, jours)` @ticket_group.command
-- L23480  `def _obs_is_owner(member)`
-- L23495  `async def server_report_cmd(i)` @server_obs_group.command
-- L23521  `async def server_history_cmd(i, jours)` @server_obs_group.command
-- L23540  `async def server_retention_cmd(i)` @server_obs_group.command
-- L23559  `async def server_anomalies_cmd(i)` @server_obs_group.command
-- L23583  `async def on_member_ban(guild, user)` @bot.event
-- L23619  `async def on_member_remove(m)` @bot.event
-- L23723  `async def _handle_goodbye(member)`
-- L23780  `async def _audit_actor(guild, action, *, target_id, within_sec)`
-- L23811  `async def _log_audited(guild, event_type, actions, target_id, desc_fn, *, channel, require_actor, user)`
-- L23850  `async def on_member_update(before, after)` @bot.event
-- L23901  `async def on_audit_log_entry_create(entry)` @bot.event
-- L23976  `async def on_user_update(before, after)` @bot.event
-- L23985  `async def _open_boost_panel(i)`
-- L24010  `async def _handle_boost_started(member)`
-- L24025  `async def _handle_boost_stopped(member)`
-- L24034  `async def _handle_rogue_bot(m)`
-- L24103  `async def _age_gate_nsfw(member)`
-- L24146  `async def _reposer_sanction_au_retour(m)`
-- L24234  `async def on_member_join(m)` @bot.event
-- L24509  `async def _handle_antiraid_join(member)`
-- L24661  `async def _verrou_raid(guild)`
-- L24674  `async def _lever_verrou_raid(guild)`
-- L24692  `def _nombre_membres(guild)`
-- L24697  `async def _track_welcome_msg(guild_id, channel_id, message_id)`
-- L24711  `async def welcome_cleanup_task()` @tasks.loop
-- L24754  `async def _welcome_cleanup_before()` @welcome_cleanup_task.before_loop
-- L24761  `async def _handle_welcome(member)`
-- L24805  `async def on_message_delete(message)` @bot.event
-- L24821  `async def on_bulk_message_delete(messages)` @bot.event
-- L24841  `async def _scan_security_on_edit(after)`
-- L25169  `async def on_message_edit(before, after)` @bot.event
-- L25191  `async def on_guild_channel_create(channel)` @bot.event
-- L25243  `async def _antinuke_check(guild, kind, cible_id)`
-- L25289  `async def _antinuke_respond(guild, actor, kind, count, c)`
-- L25332  `def _has_risky_perms(member)`
-- L25344  `async def _compromised_riposte(msg, reason)`
-- L25402  `async def on_webhooks_update(channel)` @bot.event
-- L25467  `async def tickets_inactifs_task()` @tasks.loop
-- L25508  `async def _tickets_inactifs_wait()` @tickets_inactifs_task.before_loop
-- L25513  `async def on_raw_thread_delete(payload)` @bot.event
-- L25524  `async def on_guild_channel_delete(channel)` @bot.event
-- L25543  `async def on_guild_channel_update(before, after)` @bot.event
-- L25570  `async def on_guild_role_create(role)` @bot.event
-- L25584  `async def on_guild_role_delete(role)` @bot.event
-- L25598  `async def on_guild_role_update(before, after)` @bot.event
-- L25630  `async def _perm_escalation_guard(guild, before, after)`
-- L25680  `async def _check_compromised_account(msg)`
-- L25782  `async def on_message(msg)` @bot.event
-- L27192  `async def security_check(i, command_name)`
-- L27218  `async def configure_cmd(i)` @bot.tree.command
-- L27283  `async def _logs_sur_le_site(g)`
-- L27298  `async def logs_setchannel(i, salon)` @logs_group.command
-- L27348  `async def logs_status(i)` @logs_group.command
-- L27431  `async def logs_categories(i)` @logs_group.command
-- L27570  `async def check_mod_perm(i, cmd_key)`
-- L27602  `async def _do_clear(ch, limit, moderator)`
-- L27617  `async def _clear_audit_log(guild, ch, moderator, deleted, limit)`
-- L27645  `async def _run_clear_and_report(guild, ch, limit, moderator)`
-- L27709  `async def mod_clear(i, nombre)` @mod_group.command
-- L27751  `def _format_warn_id(infraction_id, created_dt)`
-- L27775  `async def _escalade_warns(guild, membre, warn_count)`
-- L27830  `async def _avertissement_staff(g, membre_id, mod_id, raison)`
-- L27844  `async def warn_cmd(i, membre, raison)` @mod_group.command
-- L27990  `async def unwarn_cmd(i, membre)` @mod_group.command
-- L28078  `async def mute_cmd(i, membre, duree, unite, raison)` @mod_group.command
-- L28160  `async def unmute_cmd(i, membre, raison)` @mod_group.command
-- L28233  `async def direction_cmd(i, membre, duree, raison)` @mod_group.command
-- L28362  `async def undirection_cmd(i, membre, raison)` @mod_group.command
-- L28470  `def _staff_sanction_guard(moderator, target, guild)`
-- L28671  `async def mod_active_cmd(i)` @mod_group.command
-- L28751  `async def _build_casier_panel(staff, member, guild, note)`
-- L28890  `async def infractions_cmd(i, membre)` @mod_group.command
-- L29176  `async def mod_note_cmd(i, membre, texte)` @mod_group.command
-- L29231  `def _vue_blacklist(texte, avatar, couleur)`
-- L29251  `async def ticketblacklist_cmd(i, action, membre, panel)` @mod_group.command
-- L29389  `def _refus_cible_rellseas(g, auteur, membre, donner)`
-- L29410  `async def _rellseas_autorise(i)`
-- L29441  `async def rellseas_cmd(i)` @bot.tree.command
-- L29520  `async def _rr_messages_connus()`
-- L29529  `async def _handle_reaction_role(payload, *, add)`
-- L29571  `async def on_raw_reaction_add(payload)` @bot.event
-- L29606  `async def on_raw_reaction_remove(payload)` @bot.event
-- L29623  `def _page_live_due(cle, secondes)`
-- L29633  `async def check_social_feeds()` @tasks.loop
-- L29685  `def _is_recent_iso(iso_str, max_age_days)`
-- L29715  `def _yt_extract_uc(raw)`
-- L29729  `def _yt_extract_handle(raw)`
-- L29750  `async def _yt_resolve_channel_id(session, raw)`
-- L29787  `def _avertir_une_fois_par_jour(cle)`
-- L29797  `async def check_youtube_feeds(session, guild, data)`
-- L30036  `async def _deja_dans_le_salon(salon, url)`
-- L30052  `def _description_entree(entry, ns)`
-- L30078  `async def _details_websub(uc, video_id)`
-- L30101  `async def _annoncer_video_youtube(guild, feed, target_channel, video_id, title, description, chemin, avatar)`
-- L30151  `async def _feeds_youtube()`
-- L30178  `async def _chaines_youtube_suivies()`
-- L30187  `async def _annoncer_websub(uc, video)`
-- L30215  `async def websub_task()` @tasks.loop
-- L30227  `async def _websub_wait()` @websub_task.before_loop
-- L30231  `async def check_twitch_feeds(session, guild, data)`
-- L30383  `def _tk_warn_once(guild_id, username, msg)`
-- L30398  `async def check_tiktok_feeds(session, guild, data)`
-- L30787  `async def check_reddit_feeds(session, guild, data)`
-- L30900  `async def check_twitter_feeds(session, guild, data)`
-- L31076  `async def before_social_check()` @check_social_feeds.before_loop
-- L31080  `async def _forget_temp_voice_room(channel_id)`
-- L31092  `async def temp_voice_watchdog()` @tasks.loop
-- L31139  `async def before_temp_voice_watchdog()` @temp_voice_watchdog.before_loop
-- L31153  `async def on_voice_state_update(member, before, after)` @bot.event
-- L31547  `async def _activite_suivi(guild_id, user_id)`
-- L31574  `async def check_expired_roles()` @tasks.loop
-- L31614  `async def before_check_expired()` @check_expired_roles.before_loop
-- L31619  `async def check_expired_restrictions()` @tasks.loop
-- L31684  `async def before_check_restrictions()` @check_expired_restrictions.before_loop
-- L31709  `async def _2026_on_ready_addon()`
-- L31898  `async def _voice_log_listener(member, before, after)`
-- L31977  `def _salons_hub(c)`
-- L31982  `def _geste_vocal(before, after, hubs)`
-- L31995  `async def _sauts_imposes(guild, member, salons, depuis)`
-- L32016  `async def _voice_hop_listener(member, before, after)`
-- L32099  `async def _role_mentionable_guard(*args)`
-- L32176  `def _global_rl_active()`
-- L32180  `def _arm_global_rl_backoff(ex, seconds)`
-- L32202  `def _is_benign_interaction_err(ex)`
-- L32212  `async def _safe_defer(i, ephemeral)`
-- L32230  `async def _safe_followup(i, **kwargs)`
-- L32253  `async def _register_for_cleanup(message, delay_seconds, reason)`
-- L32288  `async def persistent_msg_cleaner()` @tasks.loop
-- L32298  `async def _persistent_msg_cleaner_wait()` @persistent_msg_cleaner.before_loop
-- L32302  `async def _run_persistent_cleanup_once()`
-- L32478  `async def _entraide_voice_category(guild)`
-- L32497  `async def _entraide_maybe_delete_empty_voice(guild, channel)`
-- L32576  `def _unanswered_clear(message_id)`
-- L32584  `def _unanswered_on_reaction(payload)`
-- L32612  `def _unanswered_clear_for_author(guild_id, author_id)`
-- L32685  `def _i18n_lang_role_name(lang)`
-- L32694  `def _i18n_all_lang_role_names()`
-- L32702  `async def _i18n_assign_lang_role(member, lang)`
-- L32757  `async def _i18n_apply_lang(i, lang)`
-- L32981  `async def db_optimizer_task()` @tasks.loop
-- L33115  `async def _db_optimizer_wait()` @db_optimizer_task.before_loop
-- L33300  `async def _check_alt_account(member)`
-- L33379  `async def _lever_ralentis(guild)`
-- L33400  `async def _check_auto_slow_mode(msg)`
-- L33517  `def _section_with_button(title_str, subtitle_str, button)`
-- L33534  `def _escape_md(text, max_len)`
-- L33613  `def _installer_resumeur_passerelle()`
-- L447  `class DBPool`
-    - L450  `def __init__(self, path, pool_size)`
-    - L463  `async def init(self)`
-    - L472  `async def _init_locked(self)`
-    - L496  `def acquire(self)`
-    - L500  `async def _get(self)`
-    - L532  `async def _put(self, conn)`
-    - L537  `async def close_all(self)`
-- L544  `class _DBConnection`
-    - L546  `def __init__(self, pool)`
-    - L550  `async def __aenter__(self)`
-    - L556  `async def __aexit__(self, exc_type, exc_val, exc_tb)`
-- L593  `class ConfigCache`
-    - L596  `def __init__(self, max_size, ttl_seconds)`
-    - L602  `def get(self, guild_id)`
-    - L612  `def set(self, guild_id, data)`
-    - L623  `def invalidate(self, guild_id)`
-    - L628  `def clear(self)`
-- L668  `class C`
-- L1531  `class ConfigIllisible(RuntimeError)`
-- L2636  `class _RadieAppelModal(discord.ui.Modal)`
-    - L2650  `def __init__(self, guild)`
-    - L2654  `async def on_submit(self, i)`
-- L2674  `class RadieAppelButton(discord.ui.DynamicItem[Button])`
-    - L2679  `def __init__(self, gid)`
-    - L2686  `async def from_custom_id(cls, interaction, item, match)` @classmethod
-    - L2689  `async def callback(self, i)`
-- L2808  `class RadieDecisionButton(discord.ui.DynamicItem[Button])`
-    - L2817  `def __init__(self, act, uid)`
-    - L2829  `async def from_custom_id(cls, interaction, item, match)` @classmethod
-    - L2832  `async def callback(self, i)`
-- L3671  `class SecReportView(discord.ui.View)`
-    - L3675  `def __init__(self, guild_id, top_players)`
-    - L3687  `async def _on_pick(self, i)`
-- L7233  `class BoutonApprouverBot(discord.ui.DynamicItem[Button])`
-    - L7238  `def __init__(self, bot_id)`
-    - L7244  `async def from_custom_id(cls, interaction, item, match)` @classmethod
-    - L7247  `async def callback(self, i)`
-- L7305  `class BoutonGere(discord.ui.DynamicItem[Button])`
-    - L7308  `def __init__(self, membre_id)`
-    - L7314  `async def from_custom_id(cls, interaction, item, match)` @classmethod
-    - L7317  `async def callback(self, i)`
-- L7333  `class BoutonFicheSite(discord.ui.DynamicItem[Button])`
-    - L7336  `def __init__(self, membre_id)`
-    - L7342  `async def from_custom_id(cls, interaction, item, match)` @classmethod
-    - L7345  `async def callback(self, i)`
-- L7585  `class BoutonAnciensSalons(discord.ui.DynamicItem[Button])`
-    - L7588  `def __init__(self, n)`
-    - L7595  `async def from_custom_id(cls, interaction, item, match)` @classmethod
-    - L7598  `async def callback(self, i)`
-- L7611  `class ConfirmerAnciensSalons(LayoutView)`
-    - L7612  `def __init__(self, auteur_id, salons)`
-    - L7636  `async def interaction_check(self, i)`
-    - L7639  `async def _choisir(self, i)`
-    - L7643  `async def _annuler(self, i)`
-    - L7649  `async def _supprimer(self, i)`
-- L8697  `class _SansCarte(Exception)`
-- L8955  `class TicketQuestionnaireModal(Modal)`
-    - L8956  `def __init__(self, pid, qs)`
-    - L8969  `async def on_submit(self, i)`
-- L8983  `class TicketConfirmCreateView(LayoutView)`
-    - L8990  `def __init__(self, pid, recap, *, champs, oui, non, annule)`
-    - L9001  `async def _confirm(self, i)`
-    - L9018  `async def _cancel(self, i)`
-- L9125  `class TicketCreateDynamic(discord.ui.DynamicItem[Button])`
-    - L9138  `def __init__(self, pid)`
-    - L9145  `async def from_custom_id(cls, interaction, item, match)` @classmethod
-    - L9148  `async def callback(self, i)`
-- L9253  `class TicketHubGererDynamic(discord.ui.DynamicItem[Button])`
-    - L9257  `def __init__(self)`
-    - L9262  `async def from_custom_id(cls, interaction, item, match)` @classmethod
-    - L9265  `async def callback(self, i)`
-- L9275  `class VueTypesTickets(LayoutView)`
-    - L9283  `def __init__(self, auteur_id, c)`
-    - L9322  `async def interaction_check(self, i)`
-    - L9325  `def _basculer(self, pid)`
-    - L9330  `async def _choisir(self, i)`
-    - L9334  `def _tout(self, fermer)`
-    - L9340  `async def _appliquer(self, i, choix)`
-- L9397  `class TicketHubOpenDynamic(discord.ui.DynamicItem[Button])`
-    - L9411  `def __init__(self)`
-    - L9417  `async def from_custom_id(cls, interaction, item, match)` @classmethod
-    - L9420  `async def callback(self, i)`
-- L9452  `class TicketHubTypeDynamic(discord.ui.DynamicItem[discord.ui.Select])`
-    - L9464  `def __init__(self, types)`
-    - L9479  `async def from_custom_id(cls, interaction, item, match)` @classmethod
-    - L9482  `async def callback(self, i)`
-- L9513  `class TicketHubTypeView(LayoutView)`
-    - L9516  `def __init__(self, types)`
-- L9631  `class TicketToggleDynamic(discord.ui.DynamicItem[Button])`
-    - L9635  `def __init__(self, pid)`
-    - L9641  `async def from_custom_id(cls, interaction, item, match)` @classmethod
-    - L9644  `async def callback(self, i)`
-- L10329  `class TicketCloseModal(Modal)`
-    - L10336  `def __init__(self, tk, prefill)`
-    - L10348  `async def on_submit(self, i)`
-- L10364  `class TicketControlView(View)`
-    - L10365  `def __init__(self)`
-    - L10369  `async def claim(self, i, btn)` @discord.ui.button
-    - L10388  `async def _prendre(self, i, btn)`
-    - L10478  `async def add_staff(self, i, btn)` @discord.ui.button
-    - L10508  `async def transfer(self, i, btn)` @discord.ui.button
-    - L10541  `async def priority(self, i, btn)` @discord.ui.button
-    - L10565  `async def internal_note(self, i, btn)` @discord.ui.button
-    - L10587  `async def blacklist_user(self, i, btn)` @discord.ui.button
-    - L10656  `async def close(self, i, btn)` @discord.ui.button
-    - L10687  `async def manage(self, i, btn)` @discord.ui.button
-- L10711  `class AddStaffView(LayoutView)`
-    - L10712  `def __init__(self, opts, chid)`
-- L10719  `class AddStaffSelect(Select)`
-    - L10720  `def __init__(self, opts, chid)`
-    - L10724  `async def callback(self, i)`
-- L10760  `class TransferTicketView(LayoutView)`
-    - L10761  `def __init__(self, opts, chid)`
-- L10768  `class TransferTicketSelect(Select)`
-    - L10769  `def __init__(self, opts, chid)`
-    - L10773  `async def callback(self, i)`
-- L10856  `class TicketPriorityView(LayoutView)`
-    - L10859  `def __init__(self, chid)`
-- L10866  `class TicketPrioritySelect(Select)`
-    - L10867  `def __init__(self, chid)`
-    - L10885  `async def callback(self, i)`
-- L10922  `class TicketNoteModal(Modal)`
-    - L10927  `def __init__(self, tk)`
-    - L10936  `async def on_submit(self, i)`
-- L10978  `class TicketCloseReasonView(LayoutView)`
-    - L10982  `def __init__(self, tk)`
-- L10990  `class TicketCloseReasonSelect(Select)`
-    - L10991  `def __init__(self, tk)`
-    - L10998  `async def callback(self, i)`
-- L11987  `class _RgpdPurgeModal(Modal)`
-    - L11990  `def __init__(self, g)`
-    - L12000  `async def on_submit(self, i)`
-- L12099  `class RgpdPanelV2(LayoutView)`
-    - L12102  `def __init__(self, u, g)`
-    - L12107  `async def interaction_check(self, i)`
-    - L12115  `async def render_to(self, interaction, *, edit)`
-    - L12137  `async def _open_purge(self, i)`
-    - L12143  `async def _check(self, i)`
-    - L12170  `async def _back(self, i)`
-- L12223  `class MainPanelV2(LayoutView)`
-    - L12231  `def __init__(self, u, g)`
-    - L12237  `async def interaction_check(self, i)`
-    - L12243  `def _build(self, etat)`
-    - L12297  `async def _collect_etat(self)`
-    - L12360  `async def refresh(self)`
-    - L12375  `async def render_to(self, interaction, *, edit)`
-    - L12382  `async def _module_select(self, i)`
-    - L12446  `async def _cb_refresh(self, i)`
-    - L12457  `async def _close(self, i)`
-- L12605  `class AntiRaidPanelV2(LayoutView)`
-    - L12606  `def __init__(self, u, g)`
-    - L12611  `async def interaction_check(self, i)`
-    - L12614  `async def render_to(self, interaction, *, edit)`
-    - L12680  `async def _cb_scan(self, i)`
-    - L12699  `async def _cb_toggle(self, i)`
-    - L12707  `async def _cb_thresholds(self, i)`
-    - L12718  `async def _cb_action(self, i)`
-    - L12725  `async def _cb_log_channel(self, i)`
-    - L12734  `async def _cb_back(self, i)`
-- L12739  `class _AntiRaidThresholdsModal(Modal)`
-    - L12744  `def __init__(self, g, u)`
-    - L12749  `async def on_submit(self, i)`
-- L12765  `class _AntiRaidActionPickerV2(LayoutView)`
-    - L12766  `def __init__(self, u, g)`
-    - L12771  `async def interaction_check(self, i)`
-    - L12774  `async def render_to(self, interaction, *, edit)`
-    - L12810  `async def _set(self, i, action)`
-    - L12817  `async def _cb_back(self, i)`
-- L12903  `class TicketFeedbackButton(discord.ui.DynamicItem[Button])`
-    - L12906  `def __init__(self, gid, tid, sid, rating)`
-    - L12913  `async def from_custom_id(cls, interaction, item, match)` @classmethod
-    - L12916  `async def callback(self, i)`
-- L12989  `class EntraideRatingButton(discord.ui.DynamicItem[Button])`
-    - L12992  `def __init__(self, gid, hid, qid, rating)`
-    - L12999  `async def from_custom_id(cls, interaction, item, match)` @classmethod
-    - L13002  `async def callback(self, i)`
-- L14175  `class BoutonArchive(discord.ui.DynamicItem[Button])`
-    - L14181  `def __init__(self, cid)`
-    - L14185  `async def from_custom_id(cls, interaction, item, match)` @classmethod
-    - L14188  `async def callback(self, i)`
-- L14888  `class BoutonArchives(discord.ui.DynamicItem[Button])`
-    - L14892  `def __init__(self, n)`
-    - L14898  `async def from_custom_id(cls, interaction, item, match)` @classmethod
-    - L14901  `async def callback(self, i)`
-- L14912  `class ConfirmerArchives(LayoutView)`
-    - L14913  `def __init__(self, auteur_id, salons)`
-    - L14932  `async def interaction_check(self, i)`
-    - L14935  `async def _choisir(self, i)`
-    - L14939  `async def _annuler(self, i)`
-    - L14943  `async def _supprimer(self, i)`
-- L15050  `class _ErreursInteractions(logging.Handler)`
-    - L15055  `def __init__(self)`
-    - L15058  `def emit(self, record)`
-- L15320  `class BoutonAnnulerConfig(discord.ui.DynamicItem[Button])`
-    - L15321  `def __init__(self, hid)`
-    - L15327  `async def from_custom_id(cls, interaction, item, match)` @classmethod
-    - L15330  `async def callback(self, i)`
-- L16186  `class LogsPanelV2(LayoutView)`
-    - L16189  `def __init__(self, u, g)`
-    - L16194  `async def interaction_check(self, i)`
-    - L16197  `async def render_to(self, interaction, *, edit)`
-    - L16289  `async def _rendre_site(self, interaction, edit)`
-    - L16319  `async def _cb_set_channel(self, i)`
-    - L16334  `async def _cb_categories(self, i)`
-    - L16338  `async def _cb_routing(self, i)`
-    - L16343  `async def _cb_toggle_webhook(self, i)`
-    - L16352  `async def _cb_events(self, i)`
-    - L16357  `async def _cb_exclusions(self, i)`
-    - L16362  `async def _cb_disable(self, i)`
-    - L16369  `async def _cb_security_channels(self, i)`
-    - L16374  `async def _cb_back(self, i)`
-- L16380  `class SecurityChannelsPanelV2(LayoutView)`
-    - L16404  `def __init__(self, u, g)`
-    - L16409  `async def interaction_check(self, i)`
-    - L16412  `async def render_to(self, interaction, *, edit)`
-    - L16476  `async def _open_picker(self, i, cfg_key, label)`
-    - L16542  `async def _cb_back(self, i)`
-- L16554  `class LogsRoutingPanelV2(LayoutView)`
-    - L16558  `def __init__(self, u, g)`
-    - L16563  `async def interaction_check(self, i)`
-    - L16566  `async def render_to(self, interaction, *, edit)`
-    - L16625  `async def _cb_event_routing(self, i)`
-    - L16629  `async def _cb_level(self, i, level_key)`
-    - L16633  `async def _cb_pick(self, i)`
-    - L16659  `async def _cb_back(self, i)`
-- L16664  `class LogLevelPanelV2(LayoutView)`
-    - L16681  `def __init__(self, u, g, level_key)`
-    - L16687  `async def interaction_check(self, i)`
-    - L16690  `async def render_to(self, interaction, *, edit)`
-    - L16722  `async def _cb_pick_channel(self, i)`
-    - L16753  `async def _cb_toggle(self, i)`
-    - L16766  `async def _cb_back(self, i)`
-- L16771  `class LogsEventRoutingPanelV2(LayoutView)`
-    - L16775  `def __init__(self, u, g, cat)`
-    - L16781  `async def interaction_check(self, i)`
-    - L16784  `async def render_to(self, interaction, *, edit)`
-    - L16830  `async def _cb_cat(self, i)`
-    - L16837  `async def _cb_event(self, i)`
-    - L16863  `async def _cb_back(self, i)`
-- L16868  `class LogsCategoriesPanelV2(LayoutView)`
-    - L16871  `def __init__(self, u, g)`
-    - L16876  `async def interaction_check(self, i)`
-    - L16879  `async def render_to(self, interaction, *, edit)`
-    - L16937  `async def _cb_select(self, i)`
-    - L16945  `async def _cb_back(self, i)`
-- L16954  `class LogsEventsPanelV2(LayoutView)`
-    - L16961  `def __init__(self, u, g, category)`
-    - L16967  `async def interaction_check(self, i)`
-    - L16970  `async def render_to(self, interaction, *, edit)`
-    - L17044  `async def _cb_pick_cat(self, i)`
-    - L17052  `async def _cb_pick_events(self, i)`
-    - L17073  `async def _cb_change_cat(self, i)`
-    - L17077  `async def _cb_back(self, i)`
-- L17086  `class LogsExclusionsPanelV2(LayoutView)`
-    - L17093  `def __init__(self, u, g, selected_event)`
-    - L17100  `async def interaction_check(self, i)`
-    - L17103  `async def render_to(self, interaction, *, edit)`
-    - L17188  `async def _cb_pick_cat(self, i)`
-    - L17192  `async def _cb_change_cat(self, i)`
-    - L17196  `async def _cb_pick_event(self, i)`
-    - L17200  `async def _cb_pick_roles(self, i)`
-    - L17212  `async def _cb_change_event(self, i)`
-    - L17216  `async def _cb_back(self, i)`
-- L17234  `class ProtPanelV2(LayoutView)`
-    - L17237  `def __init__(self, u, g)`
-    - L17242  `async def interaction_check(self, i)`
-    - L17245  `async def render_to(self, interaction, *, edit)`
-    - L17285  `async def _cb_sel(self, interaction)`
-    - L17291  `async def _cb_back(self, i)`
-- L17297  `class ProtDetailV2(LayoutView)`
-    - L17300  `def __init__(self, u, g, prot)`
-    - L17307  `async def interaction_check(self, i)`
-    - L17310  `async def render_to(self, interaction, *, edit)`
-    - L17494  `async def _cb_toggle(self, i)`
-    - L17500  `async def _cb_config(self, i)`
-    - L17522  `async def _cb_sanction(self, i)`
-    - L17541  `async def _cb_log(self, i)`
-    - L17565  `async def _cb_back(self, i)`
-- L17574  `class ImageConfigPanelV2(LayoutView)`
-    - L17577  `def __init__(self, u, g)`
-    - L17582  `async def interaction_check(self, i)`
-    - L17585  `async def render_to(self, interaction, *, edit)`
-    - L17637  `async def _cb_select(self, i)`
-    - L17641  `async def _cb_allow_all(self, i)`
-    - L17645  `async def _cb_block_all(self, i)`
-    - L17649  `async def _cb_back(self, i)`
-- L17659  `class BadwordsConfigPanelV2(LayoutView)`
-    - L17662  `def __init__(self, u, g)`
-    - L17667  `async def interaction_check(self, i)`
-    - L17671  `def _fmt_list(items, *, max_chars)` @staticmethod
-    - L17679  `async def render_to(self, interaction, *, edit)`
-    - L17774  `async def _cb_add(self, i)`
-    - L17779  `async def _cb_remove(self, i)`
-    - L17784  `async def _cb_clear(self, i)`
-    - L17790  `async def _cb_wl_add(self, i)`
-    - L17795  `async def _cb_wl_remove(self, i)`
-    - L17800  `async def _cb_wl_clear(self, i)`
-    - L17806  `async def _cb_thresholds(self, i)`
-    - L17819  `async def _cb_sanction_action(self, i)`
-    - L17825  `async def _cb_back(self, i)`
-- L17835  `class _BadwordsAddListModal(Modal)`
-    - L17845  `def __init__(self, g, u, *, key, title_text)`
-    - L17852  `async def on_submit(self, i)`
-- L17880  `class _BadwordsRemoveListModal(Modal)`
-    - L17890  `def __init__(self, g, u, *, key, title_text)`
-    - L17897  `async def on_submit(self, i)`
-- L17906  `class _BadwordsThresholdsModal(Modal)`
-    - L17926  `def __init__(self, g, u)`
-    - L17932  `async def on_submit(self, i)`
-- L17952  `class _BadwordsSanctionActionView(LayoutView)`
-    - L17955  `def __init__(self, u, g)`
-    - L17960  `async def interaction_check(self, i)`
-    - L17963  `async def render_to(self, interaction, *, edit)`
-    - L18013  `async def _set(self, i, action)`
-    - L18019  `async def _back(self, i)`
-- L18027  `class LinkConfigPanelV2(LayoutView)`
-    - L18030  `def __init__(self, u, g)`
-    - L18035  `async def interaction_check(self, i)`
-    - L18038  `async def render_to(self, interaction, *, edit)`
-    - L18076  `async def _cb_add_dom(self, i)`
-    - L18090  `async def _cb_clear_wl(self, i)`
-    - L18094  `async def _cb_add_ch(self, i)`
-    - L18127  `async def _cb_clear_ch(self, i)`
-    - L18131  `async def _cb_back(self, i)`
-- L18137  `class AddDomainModal(Modal)`
-    - L18145  `def __init__(self, g, u)`
-    - L18150  `async def on_submit(self, i)`
-- L18198  `class NumberConfigModal(Modal)`
-    - L18201  `def __init__(self, g, u, key)`
-    - L18219  `async def on_submit(self, i)`
-- L18311  `class ActionConfigPanelV2(LayoutView)`
-    - L18314  `def __init__(self, u, g, key)`
-    - L18320  `async def interaction_check(self, i)`
-    - L18323  `def _get_action_key(self)`
-    - L18326  `def _get_duration_key(self)`
-    - L18329  `def _get_default_action(self)`
-    - L18332  `def _get_default_duration(self)`
-    - L18335  `async def render_to(self, interaction, *, edit)`
-    - L18394  `async def _set(self, i, act)`
-    - L18400  `async def _cb_duration(self, i)`
-    - L18403  `async def _cb_back(self, i)`
-- L18409  `class DurationConfigModal(Modal)`
-    - L18412  `def __init__(self, g, u, key)`
-    - L18421  `async def on_submit(self, i)`
-- L18434  `class AltConfigPanelV2(LayoutView)`
-    - L18437  `def __init__(self, u, g)`
-    - L18442  `async def interaction_check(self, i)`
-    - L18445  `async def render_to(self, interaction, *, edit)`
-    - L18514  `async def _cb_toggle(self, i)`
-    - L18519  `async def _cb_cycle_action(self, i)`
-    - L18530  `async def _cb_toggle_auto(self, i)`
-    - L18537  `async def _cb_conf(self, i)`
-    - L18540  `async def _cb_scan(self, i)`
-    - L18560  `async def _cb_view(self, i)`
-    - L18567  `async def _cb_back(self, i)`
-- L18573  `class AltConfidenceModal(Modal)`
-    - L18581  `def __init__(self, g, u)`
-    - L18586  `async def on_submit(self, i)`
-- L18609  `class AltScanResultsPanelV2(LayoutView)`
-    - L18612  `def __init__(self, u, g, detected)`
-    - L18620  `async def interaction_check(self, i)`
-    - L18623  `def _build(self)`
-    - L18675  `async def render_to(self, interaction, *, edit)`
-    - L18679  `async def render_after_defer(self, interaction)`
-    - L18683  `async def _cb_prev(self, i)`
-    - L18688  `async def _cb_next(self, i)`
-    - L18694  `async def _cb_kick70(self, i)`
-    - L18700  `async def _cb_ban80(self, i)`
-    - L18706  `async def _cb_back(self, i)`
-- L18711  `class ConfirmerIsolementV2(LayoutView)`
-    - L18717  `def __init__(self, u, g, cibles, genre)`
-    - L18733  `async def interaction_check(self, i)`
-    - L18739  `def _fin(self, texte, couleur)`
-    - L18743  `async def _annuler(self, i)`
-    - L18747  `async def _confirmer(self, i)`
-- L18778  `class AltDetectionsPanelV2(LayoutView)`
-    - L18781  `def __init__(self, u, g, alts)`
-    - L18789  `async def interaction_check(self, i)`
-    - L18792  `async def render_to(self, interaction, *, edit)`
-    - L18849  `async def _cb_prev(self, i)`
-    - L18854  `async def _cb_next(self, i)`
-    - L18860  `async def _cb_clear(self, i)`
-    - L18876  `async def _cb_back(self, i)`
-- L18881  `class SuspectScanPanelV2(LayoutView)`
-    - L18884  `def __init__(self, u, g, suspects, bots)`
-    - L18893  `async def interaction_check(self, i)`
-    - L18896  `async def scan_members(self)`
-    - L18902  `def _build(self)`
-    - L18962  `async def render_to(self, interaction, *, edit)`
-    - L18966  `async def render_after_defer(self, interaction)`
-    - L18970  `async def _cb_prev(self, i)`
-    - L18975  `async def _cb_next(self, i)`
-    - L18981  `async def _cb_rescan(self, i)`
-    - L18987  `async def _cb_kick_crit(self, i)`
-    - L18993  `async def _cb_kick_bots(self, i)`
-    - L18998  `async def _cb_kick_all(self, i)`
-    - L19005  `async def _cb_close(self, i)`
-- L19010  `class SuspectScanPanel`
-    - L19012  `def __init__(self, u, g)`
-    - L19021  `async def scan_members(self)`
-- L19249  `class ModerationPanelV2(LayoutView)`
-    - L19252  `def __init__(self, u, g)`
-    - L19259  `async def interaction_check(self, i)`
-    - L19262  `async def render_to(self, interaction, *, edit)`
-    - L19334  `async def _open_channel_picker(self, interaction, key, label)`
-    - L19346  `async def _open_role_picker(self, interaction, key, label)`
-    - L19358  `async def _cb_set_logs(self, i)`
-    - L19361  `async def _cb_set_warn(self, i)`
-    - L19364  `async def _cb_set_mute(self, i)`
-    - L19367  `async def _cb_set_inf(self, i)`
-    - L19370  `async def _cb_set_clear(self, i)`
-    - L19373  `async def _cb_set_direction(self, i)`
-    - L19377  `async def _cb_back(self, i)`
-- L19391  `class ImmunePanelV2(LayoutView)`
-    - L19394  `def __init__(self, u, g)`
-    - L19399  `async def interaction_check(self, i)`
-    - L19402  `async def render_to(self, interaction, *, edit)`
-    - L19463  `async def _cb_add_role(self, i)`
-    - L19509  `async def _cb_add_user(self, i)`
-    - L19559  `async def _cb_add_chan(self, i)`
-    - L19606  `async def _cb_remove(self, i)`
-    - L19610  `async def _cb_clear(self, i)`
-    - L19622  `async def _cb_back(self, i)`
-- L19628  `class ImmuneRemoveViewV2(LayoutView)`
-    - L19631  `def __init__(self, u, g)`
-    - L19636  `async def interaction_check(self, i)`
-    - L19639  `async def render_to(self, interaction, *, edit)`
-    - L19692  `async def _cb_role(self, i)`
-    - L19701  `async def _cb_user(self, i)`
-    - L19709  `async def _cb_chan(self, i)`
-    - L19717  `async def _cb_back(self, i)`
-- L19722  `class PaginatedImmuneRemoveView(LayoutView)`
-    - L19736  `def __init__(self, u, g, kind, items, page)`
-    - L19741  `async def interaction_check(self, i)`
-    - L19744  `async def render_to(self, i, *, edit)`
-    - L19790  `async def _retirer(self, i, item_id)`
-- L20392  `class V2GenericChannelPicker(LayoutView)`
-    - L20412  `def __init__(self, u, g, *, config_key, return_panel_factory, title, description, color, channel_types, sub_dict_key, save_fn)`
-    - L20437  `async def interaction_check(self, i)`
-    - L20440  `async def _save(self, channel_id)`
-    - L20453  `async def _return_to_parent(self, i)`
-    - L20463  `def _build(self)`
-    - L20526  `async def render_to(self, interaction, *, edit)`
-- L20530  `class V2GenericRolePicker(LayoutView)`
-    - L20536  `def __init__(self, u, g, *, config_key, return_panel_factory, title, description, color, sub_dict_key, save_fn)`
-    - L20555  `async def interaction_check(self, i)`
-    - L20558  `async def _save(self, role_id)`
-    - L20571  `async def _return_to_parent(self, i)`
-    - L20581  `def _build(self)`
-    - L20642  `async def render_to(self, interaction, *, edit)`
-- L20759  `class DossierCompromisBouton(discord.ui.DynamicItem[Button])`
-    - L20761  `def __init__(self, act, uid)`
-    - L20767  `async def from_custom_id(cls, interaction, item, match)` @classmethod
-    - L20770  `async def callback(self, i)`
-- L20774  `class DossierCompromisAncien(discord.ui.DynamicItem[Button])`
-    - L20777  `def __init__(self, act)`
-    - L20781  `async def from_custom_id(cls, interaction, item, match)` @classmethod
-    - L20784  `async def callback(self, i)`
-- L20856  `class TicketMainPanelV2(LayoutView)`
-    - L20859  `def __init__(self, u, g)`
-    - L20864  `async def interaction_check(self, i)`
-    - L20867  `async def render_to(self, interaction, *, edit)`
-    - L20939  `async def _cb_hub(self, i)`
-    - L20960  `async def _cb_staff(self, i)`
-    - L20972  `async def _cb_logs(self, i)`
-    - L20985  `async def _cb_blacklist(self, i)`
-    - L20998  `async def _cb_new(self, i)`
-    - L21001  `async def _cb_edit(self, i)`
-    - L21010  `async def _cb_refresh(self, i)`
-    - L21014  `async def _cb_back(self, i)`
-- L21025  `class NewPanelModal(Modal)`
-    - L21029  `def __init__(self, u, g)`
-    - L21034  `async def on_submit(self, i)`
-- L21046  `class EditPanelSelectViewV2(LayoutView)`
-    - L21049  `def __init__(self, u, g, opts)`
-    - L21055  `async def interaction_check(self, i)`
-    - L21058  `def _build(self)`
-    - L21079  `async def render_to(self, interaction, *, edit)`
-    - L21083  `async def _cb_select(self, i)`
-    - L21088  `async def _cb_back(self, i)`
-- L21093  `class PanelEditViewV2(LayoutView)`
-    - L21096  `def __init__(self, u, g, pid)`
-    - L21102  `async def interaction_check(self, i)`
-    - L21105  `async def _get_panel(self)`
-    - L21109  `async def render_to(self, interaction, *, edit)`
-    - L21198  `async def _safe_error(self, i, ex)`
-    - L21210  `async def _cb_cat(self, i)`
-    - L21232  `async def _cb_staff(self, i)`
-    - L21254  `async def _cb_qs(self, i)`
-    - L21260  `async def _cb_max(self, i)`
-    - L21266  `async def _cb_apparence(self, i)`
-    - L21273  `async def _cb_welcome(self, i)`
-    - L21280  `async def _cb_blacklist(self, i)`
-    - L21286  `async def _cb_send(self, i)`
-    - L21322  `async def _cb_delete(self, i)`
-    - L21334  `async def _cb_back(self, i)`
-- L21350  `class PanelAppearanceModalSimple(Modal)`
-    - L21352  `def __init__(self, u, g, pid)`
-    - L21367  `async def on_submit(self, i)`
-- L21387  `class WelcomeMessageModalSimple(Modal)`
-    - L21389  `def __init__(self, u, g, pid)`
-    - L21398  `async def on_submit(self, i)`
-- L21419  `class PanelBlacklistView(LayoutView)`
-    - L21424  `def __init__(self, u, g, pid, page)`
-    - L21428  `async def interaction_check(self, i)`
-    - L21431  `async def _liste(self)`
-    - L21435  `async def _ecrire(self, liste)`
-    - L21442  `def _nom(self, uid)`
-    - L21446  `async def render_to(self, i, *, edit, confirmer)`
-    - L21519  `async def _cb_ajout(self, i, sel)`
-    - L21533  `async def _cb_retrait(self, i, sel)`
-- L21539  `class SetMaxModal(Modal)`
-    - L21542  `def __init__(self, u, g, pid)`
-    - L21548  `async def on_submit(self, i)`
-- L21559  `class PanelQsView(LayoutView)`
-    - L21563  `def __init__(self, u, g, pid)`
-    - L21567  `async def interaction_check(self, i)`
-    - L21570  `async def render_to(self, i, *, edit)`
-- L21602  `class AddQModal(Modal)`
-    - L21606  `def __init__(self, u, g, pid)`
-    - L21612  `async def on_submit(self, i)`
-- L21621  `class SendPanelPaginatedView(LayoutView)`
-    - L21628  `def __init__(self, u, g, pid, page)`
-    - L21643  `async def interaction_check(self, i)`
-    - L21646  `def _build(self)`
-    - L21709  `async def render_to(self, interaction, *, edit)`
-    - L21713  `async def _prev(self, i)`
-    - L21726  `async def _next(self, i)`
-    - L21739  `async def _back(self, i)`
-    - L21756  `async def _select_cb(self, i)`
-- L21911  `class _Etape`
-    - L21916  `def __init__(self, nom)`
-    - L21919  `def __enter__(self)`
-    - L21922  `def __exit__(self, type_, ex, tb)`
-- L23995  `class BoostSupportButton(discord.ui.DynamicItem[discord.ui.Button])`
-    - L23997  `def __init__(self)`
-    - L24003  `async def from_custom_id(cls, interaction, item, match)` @classmethod
-    - L24006  `async def callback(self, i)`
-- L27389  `class LogsCategoriesSelect(Select)`
-    - L27390  `def __init__(self, current)`
-    - L27411  `async def callback(self, ix)`
-- L27660  `class ClearAllConfirmView(LayoutView)`
-    - L27663  `def __init__(self, user_id, channel_id)`
-    - L27677  `async def _confirm(self, i)`
-    - L27698  `async def _cancel(self, i)`
-- L28027  `class UnwarnSelectView(View)`
-    - L28028  `def __init__(self, membre, opts)`
-- L28032  `class UnwarnSelect(Select)`
-    - L28033  `def __init__(self, membre, opts)`
-    - L28037  `async def callback(self, i)`
-- L28509  `class _StaffSanctionModal(discord.ui.Modal)`
-    - L28515  `def __init__(self, action, target)`
-    - L28536  `async def on_submit(self, modal_i)`
-- L28784  `class _CasierManageView(LayoutView)`
-    - L28788  `def __init__(self, staff, member, guild, rows, contenu)`
-    - L28816  `async def interaction_check(self, i)`
-    - L28845  `async def _reafficher(self, i, note)`
-    - L28849  `async def _on_select(self, i)`
-    - L28862  `async def _on_clear_all(self, i)`
-- L32786  `class LangSelectButton(discord.ui.DynamicItem[Button])`
-    - L32794  `def __init__(self, lang)`
-    - L32806  `async def from_custom_id(cls, interaction, item, match)` @classmethod
-    - L32809  `async def callback(self, i)`
-- L32813  `class RobloxPingButton(discord.ui.DynamicItem[discord.ui.Button])`
-    - L32836  `def __init__(self, cle)`
-    - L32844  `async def from_custom_id(cls, interaction, item, match)` @classmethod
-    - L32847  `async def callback(self, i)`
-- L32865  `class AccueilLangueView(discord.ui.View)`
-    - L32884  `def __init__(self)`
-    - L32890  `async def _cb_langue(self, i, _b)` @discord.ui.button
-- L33579  `class _ResumeurPasserelle(logging.Filter)`
-    - L33582  `def __init__(self)`
-    - L33587  `def filter(self, record)`
+- L153  `async def _global_view_on_error(self, interaction, error, item)`
+- L171  `async def _global_modal_on_error(self, interaction, error)`
+- L224  `async def _loop_heartbeat()`
+- L238  `def _stall_watchdog()`
+- L298  `def _logerr(where, ex, *, context, guild_id)`
+- L334  `def _matches_keyword_filter(title, keyword_filter)`
+- L354  `def _compter_serie(msg)`
+- L428  `def _insulte_visee(msg, parle)`
+- L588  `def get_db()`
+- L649  `def _get_config_lock(gid)`
+- L678  `def now()`
+- L681  `def _evict_if_big(d, max_keys)`
+- L730  `async def _mp_une_fois(membre, cle, texte, heures)`
+- L746  `def check_rate_limit(guild_id, user_id, action)`
+- L768  `def is_blacklisted(user_id)`
+- L777  `def blacklist_user(user_id, duration_minutes, reason)`
+- L785  `def sanitize_input(text, max_length)`
+- L804  `def validate_id(value)`
+- L816  `def detect_injection_attempt(text)`
+- L836  `async def log_security_event(guild_id, user_id, action, details)`
+- L848  `def validate_config_value(key, value)`
+- L875  `async def db_init()`
+- L1283  `async def get_strikes(gid, uid)`
+- L1323  `async def set_strikes(gid, uid, count, last_at)`
+- L1349  `async def _d4_migrate_blob_to_tables()`
+- L1410  `def _avatar_cache_set(key, url)`
+- L1423  `async def get_cached_avatar(platform, username)`
+- L1449  `async def save_avatar_cache(platform, username, avatar_url)`
+- L1465  `async def fetch_avatar_url(platform, username, session)`
+- L1539  `async def _lire_config(gid)`
+- L1574  `async def db_get(gid)`
+- L1582  `async def db_set(gid, key, val)`
+- L1669  `async def cfg(gid)`
+- L1862  `def _invalidate_immunity(gid)`
+- L1870  `async def _get_immunity(gid)`
+- L1896  `async def is_immune(m, key, channel)`
+- L1953  `async def is_channel_immune(guild_id, channel_id)`
+- L1964  `async def is_ticket_channel(channel)`
+- L2010  `async def _is_chatty_channel(channel, *, allow_announce)`
+- L2085  `async def is_fully_immune(member)`
+- L2159  `def _is_sensitive_role(role)`
+- L2196  `def _radie_pseudo(membre)`
+- L2211  `def _radie_overwrite()`
+- L2244  `async def _verrouiller_salons_radie(guild, role, membre_id)`
+- L2274  `async def _radier_membre(guild, membre, auteur, raison)`
+- L2425  `async def _autorise_radiation(i, cible)`
+- L2474  `def _refus_radiation(guild, membre, auteur)`
+- L2505  `def _compte_rendu_radiation(membre, res)`
+- L2550  `async def _journal_radiation(guild, membre, auteur, raison, res)`
+- L2598  `async def _panneau_ticket_serveur(guild)`
+- L2619  `async def _recours_deja_utilise(guild_id, user_id)`
+- L2718  `async def _ouvrir_ticket_recours(guild, membre, pourquoi, conteste)`
+- L2933  `async def _fermer_recours(i, raison)`
+- L2949  `async def _carte_recours_decidee(message, ligne)`
+- L2966  `async def _prevenir_radie(guild, user_id, texte)`
+- L2977  `async def _envoyer_recours_radie(guild, membre, raison)`
+- L3010  `async def off_on_cmd(i, membre, raison)` @off_group.command
+- L3040  `async def radier_menu_contextuel(i, membre)` @bot.tree.context_menu
+- L3083  `async def _fiche_sanction(table, guild_id, user_id, db)`
+- L3111  `async def _confier_roles(table, guild_id, user_id, roles_ids, sans, db)`
+- L3129  `def _refus_rang_radie(guild, membre, auteur, saved_ids, geste, membre_id)`
+- L3156  `async def _lever_radiation(guild, membre, auteur, raison)`
+- L3228  `async def off_off_cmd(i, membre, raison)` @off_group.command
+- L3259  `async def off_list_cmd(i)` @off_group.command
+- L3301  `async def _bouclier_lire(gid)`
+- L3313  `async def _bouclier_ecrire(gid, donnees)`
+- L3325  `async def _shield_lock(guild)`
+- L3364  `async def _shield_unlock(guild)`
+- L3396  `def _refus_bouclier(i)`
+- L3410  `async def bouclier_on(i)` @bouclier_group.command
+- L3441  `async def bouclier_off(i)` @bouclier_group.command
+- L3471  `async def bouclier_secours(i)` @bouclier_group.command
+- L3552  `def _signalement_recent(registre, gid, uid, delai)`
+- L3556  `def _signalement_note(registre, gid, uid)`
+- L3571  `async def signaler_cmd(i, description)` @bot.tree.command
+- L3619  `async def signaler_vocal_cmd(i, membre, raison)` @bot.tree.command
+- L3723  `async def _purge_old_sec_reports(channel)`
+- L3742  `async def _post_weekly_security_report(guild)`
+- L3822  `async def weekly_security_report()` @tasks.loop
+- L3834  `async def _before_weekly_security_report()` @weekly_security_report.before_loop
+- L3839  `def _quarantaine_overwrite()`
+- L3852  `async def _verrouiller_salons_quarantaine(guild, role)`
+- L3874  `def _lancer_verrou_quarantaine(guild, role)`
+- L3880  `async def _ensure_quarantine_role(guild)`
+- L3909  `async def _noter_isolement(guild_id, user_id, roles_ids, raison, genre, par)`
+- L3938  `async def _isolement_actif(guild_id, user_id)`
+- L3954  `async def _rendre_roles_isolement(member)`
+- L3980  `async def _record_infraction(guild_id, user_id, typ, reason, duration)`
+- L4011  `async def _recidivism_log_escalation(guild, member, tier, palier, reason)`
+- L4055  `def _mot_entier(terme)`
+- L4062  `def _scan_red_keywords(text, extra)`
+- L4084  `def _scan_profile_text(*texts)`
+- L4108  `async def _flag_dangerous_profile(member, *, on_join)`
+- L4163  `async def _kick_young_account(member, log_reason)`
+- L4209  `async def isolate_member(member, reason, *, actor)`
+- L4323  `async def lift_isolation(member)`
+- L4372  `async def _check_staff_sanction_rate(g, actor_id, action)`
+- L4413  `async def sanction(m, action, dur, reason, g, actor_id)`
+- L4545  `async def _infractions_recap(guild_id, user_id, limit, lang)`
+- L4595  `async def _dm_sanction(member, guild, action_label, reason, duration_text)`
+- L4655  `async def _announce_sanction_public(interaction, embed)`
+- L4685  `async def log_staff_action(guild_id, actor_id, target_id, action, detail, surface)`
+- L4727  `async def _badword_strike(msg, c)`
+- L4867  `def _carte_protection_permise(gid, key, uid, t)`
+- L4884  `async def send_log(g, key, m, msg, reason, extra)`
+- L5035  `def get_gif_type(msg)`
+- L5047  `def check_badwords(ct, words, whitelist)`
+- L5062  `def _strip_media_urls(text)`
+- L5085  `def check_link(ct, wl)`
+- L5154  `def check_invite(ct)`
+- L5168  `def _normalize_for_scan(text)`
+- L5199  `def _deobfuscate_for_insult(text)`
+- L5221  `def analyse_phishing(ct)`
+- L5249  `def check_phishing(ct)`
+- L5254  `def check_scam(ct)`
+- L5284  `def check_caps(ct, pct)`
+- L5289  `def check_mass_mention(msg, max_mentions)`
+- L5296  `def check_image(msg, allowed)`
+- L5342  `def _msg_has_image(msg)`
+- L5375  `def check_image_scam(msg)`
+- L5434  `def _spam_content_kind(guild_id, user_id, content)`
+- L5475  `async def check_spam(msg, mx, intv)`
+- L5493  `def _register_protection_strike(guild_id, user_id, kind)`
+- L5516  `async def _warn_calm_down(channel, text)`
+- L5541  `async def _trust_block_notice(msg, kind, *, fresh_escalate, fresh_minutes)`
+- L5590  `def _msg_url_slugs(text)`
+- L5604  `def _gif_texte(msg, ct)`
+- L5618  `def _sujet_interdit(c, texte, msg)`
+- L5652  `async def _offense_tick(guild, member, channel)`
+- L5699  `async def _burst_timeout(guild, member, channel, count, window)`
+- L5723  `async def _isoler_par_securite(member, guild, channel, reason, heures)`
+- L5757  `async def _lockdown_role_mentions(guild)`
+- L5791  `async def _ocr_scam_check(msg, immune, lire)`
+- L5869  `async def _texte_image_interdit(c, text)`
+- L5885  `async def _retirer_si_texte_interdit(msg, text, ou)`
+- L5906  `async def _ocr_gif_lien(msg)`
+- L5946  `async def _retirer_image_arnaque(msg, titre, detail, immune)`
+- L5960  `async def _ocr_alert_compromised(msg, detail)`
+- L5987  `def _lecteur_partage(lecteurs)`
+- L6008  `async def _supprimer_filtre(msg)`
+- L6021  `async def _retirer_fichier_dangereux(msg)`
+- L6047  `def _spawn_bg_scan(coro)`
+- L6060  `async def _nsfw_image_check(msg, lire)`
+- L6150  `def _email_perso(ct)`
+- L6156  `async def _doxxing_check(msg, ct)`
+- L6212  `async def _note_attack(msg, kind, term)`
+- L6265  `async def _harass_respond(guild, victim_id, aggressor_ids, mode, aggressor)`
+- L6297  `async def _cumulative_insult_sanction(msg, iterm)`
+- L6302  `async def _cumulative_offense_sanction(guild, member, channel, label)`
+- L6396  `def check_channel_cfg(msg, conf)`
+- L6424  `async def get_ticket(ch_id)`
+- L6437  `async def count_user_tickets(g, uid, pid)`
+- L6461  `def _ticket_event_parts(lt, user, extra, closer)`
+- L6485  `def _ticket_timeline_line(kind, actor_id, detail, ts)`
+- L6502  `def _staff_ou_plus(g, membre, c)`
+- L6530  `def _a_la_tete(g, membre, c)`
+- L6537  `def _direction_ou_plus(g, membre, c)`
+- L6549  `async def _au_journal(g, categorie, type_, texte, **kw)`
+- L6554  `async def _journal_rellseas(g, texte, membre_id, auteur_id)`
+- L6568  `async def _questions_hook(msg)`
+- L6578  `async def _ticket_ouvert(g, ticket_id)`
+- L6593  `async def _decision_recrutement(g, ticket_id, auteur, accepte, motif, *, annonce, mp)`
+- L6659  `async def _accueil_recrutement(g, ch, tid, candidat_id, pnl, pid)`
+- L6677  `async def _recrutement_extras(g, tid, pris_par)`
+- L6697  `async def _liste_noire_recrutement(g, membre_id, ajouter)`
+- L6721  `async def _role_clan_de(g)`
+- L6726  `async def _metiers_catalogue(g)`
+- L6731  `async def _fiche_recue(i, pid, champs, reponses)`
+- L6753  `async def _peut_decider(i)`
+- L6760  `async def _action_ticket_fermer(g, auteur, d)`
+- L6774  `async def _action_candidature(g, auteur, d)`
+- L6786  `async def _cible_site(g, auteur, membre_id, c)`
+- L6809  `async def _retirer_du_clan(g, auteur, membre_id, c, role)`
+- L6830  `async def _action_clan_ajouter(g, auteur, d)`
+- L6856  `async def _action_clan_prevenir(g, auteur, d)`
+- L6916  `async def _action_clan_rappel_annuler(g, auteur, d)`
+- L6925  `async def _action_clan_retirer(g, auteur, d)`
+- L6933  `async def _action_clan_retirer_lot(g, auteur, d)`
+- L6957  `async def _inscrire_sanction(g, membre_id, mod_id, typ, raison, duree)`
+- L6966  `async def _action_moderer(g, auteur, d)`
+- L7041  `async def _action_question(g, auteur, d)`
+- L7056  `async def _action_alerte_geree(g, auteur, d)`
+- L7074  `async def _action_fiche_retirer(g, auteur, d)`
+- L7085  `async def _apres_casier(g, membres, *, lever_mute, motif)`
+- L7105  `async def _action_sanction_retirer(g, auteur, d)`
+- L7137  `async def _action_casier_effacer(g, auteur, d)`
+- L7157  `async def _action_casier_serveur(g, auteur, d)`
+- L7180  `async def _action_casier_restaurer(g, auteur, d)`
+- L7193  `async def _action_debannir(g, auteur, d)`
+- L7209  `async def _dates_de_depart(guild_id)`
+- L7227  `async def amnistie_task()` @tasks.loop
+- L7251  `async def _amnistie_attente()` @amnistie_task.before_loop
+- L7256  `async def _action_suggestion_repondre(g, auteur, d)`
+- L7266  `async def _action_suggestion_retirer(g, auteur, d)`
+- L7270  `async def _action_sondage_retirer(g, auteur, d)`
+- L7287  `async def nettoyage_site_task()` @tasks.loop
+- L7303  `async def _nettoyage_site_attente()` @nettoyage_site_task.before_loop
+- L7308  `async def _salon_alertes_site(g)`
+- L7314  `async def _epargne_vigilance(g, membre_id)`
+- L7320  `def _heure_courte(t)`
+- L7327  `def _carte_vigilance(g, membre_id, incidents, points, evenements)`
+- L7345  `def _vue_alerte(membre_id)`
+- L7357  `async def _carte_alerte_decidee(message, ligne)`
+- L7413  `async def _alerte_securite_site(g, membre, raison, suspendu)`
+- L7432  `async def _alerte_forte_site(g, titre, texte)`
+- L7510  `async def _anciens_salons(g, c)`
+- L7521  `async def _salon_de_logs_pur(ch)`
+- L7534  `async def _menu_logs(g, c)`
+- L7568  `async def _salon_tableau(g)`
+- L7626  `async def _logs_direction_seule(g)`
+- L7682  `async def _passer_logs_sur_site(g)`
+- L7840  `async def _salon_transcripts_rellseas(g, c, ref)`
+- L7872  `def _heure_paris(d)`
+- L7878  `def _nom_et_id(g, uid)`
+- L7888  `async def _dossier_recrutement(ch, g, tid, uid, panel_name, answers, events)`
+- L7944  `def _vue_recrutement(g, tid, uid, qui, panel_name, answers, events, participants, nom_fichier, url)`
+- L7979  `async def send_ticket_log(g, lt, user, ti, extra, closer, ch)`
+- L8228  `def _ticket_hours_status()`
+- L8248  `def _ticket_hours_blocked_message(now_label, next_label)`
+- L8257  `async def _ticket_hours_allows(user_id, guild)`
+- L8283  `async def _access_gate_reason(member, c)`
+- L8311  `async def count_user_tickets_today(g, uid)`
+- L8325  `async def _update_support_status(g, c)`
+- L8351  `async def _apply_night_slowmode(g, c)`
+- L8389  `async def server_controls_task()` @tasks.loop
+- L8407  `async def _server_controls_task_wait()` @server_controls_task.before_loop
+- L8416  `async def gdpr_retention_task()` @tasks.loop
+- L8470  `async def _gdpr_retention_wait()` @gdpr_retention_task.before_loop
+- L8481  `async def _salon_panneau_tickets(g)`
+- L8496  `async def _ranger_tickets(g, cat)`
+- L8528  `async def _categorie_tickets(g)`
+- L8560  `async def _contexte_ticket(g, uid, tid)`
+- L8581  `async def _vue_dossier_ticket(g, tid, uid, panel_name, ans, ouvert, pris_par)`
+- L8616  `async def _vue_dossier_ticket_de(g, tk, pris_par)`
+- L8633  `async def _rafraichir_dossier(g, ch, tk, pris_par)`
+- L8657  `def _ticket_sans_limite(g, membre, c)`
+- L8663  `def _equipe_direction(g, c)`
+- L8676  `def _au_dessus_de_la_direction(g, c)`
+- L8690  `def _equipe_du_type(g, c, pid)`
+- L8704  `async def _droit_ticket(i, tk, c)`
+- L8722  `def _equipe_disponible(g, c, tk)`
+- L8741  `def _equipe_a_voir(g, c, pid, ouvreur_id)`
+- L8759  `def _carte_equipe(texte)`
+- L8765  `def _echec(ex, quoi, qui)`
+- L8771  `async def _faire_voir_ticket(g, fil, pid, ouvreur_id, carte, ticket)`
+- L8847  `def _faire_voir_plus_tard(g, fil, pid, ouvreur_id, tid)`
+- L8860  `async def _verifier_tickets_ouverts(g, carte, cle)`
+- L8923  `async def create_ticket(i, pid, ans)`
+- L8936  `async def _create_ticket_corps(i, pid, ans)`
+- L9083  `def _vue_ticket_message(texte, couleur)`
+- L9090  `def _carte_ticket(titre, texte, couleur, avatar)`
+- L9172  `async def _ticket_ouvrir(i, pid)`
+- L9316  `def _types_tickets(cfg_guild, tous)`
+- L9335  `def _resume_type(pnl)`
+- L9343  `async def _build_ticket_hub_view(guild)`
+- L9516  `async def _rafraichir_hub_tickets(g, types, sauf)`
+- L9673  `async def _build_ticket_panel_view(guild, pid)`
+- L9738  `async def _ticket_toggle_click(i, pid)`
+- L9797  `def _resolve_transcript_text(text, guild)`
+- L9835  `def _cartes_v2(composants, guild)`
+- L9901  `def _texte_v2(composants, guild, sep)`
+- L9910  `def _html_lignes_v2(lignes)`
+- L9924  `def _html_carte_v2(carte)`
+- L9942  `async def _ticket_transcript_file(ch, tid)`
+- L10027  `async def _historique_ticket(ch, plafond)`
+- L10034  `def _note_tronque(n)`
+- L10039  `def _image_sure(media)`
+- L10052  `def _message_en_donnees(m, guild)`
+- L10102  `async def _suivi_ticket(g, ticket_id)`
+- L10121  `async def _conversation_ticket(g, ticket_id)`
+- L10130  `async def _conversation_seule(g, ticket_id)`
+- L10165  `async def _render_ticket_transcript_html(ch, tid, token, base_url, titre)`
+- L10312  `async def _ticket_transcript_html(ch, tid)`
+- L10328  `def _fermer_en_fond(coro)`
+- L10337  `async def _repondre_ticket(i, texte)`
+- L10345  `async def _fermer_ticket(guild, ch, tk, closer, reason, inactif_jours, **options)`
+- L10361  `async def _garder_ticket_sans_transcript(guild, ch, tid, prevenir)`
+- L10390  `async def _fermer_ticket_corps(guild, ch, tk, closer, reason, inactif_jours, *, public, mp, prevenir)`
+- L11361  `def check_masked_links(content)`
+- L11393  `def _domaine_de_confiance(hote)`
+- L11419  `def _hote(url)`
+- L11427  `def domaine_officiel(hote)`
+- L11431  `def sans_liens_officiels(texte)`
+- L11494  `def _texte_lisible(texte)`
+- L11502  `def _hote_lisible(hote)`
+- L11513  `def _squelette(texte)`
+- L11525  `def _distance_osa(a, b)`
+- L11545  `def _domaine_enregistrable(hote)`
+- L11554  `def _service_legitime(hote)`
+- L11558  `def _imitation_de_marque(hote)`
+- L11594  `def _analyse_hote(hote)`
+- L11622  `def _domaines_pieges_cites(texte)`
+- L11635  `def _normaliser_liens(texte)`
+- L11646  `def _phrase_de_phishing(texte_min)`
+- L11650  `def _vol_de_compte_prouve(ct)`
+- L11663  `def advanced_phishing_check(content)`
+- L11705  `def advanced_scam_check(content)`
+- L11768  `def check_dangerous_file(filename)`
+- L11793  `def check_shortener(ct)`
+- L11814  `def check_qr_code_scam(content, image)`
+- L11842  `def normalize_username(name)`
+- L11858  `def levenshtein_distance(s1, s2)`
+- L11878  `def username_similarity(name1, name2)`
+- L11896  `def _nom_peut_ressembler(nom, autre)`
+- L11912  `def get_avatar_hash(member)`
+- L11918  `async def save_user_fingerprint(guild_id, member)`
+- L11939  `async def save_ban_info(guild_id, user_id, username, avatar_hash, reason)`
+- L11954  `def _alt_alerte_permise(gid, main_id, t)`
+- L11971  `async def detect_alt_account(guild, new_member)`
+- L12086  `async def save_alt_detection(guild_id, main_id, alt_id, confidence, reasons)`
+- L12100  `async def get_alt_accounts(guild_id)`
+- L12113  `async def update_alt_status(guild_id, alt_id, status, action)`
+- L12125  `async def scan_all_members_for_alts(guild)`
+- L12242  `async def _afficher_panneau(vue, interaction, edit)`
+- L12664  `def mark_welcome_raid(guild_id)`
+- L12681  `def _welcome_raid_active(guild_id)`
+- L12691  `async def _flush_welcome_raid_recap(guild_id)`
+- L12737  `def _defer_welcome_during_raid(guild_id, channel, member_id)`
+- L13008  `def _in_night_window(c)`
+- L13062  `async def _ensure_ticket_feedback_table()`
+- L13128  `def _ticket_feedback_view(gid, tid, sid)`
+- L13148  `async def _ensure_entraide_ratings_table()`
+- L13201  `async def help_cmd(i)` @bot.tree.command
+- L13402  `async def _init_sentinelle()`
+- L13420  `async def _battre_sentinelle()`
+- L13455  `async def _enfiler_billets(guildes, rel)`
+- L13541  `async def _publier_file_actualites(guildes, etiquette)`
+- L13602  `def _custom_ids_du_message(msg)`
+- L13627  `async def _migrer_panneaux_tickets(guild)`
+- L13701  `async def _bilan_sante_serveur(guild)`
+- L13761  `async def _publier_bilan_sante(guild)`
+- L13811  `async def _demonter_activite(guild)`
+- L13846  `async def _verifier_visibilite(guild)`
+- L13867  `async def _rendre_roles_au_retour(member)`
+- L13889  `async def _salons_de_logs(g, c)`
+- L13898  `async def _salons_de_flux(g, c)`
+- L13910  `async def _remplacer_salon_partout(g, ancien, nouveau)`
+- L13918  `async def _menage_unique(g)`
+- L13954  `async def menage_salons_task()` @tasks.loop
+- L13977  `async def _menage_salons_wait()` @menage_salons_task.before_loop
+- L13983  `async def salon_logs_task()` @tasks.loop
+- L13998  `async def _salon_logs_wait()` @salon_logs_task.before_loop
+- L14003  `async def _retirer_salons_combat(g)`
+- L14033  `async def _retirer_exclamations(g)`
+- L14124  `def _ids_configures(valeur, out)`
+- L14140  `def _role_supprimable(r, me, configures)`
+- L14147  `async def _retirer_fonctions_mortes(g)`
+- L14181  `async def _menage_v2(g)`
+- L14225  `async def _faq_hook(msg)`
+- L14236  `def _dans_entraide(ch, c)`
+- L14246  `async def _entraide_message(msg)`
+- L14253  `async def _entraide_effacement(payload)`
+- L14260  `async def _entraide_effacement_masse(payload)`
+- L14273  `async def _invitations_lien(invite)`
+- L14280  `async def _invitations_arrivee(membre)`
+- L14287  `async def _invitations_depart(membre)`
+- L14301  `async def _cadeaux_message(msg)`
+- L14308  `async def _cadeaux_vocal(membre, avant, apres)`
+- L14315  `async def _cadeaux_effacement(payload)`
+- L14322  `async def _cadeaux_effacement_masse(payload)`
+- L14366  `async def _actus_en_annonces(g)`
+- L14387  `def _flux_du_studio(f)`
+- L14395  `def _cle_de_suivi(reseau, f)`
+- L14402  `async def _titre_youtube(uc)`
+- L14424  `async def _flux_studio_rell(g)`
+- L14488  `async def _rattacher_flux_orphelins(g)`
+- L14518  `async def _configurer_salons(g)`
+- L14558  `def _roles_staff_et_plus(g, c)`
+- L14568  `async def _configurer_salons_v2(g)`
+- L14630  `async def _automod_invitations(g)`
+- L14676  `def _salon_des_tickets(g)`
+- L14684  `def _salon_par_nom(g, *mots, exclus)`
+- L14692  `async def _vue_aide(g, c)`
+- L14736  `async def _retirer_recherche_de_groupe(salon)`
+- L14753  `async def _salon_aide(g)`
+- L14798  `async def entraide_task()` @tasks.loop
+- L14898  `def _faq_trouves(g, c)`
+- L14907  `async def _lire_commandes(g)`
+- L14917  `async def _installer_zones(g, c)`
+- L14940  `async def _reporter_immunites(g, c)`
+- L14958  `async def _tickets_visibilite(g)`
+- L15008  `async def _retirer_equipages(g)`
+- L15038  `async def _supprimer_toutes_archives(g)`
+- L15051  `def _lecteurs_archives(g, c)`
+- L15130  `async def _installer_clan(g, c)`
+- L15147  `async def _demenager_clan(g, c)`
+- L15161  `def _faq_destinations(g, c)`
+- L15197  `async def _langue_de_membre(m)`
+- L15209  `async def giveaway_lancer(i)` @giveaway_group.command
+- L15214  `async def giveaway_gerer(i)` @giveaway_group.command
+- L15253  `async def _vocal_info(salon)`
+- L15269  `async def _vocaux_par_contexte(g)`
+- L15317  `def _installer_arret_propre()`
+- L15329  `async def _arret_propre()`
+- L15339  `async def _cadeaux_autorise(g, membre)`
+- L15344  `async def _liens_journal(g, type_, texte, **kw)`
+- L15348  `async def _cadeaux_journal(g, type_, texte, **kw)`
+- L15353  `async def cadeaux_task()` @tasks.loop
+- L15410  `async def _annonces_journal(g, type_, texte, **kw)`
+- L15415  `async def evenements_task()` @tasks.loop
+- L15427  `async def _menage_categories(g)`
+- L15469  `async def _langue_membre(i)`
+- L15476  `async def _archiver_fil(fil, titre)`
+- L15487  `async def _entraide_task_attente()` @entraide_task.before_loop
+- L15522  `async def _salon_logs_dedie(g, cle, nom)`
+- L15551  `async def _ping_social(salon)`
+- L15560  `async def _publier_social(salon, profil, embed)`
+- L15573  `async def _publier_reserve(guild, plateforme, post_id, salon, profil, embed, chemin)`
+- L15591  `async def _texte_refuse_pour(g, texte, dans, ton)`
+- L15609  `async def _texte_sondage_refuse(g, texte)`
+- L15613  `async def _texte_demande_refusee(g, texte)`
+- L15617  `async def _entraide_staff(g, membre)`
+- L15622  `async def _entraide_journal(g, type_, texte, **kw)`
+- L15628  `async def _retirer_tables_mortes()`
+- L15647  `async def _etat_public()`
+- L15722  `async def _roles_zones_manquants()`
+- L15735  `def _chemins_ids(valeur, chemin, out)`
+- L15761  `def _sante_salons(g, c)`
+- L15779  `def _porteurs_sans_direction(g, c)`
+- L15790  `def _anciens_salons_clan(g, c)`
+- L15800  `async def _recrutement_rellseas(g)`
+- L15808  `async def _boosts_au_demarrage(g)`
+- L15824  `async def _alerte_sauvegarde(titre, detail)`
+- L15831  `async def _travaux_de_demarrage()`
+- L15850  `async def _relever_actus(forcer)`
+- L15881  `async def veille_roblox_task()` @tasks.loop
+- L15901  `async def _veille_roblox_wait()` @veille_roblox_task.before_loop
+- L15935  `def _age_s(quand)`
+- L15971  `async def eclaireur_actu_task()` @tasks.loop
+- L16037  `async def _eclaireur_actu_wait()` @eclaireur_actu_task.before_loop
+- L16136  `def _capture_loop_death_cause(label, lo)`
+- L16165  `def _iter_supervised_loops()`
+- L16260  `async def task_supervisor()` @tasks.loop
+- L16291  `async def _task_supervisor_wait()` @task_supervisor.before_loop
+- L16304  `async def _membres_sanctionnes(g)`
+- L16324  `async def _metiers_membre(before, after)`
+- L16336  `async def metiers_task()` @tasks.loop
+- L16348  `async def _metiers_attente()` @metiers_task.before_loop
+- L17392  `def _resolve_event_type(value)`
+- L18466  `def get_prot_action_key(key)`
+- L18470  `def get_prot_duration_key(key)`
+- L18474  `def get_prot_default_action(key)`
+- L18478  `def get_prot_default_duration(key)`
+- L19330  `async def send_mod_log(guild, action, mod, target, reason, duration, extra)`
+- L20005  `async def load_live_state_from_db()`
+- L20028  `async def save_live_state(cache_key, guild_id, platform, username)`
+- L20051  `async def mark_live_announced(cache_key, guild_id, platform, username, message_id, live_channel_id)`
+- L20064  `async def check_live_ended(cache_key, guild_id, platform, username)`
+- L20090  `async def should_announce_live(cache_key)`
+- L20123  `def mark_live_still_active(cache_key)`
+- L20157  `def _api_warning_state_file_path()`
+- L20175  `async def _purger_commandes_globales()`
+- L20212  `def _sync_hash_file_path()`
+- L20230  `def _compute_tree_hash(tree)`
+- L20281  `def _load_api_warning_state()`
+- L20296  `def _save_api_warning_state()`
+- L20307  `def _api_retablie(guild, platform)`
+- L20314  `async def _warn_api_dead(guild, platform, reason)`
+- L20376  `async def get_webhook(channel, platform)`
+- L20402  `async def _deja_poste(channel, kw, depuis, cle)`
+- L20431  `async def webhook_send(channel, platform, embed, content, file, files, embeds, view, allowed_mentions, cle)`
+- L20840  `def _dossier_vue(uid, *, eteinte)`
+- L20851  `async def _dossier_agir(i, act, uid)`
+- L20892  `async def _dossier_traite(i, fait, uid)`
+- L20984  `async def cleanup_old_db_data()` @tasks.loop
+- L21018  `async def _cleanup_old_db_wait()` @cleanup_old_db_data.before_loop
+- L21996  `async def update_realsy_activity(guild_id, user_id)`
+- L22022  `async def _tree_dm_guard(interaction)`
+- L22037  `async def on_app_command_error(interaction, error)` @bot.tree.error
+- L22108  `async def _activite_boot()`
+- L22414  `async def on_ready()` @bot.event
+- L23209  `async def on_guild_join(guild)` @bot.event
+- L23231  `async def on_thread_create(thread)` @bot.event
+- L23244  `async def on_raw_poll_vote_add(payload)` @bot.event
+- L23261  `async def on_interaction(interaction)` @bot.event
+- L23287  `async def sync_cmd(i)` @owner_group.command
+- L23315  `async def owner_mod_stats_cmd(i, jours)` @owner_group.command
+- L23341  `async def _tix_staff(i)`
+- L23351  `async def _tix_direction(i)`
+- L23360  `async def _tix_is_in_ticket(channel)`
+- L23377  `async def ticket_transcripts_cmd(i, membre)` @ticket_group.command
+- L23409  `async def ticket_search_cmd(i, non_pris)` @ticket_group.command
+- L23452  `async def ticket_queue_cmd(i)` @ticket_group.command
+- L23499  `async def ticket_priority_cmd(i, niveau)` @ticket_group.command
+- L23529  `async def ticket_templates_cmd(i)` @ticket_group.command
+- L23549  `async def ticket_reply_cmd(i, template_name)` @ticket_group.command
+- L23576  `async def ticket_template_add_cmd(i)` @ticket_group.command
+- L23611  `async def ticket_template_remove_cmd(i, name)` @ticket_group.command
+- L23629  `async def ticket_stats_cmd(i)` @ticket_group.command
+- L23650  `async def ticket_auto_close_cmd(i, jours)` @ticket_group.command
+- L23682  `def _obs_is_owner(member)`
+- L23697  `async def server_report_cmd(i)` @server_obs_group.command
+- L23723  `async def server_history_cmd(i, jours)` @server_obs_group.command
+- L23742  `async def server_retention_cmd(i)` @server_obs_group.command
+- L23761  `async def server_anomalies_cmd(i)` @server_obs_group.command
+- L23785  `async def on_member_ban(guild, user)` @bot.event
+- L23821  `async def on_member_remove(m)` @bot.event
+- L23925  `async def _handle_goodbye(member)`
+- L23982  `async def _audit_actor(guild, action, *, target_id, within_sec)`
+- L24013  `async def _log_audited(guild, event_type, actions, target_id, desc_fn, *, channel, require_actor, user)`
+- L24052  `async def on_member_update(before, after)` @bot.event
+- L24103  `async def on_audit_log_entry_create(entry)` @bot.event
+- L24178  `async def on_user_update(before, after)` @bot.event
+- L24187  `async def _open_boost_panel(i)`
+- L24212  `async def _handle_boost_started(member)`
+- L24227  `async def _handle_boost_stopped(member)`
+- L24236  `async def _handle_rogue_bot(m)`
+- L24305  `async def _age_gate_nsfw(member)`
+- L24348  `async def _reposer_sanction_au_retour(m)`
+- L24436  `async def on_member_join(m)` @bot.event
+- L24708  `async def _handle_antiraid_join(member)`
+- L24860  `async def _verrou_raid(guild)`
+- L24873  `async def _lever_verrou_raid(guild)`
+- L24891  `def _nombre_membres(guild)`
+- L24896  `async def _track_welcome_msg(guild_id, channel_id, message_id)`
+- L24910  `async def welcome_cleanup_task()` @tasks.loop
+- L24953  `async def _welcome_cleanup_before()` @welcome_cleanup_task.before_loop
+- L24960  `async def _handle_welcome(member)`
+- L25004  `async def on_message_delete(message)` @bot.event
+- L25020  `async def on_bulk_message_delete(messages)` @bot.event
+- L25040  `async def _scan_security_on_edit(after)`
+- L25370  `async def on_message_edit(before, after)` @bot.event
+- L25392  `async def on_guild_channel_create(channel)` @bot.event
+- L25444  `async def _antinuke_check(guild, kind, cible_id)`
+- L25490  `async def _antinuke_respond(guild, actor, kind, count, c)`
+- L25533  `def _has_risky_perms(member)`
+- L25545  `async def _compromised_riposte(msg, reason)`
+- L25603  `async def on_webhooks_update(channel)` @bot.event
+- L25668  `async def tickets_inactifs_task()` @tasks.loop
+- L25709  `async def _tickets_inactifs_wait()` @tickets_inactifs_task.before_loop
+- L25714  `async def on_raw_thread_delete(payload)` @bot.event
+- L25725  `async def on_guild_channel_delete(channel)` @bot.event
+- L25744  `async def on_guild_channel_update(before, after)` @bot.event
+- L25771  `async def on_guild_role_create(role)` @bot.event
+- L25785  `async def on_guild_role_delete(role)` @bot.event
+- L25799  `async def on_guild_role_update(before, after)` @bot.event
+- L25831  `async def _perm_escalation_guard(guild, before, after)`
+- L25881  `async def _check_compromised_account(msg)`
+- L25983  `async def on_message(msg)` @bot.event
+- L27398  `async def security_check(i, command_name)`
+- L27424  `async def configure_cmd(i)` @bot.tree.command
+- L27489  `async def _logs_sur_le_site(g)`
+- L27504  `async def logs_setchannel(i, salon)` @logs_group.command
+- L27554  `async def logs_status(i)` @logs_group.command
+- L27637  `async def logs_categories(i)` @logs_group.command
+- L27776  `async def check_mod_perm(i, cmd_key)`
+- L27808  `async def _do_clear(ch, limit, moderator)`
+- L27823  `async def _clear_audit_log(guild, ch, moderator, deleted, limit)`
+- L27851  `async def _run_clear_and_report(guild, ch, limit, moderator)`
+- L27915  `async def mod_clear(i, nombre)` @mod_group.command
+- L27957  `def _format_warn_id(infraction_id, created_dt)`
+- L27981  `async def _escalade_warns(guild, membre, warn_count)`
+- L28036  `async def _avertissement_staff(g, membre_id, mod_id, raison)`
+- L28050  `async def warn_cmd(i, membre, raison)` @mod_group.command
+- L28196  `async def unwarn_cmd(i, membre)` @mod_group.command
+- L28284  `async def mute_cmd(i, membre, duree, unite, raison)` @mod_group.command
+- L28366  `async def unmute_cmd(i, membre, raison)` @mod_group.command
+- L28439  `async def direction_cmd(i, membre, duree, raison)` @mod_group.command
+- L28568  `async def undirection_cmd(i, membre, raison)` @mod_group.command
+- L28676  `def _staff_sanction_guard(moderator, target, guild)`
+- L28877  `async def mod_active_cmd(i)` @mod_group.command
+- L28957  `async def _build_casier_panel(staff, member, guild, note)`
+- L29096  `async def infractions_cmd(i, membre)` @mod_group.command
+- L29382  `async def mod_note_cmd(i, membre, texte)` @mod_group.command
+- L29437  `def _vue_blacklist(texte, avatar, couleur)`
+- L29457  `async def ticketblacklist_cmd(i, action, membre, panel)` @mod_group.command
+- L29601  `def _refus_cible_rellseas(g, auteur, membre, donner)`
+- L29622  `async def _rellseas_autorise(i)`
+- L29653  `async def rellseas_cmd(i)` @bot.tree.command
+- L29732  `async def _rr_messages_connus()`
+- L29741  `async def _handle_reaction_role(payload, *, add)`
+- L29783  `async def on_raw_reaction_add(payload)` @bot.event
+- L29818  `async def on_raw_reaction_remove(payload)` @bot.event
+- L29835  `def _page_live_due(cle, secondes)`
+- L29845  `async def check_social_feeds()` @tasks.loop
+- L29897  `def _is_recent_iso(iso_str, max_age_days)`
+- L29927  `def _yt_extract_uc(raw)`
+- L29941  `def _yt_extract_handle(raw)`
+- L29962  `async def _yt_resolve_channel_id(session, raw)`
+- L29999  `def _avertir_une_fois_par_jour(cle)`
+- L30009  `async def check_youtube_feeds(session, guild, data)`
+- L30248  `async def _deja_dans_le_salon(salon, url)`
+- L30264  `def _description_entree(entry, ns)`
+- L30290  `async def _details_websub(uc, video_id)`
+- L30313  `async def _annoncer_video_youtube(guild, feed, target_channel, video_id, title, description, chemin, avatar)`
+- L30363  `async def _feeds_youtube()`
+- L30390  `async def _chaines_youtube_suivies()`
+- L30399  `async def _annoncer_websub(uc, video)`
+- L30427  `async def websub_task()` @tasks.loop
+- L30439  `async def _websub_wait()` @websub_task.before_loop
+- L30443  `async def check_twitch_feeds(session, guild, data)`
+- L30595  `def _tk_warn_once(guild_id, username, msg)`
+- L30610  `async def check_tiktok_feeds(session, guild, data)`
+- L30999  `async def check_reddit_feeds(session, guild, data)`
+- L31112  `async def check_twitter_feeds(session, guild, data)`
+- L31288  `async def before_social_check()` @check_social_feeds.before_loop
+- L31292  `async def _forget_temp_voice_room(channel_id)`
+- L31304  `async def temp_voice_watchdog()` @tasks.loop
+- L31351  `async def before_temp_voice_watchdog()` @temp_voice_watchdog.before_loop
+- L31365  `async def on_voice_state_update(member, before, after)` @bot.event
+- L31759  `async def _activite_suivi(guild_id, user_id)`
+- L31786  `async def check_expired_roles()` @tasks.loop
+- L31826  `async def before_check_expired()` @check_expired_roles.before_loop
+- L31831  `async def check_expired_restrictions()` @tasks.loop
+- L31896  `async def before_check_restrictions()` @check_expired_restrictions.before_loop
+- L31921  `async def _2026_on_ready_addon()`
+- L32110  `async def _voice_log_listener(member, before, after)`
+- L32189  `def _salons_hub(c)`
+- L32194  `def _geste_vocal(before, after, hubs)`
+- L32207  `async def _sauts_imposes(guild, member, salons, depuis)`
+- L32228  `async def _voice_hop_listener(member, before, after)`
+- L32311  `async def _role_mentionable_guard(*args)`
+- L32388  `def _global_rl_active()`
+- L32392  `def _arm_global_rl_backoff(ex, seconds)`
+- L32414  `def _is_benign_interaction_err(ex)`
+- L32424  `async def _safe_defer(i, ephemeral)`
+- L32442  `async def _safe_followup(i, **kwargs)`
+- L32465  `async def _register_for_cleanup(message, delay_seconds, reason)`
+- L32500  `async def persistent_msg_cleaner()` @tasks.loop
+- L32510  `async def _persistent_msg_cleaner_wait()` @persistent_msg_cleaner.before_loop
+- L32514  `async def _run_persistent_cleanup_once()`
+- L32690  `async def _entraide_voice_category(guild)`
+- L32709  `async def _entraide_maybe_delete_empty_voice(guild, channel)`
+- L32788  `def _unanswered_clear(message_id)`
+- L32796  `def _unanswered_on_reaction(payload)`
+- L32824  `def _unanswered_clear_for_author(guild_id, author_id)`
+- L32897  `def _i18n_lang_role_name(lang)`
+- L32906  `def _i18n_all_lang_role_names()`
+- L32914  `async def _i18n_assign_lang_role(member, lang)`
+- L32969  `async def _i18n_apply_lang(i, lang)`
+- L33193  `async def db_optimizer_task()` @tasks.loop
+- L33327  `async def _db_optimizer_wait()` @db_optimizer_task.before_loop
+- L33512  `async def _check_alt_account(member)`
+- L33591  `async def _lever_ralentis(guild)`
+- L33612  `async def _check_auto_slow_mode(msg)`
+- L33729  `def _section_with_button(title_str, subtitle_str, button)`
+- L33746  `def _escape_md(text, max_len)`
+- L33825  `def _installer_resumeur_passerelle()`
+- L451  `class DBPool`
+    - L454  `def __init__(self, path, pool_size)`
+    - L467  `async def init(self)`
+    - L476  `async def _init_locked(self)`
+    - L500  `def acquire(self)`
+    - L504  `async def _get(self)`
+    - L536  `async def _put(self, conn)`
+    - L541  `async def close_all(self)`
+- L548  `class _DBConnection`
+    - L550  `def __init__(self, pool)`
+    - L554  `async def __aenter__(self)`
+    - L560  `async def __aexit__(self, exc_type, exc_val, exc_tb)`
+- L597  `class ConfigCache`
+    - L600  `def __init__(self, max_size, ttl_seconds)`
+    - L606  `def get(self, guild_id)`
+    - L616  `def set(self, guild_id, data)`
+    - L627  `def invalidate(self, guild_id)`
+    - L632  `def clear(self)`
+- L672  `class C`
+- L1535  `class ConfigIllisible(RuntimeError)`
+- L2640  `class _RadieAppelModal(discord.ui.Modal)`
+    - L2654  `def __init__(self, guild)`
+    - L2658  `async def on_submit(self, i)`
+- L2678  `class RadieAppelButton(discord.ui.DynamicItem[Button])`
+    - L2683  `def __init__(self, gid)`
+    - L2690  `async def from_custom_id(cls, interaction, item, match)` @classmethod
+    - L2693  `async def callback(self, i)`
+- L2812  `class RadieDecisionButton(discord.ui.DynamicItem[Button])`
+    - L2821  `def __init__(self, act, uid)`
+    - L2833  `async def from_custom_id(cls, interaction, item, match)` @classmethod
+    - L2836  `async def callback(self, i)`
+- L3675  `class SecReportView(discord.ui.View)`
+    - L3679  `def __init__(self, guild_id, top_players)`
+    - L3691  `async def _on_pick(self, i)`
+- L7379  `class BoutonApprouverBot(discord.ui.DynamicItem[Button])`
+    - L7384  `def __init__(self, bot_id)`
+    - L7390  `async def from_custom_id(cls, interaction, item, match)` @classmethod
+    - L7393  `async def callback(self, i)`
+- L7451  `class BoutonGere(discord.ui.DynamicItem[Button])`
+    - L7454  `def __init__(self, membre_id)`
+    - L7460  `async def from_custom_id(cls, interaction, item, match)` @classmethod
+    - L7463  `async def callback(self, i)`
+- L7479  `class BoutonFicheSite(discord.ui.DynamicItem[Button])`
+    - L7482  `def __init__(self, membre_id)`
+    - L7488  `async def from_custom_id(cls, interaction, item, match)` @classmethod
+    - L7491  `async def callback(self, i)`
+- L7731  `class BoutonAnciensSalons(discord.ui.DynamicItem[Button])`
+    - L7734  `def __init__(self, n)`
+    - L7741  `async def from_custom_id(cls, interaction, item, match)` @classmethod
+    - L7744  `async def callback(self, i)`
+- L7757  `class ConfirmerAnciensSalons(LayoutView)`
+    - L7758  `def __init__(self, auteur_id, salons)`
+    - L7782  `async def interaction_check(self, i)`
+    - L7785  `async def _choisir(self, i)`
+    - L7789  `async def _annuler(self, i)`
+    - L7795  `async def _supprimer(self, i)`
+- L8843  `class _SansCarte(Exception)`
+- L9101  `class TicketQuestionnaireModal(Modal)`
+    - L9102  `def __init__(self, pid, qs)`
+    - L9115  `async def on_submit(self, i)`
+- L9129  `class TicketConfirmCreateView(LayoutView)`
+    - L9136  `def __init__(self, pid, recap, *, champs, oui, non, annule)`
+    - L9147  `async def _confirm(self, i)`
+    - L9164  `async def _cancel(self, i)`
+- L9274  `class TicketCreateDynamic(discord.ui.DynamicItem[Button])`
+    - L9287  `def __init__(self, pid)`
+    - L9294  `async def from_custom_id(cls, interaction, item, match)` @classmethod
+    - L9297  `async def callback(self, i)`
+- L9402  `class TicketHubGererDynamic(discord.ui.DynamicItem[Button])`
+    - L9406  `def __init__(self)`
+    - L9411  `async def from_custom_id(cls, interaction, item, match)` @classmethod
+    - L9414  `async def callback(self, i)`
+- L9424  `class VueTypesTickets(LayoutView)`
+    - L9432  `def __init__(self, auteur_id, c)`
+    - L9471  `async def interaction_check(self, i)`
+    - L9474  `def _basculer(self, pid)`
+    - L9479  `async def _choisir(self, i)`
+    - L9483  `def _tout(self, fermer)`
+    - L9489  `async def _appliquer(self, i, choix)`
+- L9546  `class TicketHubOpenDynamic(discord.ui.DynamicItem[Button])`
+    - L9560  `def __init__(self)`
+    - L9566  `async def from_custom_id(cls, interaction, item, match)` @classmethod
+    - L9569  `async def callback(self, i)`
+- L9601  `class TicketHubTypeDynamic(discord.ui.DynamicItem[discord.ui.Select])`
+    - L9613  `def __init__(self, types)`
+    - L9628  `async def from_custom_id(cls, interaction, item, match)` @classmethod
+    - L9631  `async def callback(self, i)`
+- L9662  `class TicketHubTypeView(LayoutView)`
+    - L9665  `def __init__(self, types)`
+- L9780  `class TicketToggleDynamic(discord.ui.DynamicItem[Button])`
+    - L9784  `def __init__(self, pid)`
+    - L9790  `async def from_custom_id(cls, interaction, item, match)` @classmethod
+    - L9793  `async def callback(self, i)`
+- L10478  `class TicketCloseModal(Modal)`
+    - L10485  `def __init__(self, tk, prefill)`
+    - L10497  `async def on_submit(self, i)`
+- L10513  `class TicketControlView(View)`
+    - L10514  `def __init__(self)`
+    - L10518  `async def claim(self, i, btn)` @discord.ui.button
+    - L10537  `async def _prendre(self, i, btn)`
+    - L10627  `async def add_staff(self, i, btn)` @discord.ui.button
+    - L10657  `async def transfer(self, i, btn)` @discord.ui.button
+    - L10690  `async def priority(self, i, btn)` @discord.ui.button
+    - L10714  `async def internal_note(self, i, btn)` @discord.ui.button
+    - L10736  `async def blacklist_user(self, i, btn)` @discord.ui.button
+    - L10808  `async def close(self, i, btn)` @discord.ui.button
+    - L10839  `async def manage(self, i, btn)` @discord.ui.button
+- L10863  `class AddStaffView(LayoutView)`
+    - L10864  `def __init__(self, opts, chid)`
+- L10871  `class AddStaffSelect(Select)`
+    - L10872  `def __init__(self, opts, chid)`
+    - L10876  `async def callback(self, i)`
+- L10912  `class TransferTicketView(LayoutView)`
+    - L10913  `def __init__(self, opts, chid)`
+- L10920  `class TransferTicketSelect(Select)`
+    - L10921  `def __init__(self, opts, chid)`
+    - L10925  `async def callback(self, i)`
+- L11008  `class TicketPriorityView(LayoutView)`
+    - L11011  `def __init__(self, chid)`
+- L11018  `class TicketPrioritySelect(Select)`
+    - L11019  `def __init__(self, chid)`
+    - L11037  `async def callback(self, i)`
+- L11074  `class TicketNoteModal(Modal)`
+    - L11079  `def __init__(self, tk)`
+    - L11088  `async def on_submit(self, i)`
+- L11130  `class TicketCloseReasonView(LayoutView)`
+    - L11134  `def __init__(self, tk)`
+- L11142  `class TicketCloseReasonSelect(Select)`
+    - L11143  `def __init__(self, tk)`
+    - L11150  `async def callback(self, i)`
+- L12159  `class _RgpdPurgeModal(Modal)`
+    - L12162  `def __init__(self, g)`
+    - L12172  `async def on_submit(self, i)`
+- L12271  `class RgpdPanelV2(LayoutView)`
+    - L12274  `def __init__(self, u, g)`
+    - L12279  `async def interaction_check(self, i)`
+    - L12287  `async def render_to(self, interaction, *, edit)`
+    - L12309  `async def _open_purge(self, i)`
+    - L12315  `async def _check(self, i)`
+    - L12342  `async def _back(self, i)`
+- L12395  `class MainPanelV2(LayoutView)`
+    - L12403  `def __init__(self, u, g)`
+    - L12409  `async def interaction_check(self, i)`
+    - L12415  `def _build(self, etat)`
+    - L12469  `async def _collect_etat(self)`
+    - L12532  `async def refresh(self)`
+    - L12547  `async def render_to(self, interaction, *, edit)`
+    - L12554  `async def _module_select(self, i)`
+    - L12618  `async def _cb_refresh(self, i)`
+    - L12629  `async def _close(self, i)`
+- L12777  `class AntiRaidPanelV2(LayoutView)`
+    - L12778  `def __init__(self, u, g)`
+    - L12783  `async def interaction_check(self, i)`
+    - L12786  `async def render_to(self, interaction, *, edit)`
+    - L12852  `async def _cb_scan(self, i)`
+    - L12871  `async def _cb_toggle(self, i)`
+    - L12879  `async def _cb_thresholds(self, i)`
+    - L12890  `async def _cb_action(self, i)`
+    - L12897  `async def _cb_log_channel(self, i)`
+    - L12906  `async def _cb_back(self, i)`
+- L12911  `class _AntiRaidThresholdsModal(Modal)`
+    - L12916  `def __init__(self, g, u)`
+    - L12921  `async def on_submit(self, i)`
+- L12937  `class _AntiRaidActionPickerV2(LayoutView)`
+    - L12938  `def __init__(self, u, g)`
+    - L12943  `async def interaction_check(self, i)`
+    - L12946  `async def render_to(self, interaction, *, edit)`
+    - L12982  `async def _set(self, i, action)`
+    - L12989  `async def _cb_back(self, i)`
+- L13075  `class TicketFeedbackButton(discord.ui.DynamicItem[Button])`
+    - L13078  `def __init__(self, gid, tid, sid, rating)`
+    - L13085  `async def from_custom_id(cls, interaction, item, match)` @classmethod
+    - L13088  `async def callback(self, i)`
+- L13161  `class EntraideRatingButton(discord.ui.DynamicItem[Button])`
+    - L13164  `def __init__(self, gid, hid, qid, rating)`
+    - L13171  `async def from_custom_id(cls, interaction, item, match)` @classmethod
+    - L13174  `async def callback(self, i)`
+- L14346  `class BoutonArchive(discord.ui.DynamicItem[Button])`
+    - L14352  `def __init__(self, cid)`
+    - L14356  `async def from_custom_id(cls, interaction, item, match)` @classmethod
+    - L14359  `async def callback(self, i)`
+- L15059  `class BoutonArchives(discord.ui.DynamicItem[Button])`
+    - L15063  `def __init__(self, n)`
+    - L15069  `async def from_custom_id(cls, interaction, item, match)` @classmethod
+    - L15072  `async def callback(self, i)`
+- L15083  `class ConfirmerArchives(LayoutView)`
+    - L15084  `def __init__(self, auteur_id, salons)`
+    - L15103  `async def interaction_check(self, i)`
+    - L15106  `async def _choisir(self, i)`
+    - L15110  `async def _annuler(self, i)`
+    - L15114  `async def _supprimer(self, i)`
+- L15221  `class _ErreursInteractions(logging.Handler)`
+    - L15226  `def __init__(self)`
+    - L15229  `def emit(self, record)`
+- L15491  `class BoutonAnnulerConfig(discord.ui.DynamicItem[Button])`
+    - L15492  `def __init__(self, hid)`
+    - L15498  `async def from_custom_id(cls, interaction, item, match)` @classmethod
+    - L15501  `async def callback(self, i)`
+- L16357  `class LogsPanelV2(LayoutView)`
+    - L16360  `def __init__(self, u, g)`
+    - L16365  `async def interaction_check(self, i)`
+    - L16368  `async def render_to(self, interaction, *, edit)`
+    - L16460  `async def _rendre_site(self, interaction, edit)`
+    - L16490  `async def _cb_set_channel(self, i)`
+    - L16505  `async def _cb_categories(self, i)`
+    - L16509  `async def _cb_routing(self, i)`
+    - L16514  `async def _cb_toggle_webhook(self, i)`
+    - L16523  `async def _cb_events(self, i)`
+    - L16528  `async def _cb_exclusions(self, i)`
+    - L16533  `async def _cb_disable(self, i)`
+    - L16540  `async def _cb_security_channels(self, i)`
+    - L16545  `async def _cb_back(self, i)`
+- L16551  `class SecurityChannelsPanelV2(LayoutView)`
+    - L16575  `def __init__(self, u, g)`
+    - L16580  `async def interaction_check(self, i)`
+    - L16583  `async def render_to(self, interaction, *, edit)`
+    - L16647  `async def _open_picker(self, i, cfg_key, label)`
+    - L16713  `async def _cb_back(self, i)`
+- L16725  `class LogsRoutingPanelV2(LayoutView)`
+    - L16729  `def __init__(self, u, g)`
+    - L16734  `async def interaction_check(self, i)`
+    - L16737  `async def render_to(self, interaction, *, edit)`
+    - L16796  `async def _cb_event_routing(self, i)`
+    - L16800  `async def _cb_level(self, i, level_key)`
+    - L16804  `async def _cb_pick(self, i)`
+    - L16830  `async def _cb_back(self, i)`
+- L16835  `class LogLevelPanelV2(LayoutView)`
+    - L16852  `def __init__(self, u, g, level_key)`
+    - L16858  `async def interaction_check(self, i)`
+    - L16861  `async def render_to(self, interaction, *, edit)`
+    - L16893  `async def _cb_pick_channel(self, i)`
+    - L16924  `async def _cb_toggle(self, i)`
+    - L16937  `async def _cb_back(self, i)`
+- L16942  `class LogsEventRoutingPanelV2(LayoutView)`
+    - L16946  `def __init__(self, u, g, cat)`
+    - L16952  `async def interaction_check(self, i)`
+    - L16955  `async def render_to(self, interaction, *, edit)`
+    - L17001  `async def _cb_cat(self, i)`
+    - L17008  `async def _cb_event(self, i)`
+    - L17034  `async def _cb_back(self, i)`
+- L17039  `class LogsCategoriesPanelV2(LayoutView)`
+    - L17042  `def __init__(self, u, g)`
+    - L17047  `async def interaction_check(self, i)`
+    - L17050  `async def render_to(self, interaction, *, edit)`
+    - L17108  `async def _cb_select(self, i)`
+    - L17116  `async def _cb_back(self, i)`
+- L17125  `class LogsEventsPanelV2(LayoutView)`
+    - L17132  `def __init__(self, u, g, category)`
+    - L17138  `async def interaction_check(self, i)`
+    - L17141  `async def render_to(self, interaction, *, edit)`
+    - L17215  `async def _cb_pick_cat(self, i)`
+    - L17223  `async def _cb_pick_events(self, i)`
+    - L17244  `async def _cb_change_cat(self, i)`
+    - L17248  `async def _cb_back(self, i)`
+- L17257  `class LogsExclusionsPanelV2(LayoutView)`
+    - L17264  `def __init__(self, u, g, selected_event)`
+    - L17271  `async def interaction_check(self, i)`
+    - L17274  `async def render_to(self, interaction, *, edit)`
+    - L17359  `async def _cb_pick_cat(self, i)`
+    - L17363  `async def _cb_change_cat(self, i)`
+    - L17367  `async def _cb_pick_event(self, i)`
+    - L17371  `async def _cb_pick_roles(self, i)`
+    - L17383  `async def _cb_change_event(self, i)`
+    - L17387  `async def _cb_back(self, i)`
+- L17405  `class ProtPanelV2(LayoutView)`
+    - L17408  `def __init__(self, u, g)`
+    - L17413  `async def interaction_check(self, i)`
+    - L17416  `async def render_to(self, interaction, *, edit)`
+    - L17456  `async def _cb_sel(self, interaction)`
+    - L17462  `async def _cb_back(self, i)`
+- L17468  `class ProtDetailV2(LayoutView)`
+    - L17471  `def __init__(self, u, g, prot)`
+    - L17478  `async def interaction_check(self, i)`
+    - L17481  `async def render_to(self, interaction, *, edit)`
+    - L17665  `async def _cb_toggle(self, i)`
+    - L17671  `async def _cb_config(self, i)`
+    - L17693  `async def _cb_sanction(self, i)`
+    - L17712  `async def _cb_log(self, i)`
+    - L17736  `async def _cb_back(self, i)`
+- L17745  `class ImageConfigPanelV2(LayoutView)`
+    - L17748  `def __init__(self, u, g)`
+    - L17753  `async def interaction_check(self, i)`
+    - L17756  `async def render_to(self, interaction, *, edit)`
+    - L17808  `async def _cb_select(self, i)`
+    - L17812  `async def _cb_allow_all(self, i)`
+    - L17816  `async def _cb_block_all(self, i)`
+    - L17820  `async def _cb_back(self, i)`
+- L17830  `class BadwordsConfigPanelV2(LayoutView)`
+    - L17833  `def __init__(self, u, g)`
+    - L17838  `async def interaction_check(self, i)`
+    - L17842  `def _fmt_list(items, *, max_chars)` @staticmethod
+    - L17850  `async def render_to(self, interaction, *, edit)`
+    - L17945  `async def _cb_add(self, i)`
+    - L17950  `async def _cb_remove(self, i)`
+    - L17955  `async def _cb_clear(self, i)`
+    - L17961  `async def _cb_wl_add(self, i)`
+    - L17966  `async def _cb_wl_remove(self, i)`
+    - L17971  `async def _cb_wl_clear(self, i)`
+    - L17977  `async def _cb_thresholds(self, i)`
+    - L17990  `async def _cb_sanction_action(self, i)`
+    - L17996  `async def _cb_back(self, i)`
+- L18006  `class _BadwordsAddListModal(Modal)`
+    - L18016  `def __init__(self, g, u, *, key, title_text)`
+    - L18023  `async def on_submit(self, i)`
+- L18051  `class _BadwordsRemoveListModal(Modal)`
+    - L18061  `def __init__(self, g, u, *, key, title_text)`
+    - L18068  `async def on_submit(self, i)`
+- L18077  `class _BadwordsThresholdsModal(Modal)`
+    - L18097  `def __init__(self, g, u)`
+    - L18103  `async def on_submit(self, i)`
+- L18123  `class _BadwordsSanctionActionView(LayoutView)`
+    - L18126  `def __init__(self, u, g)`
+    - L18131  `async def interaction_check(self, i)`
+    - L18134  `async def render_to(self, interaction, *, edit)`
+    - L18184  `async def _set(self, i, action)`
+    - L18190  `async def _back(self, i)`
+- L18198  `class LinkConfigPanelV2(LayoutView)`
+    - L18201  `def __init__(self, u, g)`
+    - L18206  `async def interaction_check(self, i)`
+    - L18209  `async def render_to(self, interaction, *, edit)`
+    - L18247  `async def _cb_add_dom(self, i)`
+    - L18261  `async def _cb_clear_wl(self, i)`
+    - L18265  `async def _cb_add_ch(self, i)`
+    - L18298  `async def _cb_clear_ch(self, i)`
+    - L18302  `async def _cb_back(self, i)`
+- L18308  `class AddDomainModal(Modal)`
+    - L18316  `def __init__(self, g, u)`
+    - L18321  `async def on_submit(self, i)`
+- L18369  `class NumberConfigModal(Modal)`
+    - L18372  `def __init__(self, g, u, key)`
+    - L18390  `async def on_submit(self, i)`
+- L18482  `class ActionConfigPanelV2(LayoutView)`
+    - L18485  `def __init__(self, u, g, key)`
+    - L18491  `async def interaction_check(self, i)`
+    - L18494  `def _get_action_key(self)`
+    - L18497  `def _get_duration_key(self)`
+    - L18500  `def _get_default_action(self)`
+    - L18503  `def _get_default_duration(self)`
+    - L18506  `async def render_to(self, interaction, *, edit)`
+    - L18565  `async def _set(self, i, act)`
+    - L18571  `async def _cb_duration(self, i)`
+    - L18574  `async def _cb_back(self, i)`
+- L18580  `class DurationConfigModal(Modal)`
+    - L18583  `def __init__(self, g, u, key)`
+    - L18592  `async def on_submit(self, i)`
+- L18605  `class AltConfigPanelV2(LayoutView)`
+    - L18608  `def __init__(self, u, g)`
+    - L18613  `async def interaction_check(self, i)`
+    - L18616  `async def render_to(self, interaction, *, edit)`
+    - L18685  `async def _cb_toggle(self, i)`
+    - L18690  `async def _cb_cycle_action(self, i)`
+    - L18701  `async def _cb_toggle_auto(self, i)`
+    - L18708  `async def _cb_conf(self, i)`
+    - L18711  `async def _cb_scan(self, i)`
+    - L18731  `async def _cb_view(self, i)`
+    - L18738  `async def _cb_back(self, i)`
+- L18744  `class AltConfidenceModal(Modal)`
+    - L18752  `def __init__(self, g, u)`
+    - L18757  `async def on_submit(self, i)`
+- L18780  `class AltScanResultsPanelV2(LayoutView)`
+    - L18783  `def __init__(self, u, g, detected)`
+    - L18791  `async def interaction_check(self, i)`
+    - L18794  `def _build(self)`
+    - L18846  `async def render_to(self, interaction, *, edit)`
+    - L18850  `async def render_after_defer(self, interaction)`
+    - L18854  `async def _cb_prev(self, i)`
+    - L18859  `async def _cb_next(self, i)`
+    - L18865  `async def _cb_kick70(self, i)`
+    - L18871  `async def _cb_ban80(self, i)`
+    - L18877  `async def _cb_back(self, i)`
+- L18882  `class ConfirmerIsolementV2(LayoutView)`
+    - L18888  `def __init__(self, u, g, cibles, genre)`
+    - L18904  `async def interaction_check(self, i)`
+    - L18910  `def _fin(self, texte, couleur)`
+    - L18914  `async def _annuler(self, i)`
+    - L18918  `async def _confirmer(self, i)`
+- L18949  `class AltDetectionsPanelV2(LayoutView)`
+    - L18952  `def __init__(self, u, g, alts)`
+    - L18960  `async def interaction_check(self, i)`
+    - L18963  `async def render_to(self, interaction, *, edit)`
+    - L19020  `async def _cb_prev(self, i)`
+    - L19025  `async def _cb_next(self, i)`
+    - L19031  `async def _cb_clear(self, i)`
+    - L19047  `async def _cb_back(self, i)`
+- L19052  `class SuspectScanPanelV2(LayoutView)`
+    - L19055  `def __init__(self, u, g, suspects, bots)`
+    - L19064  `async def interaction_check(self, i)`
+    - L19067  `async def scan_members(self)`
+    - L19073  `def _build(self)`
+    - L19133  `async def render_to(self, interaction, *, edit)`
+    - L19137  `async def render_after_defer(self, interaction)`
+    - L19141  `async def _cb_prev(self, i)`
+    - L19146  `async def _cb_next(self, i)`
+    - L19152  `async def _cb_rescan(self, i)`
+    - L19158  `async def _cb_kick_crit(self, i)`
+    - L19164  `async def _cb_kick_bots(self, i)`
+    - L19169  `async def _cb_kick_all(self, i)`
+    - L19176  `async def _cb_close(self, i)`
+- L19181  `class SuspectScanPanel`
+    - L19183  `def __init__(self, u, g)`
+    - L19192  `async def scan_members(self)`
+- L19420  `class ModerationPanelV2(LayoutView)`
+    - L19423  `def __init__(self, u, g)`
+    - L19430  `async def interaction_check(self, i)`
+    - L19433  `async def render_to(self, interaction, *, edit)`
+    - L19505  `async def _open_channel_picker(self, interaction, key, label)`
+    - L19517  `async def _open_role_picker(self, interaction, key, label)`
+    - L19529  `async def _cb_set_logs(self, i)`
+    - L19532  `async def _cb_set_warn(self, i)`
+    - L19535  `async def _cb_set_mute(self, i)`
+    - L19538  `async def _cb_set_inf(self, i)`
+    - L19541  `async def _cb_set_clear(self, i)`
+    - L19544  `async def _cb_set_direction(self, i)`
+    - L19548  `async def _cb_back(self, i)`
+- L19562  `class ImmunePanelV2(LayoutView)`
+    - L19565  `def __init__(self, u, g)`
+    - L19570  `async def interaction_check(self, i)`
+    - L19573  `async def render_to(self, interaction, *, edit)`
+    - L19634  `async def _cb_add_role(self, i)`
+    - L19680  `async def _cb_add_user(self, i)`
+    - L19730  `async def _cb_add_chan(self, i)`
+    - L19777  `async def _cb_remove(self, i)`
+    - L19781  `async def _cb_clear(self, i)`
+    - L19793  `async def _cb_back(self, i)`
+- L19799  `class ImmuneRemoveViewV2(LayoutView)`
+    - L19802  `def __init__(self, u, g)`
+    - L19807  `async def interaction_check(self, i)`
+    - L19810  `async def render_to(self, interaction, *, edit)`
+    - L19863  `async def _cb_role(self, i)`
+    - L19872  `async def _cb_user(self, i)`
+    - L19880  `async def _cb_chan(self, i)`
+    - L19888  `async def _cb_back(self, i)`
+- L19893  `class PaginatedImmuneRemoveView(LayoutView)`
+    - L19907  `def __init__(self, u, g, kind, items, page)`
+    - L19912  `async def interaction_check(self, i)`
+    - L19915  `async def render_to(self, i, *, edit)`
+    - L19961  `async def _retirer(self, i, item_id)`
+- L20563  `class V2GenericChannelPicker(LayoutView)`
+    - L20583  `def __init__(self, u, g, *, config_key, return_panel_factory, title, description, color, channel_types, sub_dict_key, save_fn)`
+    - L20608  `async def interaction_check(self, i)`
+    - L20611  `async def _save(self, channel_id)`
+    - L20624  `async def _return_to_parent(self, i)`
+    - L20634  `def _build(self)`
+    - L20697  `async def render_to(self, interaction, *, edit)`
+- L20701  `class V2GenericRolePicker(LayoutView)`
+    - L20707  `def __init__(self, u, g, *, config_key, return_panel_factory, title, description, color, sub_dict_key, save_fn)`
+    - L20726  `async def interaction_check(self, i)`
+    - L20729  `async def _save(self, role_id)`
+    - L20742  `async def _return_to_parent(self, i)`
+    - L20752  `def _build(self)`
+    - L20813  `async def render_to(self, interaction, *, edit)`
+- L20930  `class DossierCompromisBouton(discord.ui.DynamicItem[Button])`
+    - L20932  `def __init__(self, act, uid)`
+    - L20938  `async def from_custom_id(cls, interaction, item, match)` @classmethod
+    - L20941  `async def callback(self, i)`
+- L20945  `class DossierCompromisAncien(discord.ui.DynamicItem[Button])`
+    - L20948  `def __init__(self, act)`
+    - L20952  `async def from_custom_id(cls, interaction, item, match)` @classmethod
+    - L20955  `async def callback(self, i)`
+- L21027  `class TicketMainPanelV2(LayoutView)`
+    - L21030  `def __init__(self, u, g)`
+    - L21035  `async def interaction_check(self, i)`
+    - L21038  `async def render_to(self, interaction, *, edit)`
+    - L21110  `async def _cb_hub(self, i)`
+    - L21131  `async def _cb_staff(self, i)`
+    - L21143  `async def _cb_logs(self, i)`
+    - L21156  `async def _cb_blacklist(self, i)`
+    - L21169  `async def _cb_new(self, i)`
+    - L21172  `async def _cb_edit(self, i)`
+    - L21181  `async def _cb_refresh(self, i)`
+    - L21185  `async def _cb_back(self, i)`
+- L21196  `class NewPanelModal(Modal)`
+    - L21200  `def __init__(self, u, g)`
+    - L21205  `async def on_submit(self, i)`
+- L21217  `class EditPanelSelectViewV2(LayoutView)`
+    - L21220  `def __init__(self, u, g, opts)`
+    - L21226  `async def interaction_check(self, i)`
+    - L21229  `def _build(self)`
+    - L21250  `async def render_to(self, interaction, *, edit)`
+    - L21254  `async def _cb_select(self, i)`
+    - L21259  `async def _cb_back(self, i)`
+- L21264  `class PanelEditViewV2(LayoutView)`
+    - L21267  `def __init__(self, u, g, pid)`
+    - L21273  `async def interaction_check(self, i)`
+    - L21276  `async def _get_panel(self)`
+    - L21280  `async def render_to(self, interaction, *, edit)`
+    - L21369  `async def _safe_error(self, i, ex)`
+    - L21381  `async def _cb_cat(self, i)`
+    - L21403  `async def _cb_staff(self, i)`
+    - L21425  `async def _cb_qs(self, i)`
+    - L21431  `async def _cb_max(self, i)`
+    - L21437  `async def _cb_apparence(self, i)`
+    - L21444  `async def _cb_welcome(self, i)`
+    - L21451  `async def _cb_blacklist(self, i)`
+    - L21457  `async def _cb_send(self, i)`
+    - L21493  `async def _cb_delete(self, i)`
+    - L21505  `async def _cb_back(self, i)`
+- L21521  `class PanelAppearanceModalSimple(Modal)`
+    - L21523  `def __init__(self, u, g, pid)`
+    - L21538  `async def on_submit(self, i)`
+- L21558  `class WelcomeMessageModalSimple(Modal)`
+    - L21560  `def __init__(self, u, g, pid)`
+    - L21569  `async def on_submit(self, i)`
+- L21590  `class PanelBlacklistView(LayoutView)`
+    - L21595  `def __init__(self, u, g, pid, page)`
+    - L21599  `async def interaction_check(self, i)`
+    - L21602  `async def _liste(self)`
+    - L21606  `async def _ecrire(self, liste)`
+    - L21613  `def _nom(self, uid)`
+    - L21617  `async def render_to(self, i, *, edit, confirmer)`
+    - L21690  `async def _cb_ajout(self, i, sel)`
+    - L21707  `async def _cb_retrait(self, i, sel)`
+- L21717  `class SetMaxModal(Modal)`
+    - L21720  `def __init__(self, u, g, pid)`
+    - L21726  `async def on_submit(self, i)`
+- L21737  `class PanelQsView(LayoutView)`
+    - L21741  `def __init__(self, u, g, pid)`
+    - L21745  `async def interaction_check(self, i)`
+    - L21748  `async def render_to(self, i, *, edit)`
+- L21780  `class AddQModal(Modal)`
+    - L21784  `def __init__(self, u, g, pid)`
+    - L21790  `async def on_submit(self, i)`
+- L21799  `class SendPanelPaginatedView(LayoutView)`
+    - L21806  `def __init__(self, u, g, pid, page)`
+    - L21821  `async def interaction_check(self, i)`
+    - L21824  `def _build(self)`
+    - L21887  `async def render_to(self, interaction, *, edit)`
+    - L21891  `async def _prev(self, i)`
+    - L21904  `async def _next(self, i)`
+    - L21917  `async def _back(self, i)`
+    - L21934  `async def _select_cb(self, i)`
+- L22089  `class _Etape`
+    - L22094  `def __init__(self, nom)`
+    - L22097  `def __enter__(self)`
+    - L22100  `def __exit__(self, type_, ex, tb)`
+- L24197  `class BoostSupportButton(discord.ui.DynamicItem[discord.ui.Button])`
+    - L24199  `def __init__(self)`
+    - L24205  `async def from_custom_id(cls, interaction, item, match)` @classmethod
+    - L24208  `async def callback(self, i)`
+- L27595  `class LogsCategoriesSelect(Select)`
+    - L27596  `def __init__(self, current)`
+    - L27617  `async def callback(self, ix)`
+- L27866  `class ClearAllConfirmView(LayoutView)`
+    - L27869  `def __init__(self, user_id, channel_id)`
+    - L27883  `async def _confirm(self, i)`
+    - L27904  `async def _cancel(self, i)`
+- L28233  `class UnwarnSelectView(View)`
+    - L28234  `def __init__(self, membre, opts)`
+- L28238  `class UnwarnSelect(Select)`
+    - L28239  `def __init__(self, membre, opts)`
+    - L28243  `async def callback(self, i)`
+- L28715  `class _StaffSanctionModal(discord.ui.Modal)`
+    - L28721  `def __init__(self, action, target)`
+    - L28742  `async def on_submit(self, modal_i)`
+- L28990  `class _CasierManageView(LayoutView)`
+    - L28994  `def __init__(self, staff, member, guild, rows, contenu)`
+    - L29022  `async def interaction_check(self, i)`
+    - L29051  `async def _reafficher(self, i, note)`
+    - L29055  `async def _on_select(self, i)`
+    - L29068  `async def _on_clear_all(self, i)`
+- L32998  `class LangSelectButton(discord.ui.DynamicItem[Button])`
+    - L33006  `def __init__(self, lang)`
+    - L33018  `async def from_custom_id(cls, interaction, item, match)` @classmethod
+    - L33021  `async def callback(self, i)`
+- L33025  `class RobloxPingButton(discord.ui.DynamicItem[discord.ui.Button])`
+    - L33048  `def __init__(self, cle)`
+    - L33056  `async def from_custom_id(cls, interaction, item, match)` @classmethod
+    - L33059  `async def callback(self, i)`
+- L33077  `class AccueilLangueView(discord.ui.View)`
+    - L33096  `def __init__(self)`
+    - L33102  `async def _cb_langue(self, i, _b)` @discord.ui.button
+- L33791  `class _ResumeurPasserelle(logging.Filter)`
+    - L33794  `def __init__(self)`
+    - L33799  `def filter(self, record)`
 
 ### `cadeaux.py`
 
-- L113  `def tr(cle, langue, **kw)`
-- L143  `def setup(*, get_db, cfg, db_set, autorise, journal, ticket, langue, log, invitations, invitations_tous, relever)`
-- L153  `def _setup(*, get_db, cfg, db_set, autorise, journal, ticket, langue, log)`
-- L162  `def _verrou(cle)`
-- L166  `def pret()`
-- L172  `async def langue_de(i)`
-- L204  `async def init_db()`
-- L241  `def _ligne(r)`
-- L257  `async def charger(cid)`
-- L264  `async def recents(guild_id, limite)`
-- L270  `async def _ecrire(sql, args)`
-- L277  `async def inscrits(cid)`
-- L284  `async def inscrits_quand(cid)`
-- L292  `async def _retirer_inscriptions(cid, uids)`
-- L306  `async def _noter_retires(cid, uids)`
-- L316  `async def _vu_retire(cid, uid)`
-- L324  `async def nb_inscrits(cid)`
-- L330  `async def est_inscrit(cid, uid)`
-- L337  `async def _stats_en_base(cid)`
-- L348  `def nb_actifs()`
-- L352  `def sur_message(message)`
-- L380  `def sur_suppression(message_id)`
-- L391  `def _elaguer(maintenant)`
-- L398  `def compte_en_vocal(g, etat)`
-- L409  `def _crediter(gid, uid, depuis, jusqu_a)`
-- L416  `def sur_vocal(membre, avant, apres)`
-- L429  `def _demarrer_vocaux(g)`
-- L443  `async def vider()`
-- L453  `async def _vider()`
-- L486  `async def stats(cid, uid)`
-- L505  `async def stats_de_tous(cid)`
-- L522  `async def charger_actifs(g)`
-- L544  `def _reprendre_vocaux(g)`
-- L561  `def _oublier(gid, cid)`
-- L579  `def nb_conditions(c)`
-- L583  `def jours_sur_serveur(membre)`
-- L591  `async def invitations_de(c, uid)`
-- L598  `async def invitations_tous(c)`
-- L604  `def remplit(c, messages, secondes, invitations, membre)`
-- L619  `def _ids_roles(membre)`
-- L623  `def exclu(c, membre)`
-- L628  `def peut_participer(c, membre)`
-- L633  `def chance(c, membre)`
-- L637  `def tirer(eligibles, n, hasard)`
-- L645  `def lire_duree(texte, maintenant)`
-- L676  `def _nombre(x)`
-- L680  `def duree_txt(minutes)`
-- L687  `def barre(fait, total, cases)`
-- L851  `def texte_conditions(c)`
-- L882  `def composants_carte(c, nb, *, apercu)`
-- L929  `def vue_carte(c, nb, **kw)`
-- L936  `def progres(c, messages, secondes, invitations, membre)`
-- L950  `def lignes_progres(c, messages, secondes, langue, *, soi, invitations, membre)`
-- L980  `def vue_stats(c, membre, messages, secondes, inscrit, langue, entete, invitations)`
-- L1003  `def _vue_message(texte, couleur)`
-- L1009  `def _depuis_ephemere(i)`
-- L1015  `async def _acquitter(i, *, nouveau)`
-- L1027  `async def _repondre(i, vue, *, nouveau)`
-- L1042  `async def _sans_echec(i, travail)`
-- L1062  `async def _pas_pret(i)`
-- L1075  `def _effacer_plus_tard(i, delai)`
-- L1092  `async def _statut(cid)`
-- L1099  `async def participer(i, cid)`
-- L1141  `async def _inscrire(cid, uid)`
-- L1150  `async def quitter(i, cid)`
-- L1171  `async def montrer_stats(i, cid)`
-- L1193  `def _nom(g, uid)`
-- L1198  `async def montrer_participants(i, cid, page, recherche, *, nouveau)`
-- L1210  `async def vue_participants(g, c, page, recherche)`
-- L1278  `async def montrer_participant(i, cid, uid, page)`
-- L1309  `async def elaguer(g)`
-- L1334  `def _texte_composants(m)`
-- L1348  `async def nettoyer_avis(g)`
-- L1380  `async def etat(g)`
-- L1400  `def planifier_maj(g, cid)`
-- L1406  `async def _maj_apres(g, cid)`
-- L1414  `async def _salon(g, sid)`
-- L1427  `async def maj_carte(g, cid)`
-- L1444  `def vue_gagnants(c, gagnants, *, relance, ticket)`
-- L1466  `async def _annoncer(g, c, gagnants, *, relance)`
-- L1502  `async def _clore(g, cid, statut, resultat)`
-- L1515  `async def _publier_resultat(g, cid, *, dernier_essai)`
-- L1535  `async def terminer(g, cid, *, par)`
-- L1579  `async def _rattraper_annonces(g)`
-- L1617  `async def relancer(g, cid, *, par, attendu)`
-- L1644  `async def annuler(g, cid, *, par)`
-- L1656  `async def purger(g)`
-- L1706  `async def tic(guilds)`
-- L1745  `async def _minuteur(g, cid, fin)`
-- L1763  `def vue_accueil()`
-- L1780  `def droits_salon(g)`
-- L1790  `async def salon_cadeaux(g, *, creer)`
-- L1849  `async def lancer(g, auteur, b)`
-- L2173  `def _brouillon_neuf(g)`
-- L2179  `async def ouvrir_composeur(i)`
-- L2189  `async def ouvrir_gestion(i)`
-- L2199  `async def _reecrire(i, fabrique)`
-- L2205  `async def _geste(i, cle, attente, action)`
-- L2224  `def _liste_gagnants(gagnants, n_max)`
-- L2231  `def _borner(texte, n)`
-- L2235  `async def vue_gestion(auteur, g)`
-- L2268  `def _gerer(auteur, g, cid)`
-- L2276  `async def vue_un_cadeau(auteur, g, cid, *, confirmer, note)`
-- L698  `class BoutonParticiper(discord.ui.DynamicItem[Button])`
-    - L699  `def __init__(self, cid, label)`
-    - L705  `async def from_custom_id(cls, interaction, item, match)` @classmethod
-    - L708  `async def callback(self, i)`
-- L712  `class BoutonStats(discord.ui.DynamicItem[Button])`
-    - L713  `def __init__(self, cid)`
-    - L719  `async def from_custom_id(cls, interaction, item, match)` @classmethod
-    - L722  `async def callback(self, i)`
-- L726  `class BoutonActualiser(discord.ui.DynamicItem[Button])`
-    - L727  `def __init__(self, cid, label)`
-    - L733  `async def from_custom_id(cls, interaction, item, match)` @classmethod
-    - L736  `async def callback(self, i)`
-- L740  `class BoutonQuitter(discord.ui.DynamicItem[Button])`
-    - L741  `def __init__(self, cid, label)`
-    - L746  `async def from_custom_id(cls, interaction, item, match)` @classmethod
-    - L749  `async def callback(self, i)`
-- L753  `class BoutonCadeaux(discord.ui.DynamicItem[Button])`
-    - L756  `def __init__(self)`
+- L120  `def tr(cle, langue, **kw)`
+- L151  `def setup(*, get_db, cfg, db_set, autorise, journal, ticket, langue, log, invitations, invitations_tous, relever)`
+- L161  `def _setup(*, get_db, cfg, db_set, autorise, journal, ticket, langue, log)`
+- L170  `def _verrou(cle)`
+- L174  `def pret()`
+- L180  `async def langue_de(i)`
+- L212  `async def init_db()`
+- L249  `def _ligne(r)`
+- L265  `async def charger(cid)`
+- L272  `async def recents(guild_id, limite)`
+- L278  `async def _ecrire(sql, args)`
+- L285  `async def inscrits(cid)`
+- L292  `async def inscrits_quand(cid)`
+- L300  `async def _retirer_inscriptions(cid, uids)`
+- L314  `async def _noter_retires(cid, uids)`
+- L324  `async def _vu_retire(cid, uid)`
+- L332  `async def nb_inscrits(cid)`
+- L338  `async def est_inscrit(cid, uid)`
+- L345  `async def _stats_en_base(cid)`
+- L356  `def nb_actifs()`
+- L360  `def sur_message(message)`
+- L393  `def sur_suppression(message_id)`
+- L404  `def _elaguer(maintenant)`
+- L416  `def court(texte)`
+- L426  `def _elaguer_rafales(t)`
+- L436  `def _rafale(cle, texte, t)`
+- L453  `def compte_en_vocal(g, etat)`
+- L464  `def _crediter(gid, uid, depuis, jusqu_a)`
+- L471  `def sur_vocal(membre, avant, apres)`
+- L484  `def _demarrer_vocaux(g)`
+- L498  `async def vider()`
+- L508  `async def _vider()`
+- L541  `async def stats(cid, uid)`
+- L560  `async def stats_de_tous(cid)`
+- L577  `async def charger_actifs(g)`
+- L599  `def _reprendre_vocaux(g)`
+- L616  `def _oublier(gid, cid)`
+- L634  `def nb_conditions(c)`
+- L638  `def jours_sur_serveur(membre)`
+- L646  `async def invitations_de(c, uid)`
+- L653  `async def invitations_tous(c)`
+- L659  `def remplit(c, messages, secondes, invitations, membre)`
+- L674  `def _ids_roles(membre)`
+- L678  `def exclu(c, membre)`
+- L683  `def peut_participer(c, membre)`
+- L688  `def chance(c, membre)`
+- L692  `def tirer(eligibles, n, hasard)`
+- L700  `def lire_duree(texte, maintenant)`
+- L731  `def _nombre(x)`
+- L735  `def duree_txt(minutes)`
+- L742  `def barre(fait, total, cases)`
+- L906  `def texte_conditions(c)`
+- L937  `def composants_carte(c, nb, *, apercu)`
+- L984  `def vue_carte(c, nb, **kw)`
+- L991  `def progres(c, messages, secondes, invitations, membre)`
+- L1005  `def lignes_progres(c, messages, secondes, langue, *, soi, invitations, membre)`
+- L1035  `def vue_stats(c, membre, messages, secondes, inscrit, langue, entete, invitations)`
+- L1058  `def _vue_message(texte, couleur)`
+- L1064  `def _depuis_ephemere(i)`
+- L1070  `async def _acquitter(i, *, nouveau)`
+- L1082  `async def _repondre(i, vue, *, nouveau)`
+- L1097  `async def _sans_echec(i, travail)`
+- L1117  `async def _pas_pret(i)`
+- L1130  `def _effacer_plus_tard(i, delai)`
+- L1147  `async def _statut(cid)`
+- L1154  `async def participer(i, cid)`
+- L1196  `async def _inscrire(cid, uid)`
+- L1205  `async def quitter(i, cid)`
+- L1226  `async def montrer_stats(i, cid)`
+- L1248  `def _nom(g, uid)`
+- L1253  `async def montrer_participants(i, cid, page, recherche, *, nouveau)`
+- L1265  `async def vue_participants(g, c, page, recherche)`
+- L1333  `async def montrer_participant(i, cid, uid, page)`
+- L1364  `async def elaguer(g)`
+- L1389  `def _texte_composants(m)`
+- L1403  `async def nettoyer_avis(g)`
+- L1435  `async def etat(g)`
+- L1455  `def planifier_maj(g, cid)`
+- L1461  `async def _maj_apres(g, cid)`
+- L1469  `async def _salon(g, sid)`
+- L1482  `async def maj_carte(g, cid)`
+- L1499  `def vue_gagnants(c, gagnants, *, relance, ticket)`
+- L1521  `async def _annoncer(g, c, gagnants, *, relance)`
+- L1557  `async def _clore(g, cid, statut, resultat)`
+- L1570  `async def _publier_resultat(g, cid, *, dernier_essai)`
+- L1590  `async def terminer(g, cid, *, par)`
+- L1634  `async def _rattraper_annonces(g)`
+- L1672  `async def relancer(g, cid, *, par, attendu)`
+- L1699  `async def annuler(g, cid, *, par)`
+- L1711  `async def purger(g)`
+- L1761  `async def tic(guilds)`
+- L1800  `async def _minuteur(g, cid, fin)`
+- L1818  `def vue_accueil()`
+- L1836  `def droits_salon(g)`
+- L1846  `async def salon_cadeaux(g, *, creer)`
+- L1905  `async def lancer(g, auteur, b)`
+- L2229  `def _brouillon_neuf(g)`
+- L2235  `async def ouvrir_composeur(i)`
+- L2245  `async def ouvrir_gestion(i)`
+- L2255  `async def _reecrire(i, fabrique)`
+- L2261  `async def _geste(i, cle, attente, action)`
+- L2280  `def _liste_gagnants(gagnants, n_max)`
+- L2287  `def _borner(texte, n)`
+- L2291  `async def vue_gestion(auteur, g)`
+- L2324  `def _gerer(auteur, g, cid)`
+- L2332  `async def vue_un_cadeau(auteur, g, cid, *, confirmer, note)`
+- L753  `class BoutonParticiper(discord.ui.DynamicItem[Button])`
+    - L754  `def __init__(self, cid, label)`
     - L760  `async def from_custom_id(cls, interaction, item, match)` @classmethod
     - L763  `async def callback(self, i)`
-- L767  `class BoutonParticipants(discord.ui.DynamicItem[Button])`
-    - L770  `def __init__(self, cid)`
-    - L776  `async def from_custom_id(cls, interaction, item, match)` @classmethod
-    - L779  `async def callback(self, i)`
-- L783  `class BoutonPage(discord.ui.DynamicItem[Button])`
-    - L786  `def __init__(self, cid, page, label, emoji)`
-    - L792  `async def from_custom_id(cls, interaction, item, match)` @classmethod
-    - L795  `async def callback(self, i)`
-- L799  `class ChoixParticipant(discord.ui.DynamicItem[discord.ui.Select])`
-    - L802  `def __init__(self, cid, page, options, placeholder)`
-    - L809  `async def from_custom_id(cls, interaction, item, match)` @classmethod
-    - L812  `async def callback(self, i)`
-- L818  `class BoutonChercher(discord.ui.DynamicItem[Button])`
-    - L821  `def __init__(self, cid)`
-    - L827  `async def from_custom_id(cls, interaction, item, match)` @classmethod
-    - L830  `async def callback(self, i)`
-- L836  `class FormulaireRecherche(discord.ui.Modal)`
-    - L837  `def __init__(self, cid)`
-    - L843  `async def on_submit(self, i)`
-- L1812  `class Brouillon` @dataclass
-    - L1833  `def image_nom(self)` @property
-    - L1836  `def fichier(self)`
-    - L1839  `def comme_cadeau(self, fin)`
-- L1913  `class FormulaireLot(discord.ui.Modal)`
-    - L1914  `def __init__(self, porteur)`
-    - L1933  `async def on_submit(self, i)`
-- L1969  `class FormulaireConditions(discord.ui.Modal)`
+- L767  `class BoutonStats(discord.ui.DynamicItem[Button])`
+    - L768  `def __init__(self, cid)`
+    - L774  `async def from_custom_id(cls, interaction, item, match)` @classmethod
+    - L777  `async def callback(self, i)`
+- L781  `class BoutonActualiser(discord.ui.DynamicItem[Button])`
+    - L782  `def __init__(self, cid, label)`
+    - L788  `async def from_custom_id(cls, interaction, item, match)` @classmethod
+    - L791  `async def callback(self, i)`
+- L795  `class BoutonQuitter(discord.ui.DynamicItem[Button])`
+    - L796  `def __init__(self, cid, label)`
+    - L801  `async def from_custom_id(cls, interaction, item, match)` @classmethod
+    - L804  `async def callback(self, i)`
+- L808  `class BoutonCadeaux(discord.ui.DynamicItem[Button])`
+    - L811  `def __init__(self)`
+    - L815  `async def from_custom_id(cls, interaction, item, match)` @classmethod
+    - L818  `async def callback(self, i)`
+- L822  `class BoutonParticipants(discord.ui.DynamicItem[Button])`
+    - L825  `def __init__(self, cid)`
+    - L831  `async def from_custom_id(cls, interaction, item, match)` @classmethod
+    - L834  `async def callback(self, i)`
+- L838  `class BoutonPage(discord.ui.DynamicItem[Button])`
+    - L841  `def __init__(self, cid, page, label, emoji)`
+    - L847  `async def from_custom_id(cls, interaction, item, match)` @classmethod
+    - L850  `async def callback(self, i)`
+- L854  `class ChoixParticipant(discord.ui.DynamicItem[discord.ui.Select])`
+    - L857  `def __init__(self, cid, page, options, placeholder)`
+    - L864  `async def from_custom_id(cls, interaction, item, match)` @classmethod
+    - L867  `async def callback(self, i)`
+- L873  `class BoutonChercher(discord.ui.DynamicItem[Button])`
+    - L876  `def __init__(self, cid)`
+    - L882  `async def from_custom_id(cls, interaction, item, match)` @classmethod
+    - L885  `async def callback(self, i)`
+- L891  `class FormulaireRecherche(discord.ui.Modal)`
+    - L892  `def __init__(self, cid)`
+    - L898  `async def on_submit(self, i)`
+- L1868  `class Brouillon` @dataclass
+    - L1889  `def image_nom(self)` @property
+    - L1892  `def fichier(self)`
+    - L1895  `def comme_cadeau(self, fin)`
+- L1969  `class FormulaireLot(discord.ui.Modal)`
     - L1970  `def __init__(self, porteur)`
-    - L1986  `async def on_submit(self, i)`
-- L1999  `class FormulaireChance(discord.ui.Modal)`
-    - L2000  `def __init__(self, porteur)`
-    - L2007  `async def on_submit(self, i)`
-- L2018  `class VueCadeau(LayoutView)`
-    - L2021  `def __init__(self, auteur, g, b, erreurs)`
-    - L2085  `async def interaction_check(self, i)`
-    - L2088  `async def _fige(self, i)`
-    - L2096  `async def _reafficher(self, i, erreurs)`
-    - L2099  `async def _cb_roles(self, i)`
-    - L2105  `async def _cb_exclus(self, i)`
-    - L2111  `async def _cb_chance(self, i)`
-    - L2117  `async def _cb_conditions(self, i)`
-    - L2122  `async def _cb_logique(self, i)`
-    - L2128  `async def _cb_mult(self, i)`
-    - L2133  `async def _cb_lot(self, i)`
-    - L2138  `async def _cb_mention(self, i)`
-    - L2144  `async def _cb_annuler(self, i)`
-    - L2149  `async def _cb_lancer(self, i)`
+    - L1989  `async def on_submit(self, i)`
+- L2025  `class FormulaireConditions(discord.ui.Modal)`
+    - L2026  `def __init__(self, porteur)`
+    - L2042  `async def on_submit(self, i)`
+- L2055  `class FormulaireChance(discord.ui.Modal)`
+    - L2056  `def __init__(self, porteur)`
+    - L2063  `async def on_submit(self, i)`
+- L2074  `class VueCadeau(LayoutView)`
+    - L2077  `def __init__(self, auteur, g, b, erreurs)`
+    - L2141  `async def interaction_check(self, i)`
+    - L2144  `async def _fige(self, i)`
+    - L2152  `async def _reafficher(self, i, erreurs)`
+    - L2155  `async def _cb_roles(self, i)`
+    - L2161  `async def _cb_exclus(self, i)`
+    - L2167  `async def _cb_chance(self, i)`
+    - L2173  `async def _cb_conditions(self, i)`
+    - L2178  `async def _cb_logique(self, i)`
+    - L2184  `async def _cb_mult(self, i)`
+    - L2189  `async def _cb_lot(self, i)`
+    - L2194  `async def _cb_mention(self, i)`
+    - L2200  `async def _cb_annuler(self, i)`
+    - L2205  `async def _cb_lancer(self, i)`
 
 ### `candidature_site.py`
 
@@ -9775,15 +10092,15 @@
 
 ### `data_cleanup.py`
 
-- L106  `def setup(bot_instance, get_db_fn)`
-- L117  `async def _purge_table(table, date_col, retention_days)`
-- L166  `def _borne(jours, fmt)`
-- L171  `async def _purges_ciblees()`
-- L185  `async def run_cleanup()`
-- L204  `async def part_libre()`
-- L220  `async def vacuum_db()`
-- L251  `async def weekly_cleanup_task()` @tasks.loop
-- L285  `async def _before()` @weekly_cleanup_task.before_loop
+- L108  `def setup(bot_instance, get_db_fn)`
+- L119  `async def _purge_table(table, date_col, retention_days)`
+- L168  `def _borne(jours, fmt)`
+- L173  `async def _purges_ciblees()`
+- L187  `async def run_cleanup()`
+- L206  `async def part_libre()`
+- L222  `async def vacuum_db()`
+- L253  `async def weekly_cleanup_task()` @tasks.loop
+- L287  `async def _before()` @weekly_cleanup_task.before_loop
 
 ### `db_backup.py`
 
@@ -9826,130 +10143,131 @@
 - L463  `async def _ecrire(sql, args)`
 - L469  `async def recentes(guild_id, limite)`
 - L474  `async def reputation(guild_id, membre_id, zone)`
-- L483  `async def compter_ouvertes(guild_id)`
-- L495  `async def conf(g)`
-- L503  `def ids_salons(c)`
-- L509  `def salon(g, cf, cle)`
-- L515  `async def _resoudre(g, cid)`
-- L529  `async def conteneur(g, cf, cle)`
-- L545  `def en_cartes(ch)`
-- L551  `def lien(g, d)`
-- L558  `def role_zone(g, cf, cle)`
-- L562  `def expire_h(cf, z)`
-- L567  `def garder_h(cf)`
-- L572  `def prevenir(cf, z)`
-- L576  `async def _regler(g, cle, valeur)`
-- L587  `def _echapper(t)`
-- L591  `def _mention(uid)`
-- L595  `def _une_ligne(t)`
-- L599  `def titre_de(z, valeurs)`
-- L603  `def nom_du_fil(auteur, titre)`
-- L607  `def verifier(z, valeurs, langue)`
-- L617  `def _ligne_statut(d, z)`
-- L645  `def vue_carte(d, z, *, avatar, ping, rep)`
-- L676  `def vue_panneau(cle, cf, g)`
-- L700  `def _horodatage(snowflake)`
-- L704  `async def _fil(g, d)`
-- L719  `async def _fil_ou_rien(g, d)`
-- L728  `def _porteur(fil)`
-- L734  `def _tags(forum, statut, z)`
-- L742  `async def _maj_carte(g, d, fil)`
-- L770  `async def _clore_sur_discord(g, d, note)`
-- L812  `async def peut_publier(i, z, langue)`
-- L824  `async def limite(g, m, z, langue)`
-- L856  `def vue_corriger(auteur_id, z, erreur, valeurs, langue)`
-- L870  `async def publier(i, z, valeurs, langue)`
-- L961  `async def _demande_ouverte(i, did, langue)`
-- L972  `async def rejoindre(i, did)`
-- L1011  `async def _annoncer(g, d, texte, mentions)`
-- L1027  `async def _notes(did)`
-- L1048  `async def appeler_middleman(i, did)`
-- L1101  `async def peut_certifier(g, m, d, langue)`
-- L1117  `async def certifier(g, did, par, credites, partenaire, langue)`
-- L1148  `async def resoudre(g, did, par, partenaire, langue)`
-- L1176  `async def fermer(g, did, par_id, statut, note, maintenant)`
-- L1194  `def _vue_message(texte, couleur)`
-- L1308  `def vue_confirmer(texte, libelle, action, auteur_id, *, icone, style)`
-- L1386  `async def _effacer(g, d)`
-- L1414  `async def _effacer_carte(porteur, d)`
-- L1435  `async def _existe(g, d)`
-- L1450  `async def entretenir(g, maintenant)`
-- L1526  `def releve()`
-- L1531  `async def _rafraichir_reperes(g, ouvertes)`
-- L1545  `async def sur_message(msg)`
-- L1567  `async def sur_suppression(guild_id, message_id)`
-- L1580  `async def fermer_anciennes(g, note)`
-- L1590  `async def sur_depart(member)`
-- L1600  `def _nom_panneau(cle)`
-- L1605  `async def _panneau_forum(g, cf, cle, forum, forcer)`
-- L1645  `async def _panneau_conteneur(g, cf, cle, ch, forcer)`
-- L1670  `async def reposer_panneau(g, cle)`
-- L1691  `async def assurer_panneaux(g, forcer)`
-- L1711  `def droits_zone(g)`
-- L1723  `async def completer_droits(ch, g, droits, raison)`
-- L1737  `def sujet(cle, cf)`
-- L1744  `def categorie_communautaire(g)`
-- L1752  `async def categorie_cible(g)`
-- L1758  `async def installer(g, *, forum, categorie, creer_salons)`
-- L1804  `def _copie_etiquette(t)`
-- L1812  `def _signature_etiquettes(tags)`
-- L1816  `def etiquettes_a_jour(existantes, cle)`
-- L1837  `async def mettre_a_niveau(g, categorie)`
-- L1869  `async def migrer_v2(g)`
+- L483  `async def demandes_aide(guild_id, membre_id)`
+- L496  `async def compter_ouvertes(guild_id)`
+- L508  `async def conf(g)`
+- L516  `def ids_salons(c)`
+- L522  `def salon(g, cf, cle)`
+- L528  `async def _resoudre(g, cid)`
+- L542  `async def conteneur(g, cf, cle)`
+- L558  `def en_cartes(ch)`
+- L564  `def lien(g, d)`
+- L571  `def role_zone(g, cf, cle)`
+- L575  `def expire_h(cf, z)`
+- L580  `def garder_h(cf)`
+- L585  `def prevenir(cf, z)`
+- L589  `async def _regler(g, cle, valeur)`
+- L600  `def _echapper(t)`
+- L604  `def _mention(uid)`
+- L608  `def _une_ligne(t)`
+- L612  `def titre_de(z, valeurs)`
+- L616  `def nom_du_fil(auteur, titre)`
+- L620  `def verifier(z, valeurs, langue)`
+- L630  `def _ligne_statut(d, z)`
+- L658  `def vue_carte(d, z, *, avatar, ping, rep)`
+- L689  `def vue_panneau(cle, cf, g)`
+- L713  `def _horodatage(snowflake)`
+- L717  `async def _fil(g, d)`
+- L732  `async def _fil_ou_rien(g, d)`
+- L741  `def _porteur(fil)`
+- L747  `def _tags(forum, statut, z)`
+- L755  `async def _maj_carte(g, d, fil)`
+- L783  `async def _clore_sur_discord(g, d, note)`
+- L825  `async def peut_publier(i, z, langue)`
+- L837  `async def limite(g, m, z, langue)`
+- L869  `def vue_corriger(auteur_id, z, erreur, valeurs, langue)`
+- L883  `async def publier(i, z, valeurs, langue)`
+- L974  `async def _demande_ouverte(i, did, langue)`
+- L985  `async def rejoindre(i, did)`
+- L1024  `async def _annoncer(g, d, texte, mentions)`
+- L1040  `async def _notes(did)`
+- L1061  `async def appeler_middleman(i, did)`
+- L1114  `async def peut_certifier(g, m, d, langue)`
+- L1130  `async def certifier(g, did, par, credites, partenaire, langue)`
+- L1161  `async def resoudre(g, did, par, partenaire, langue)`
+- L1189  `async def fermer(g, did, par_id, statut, note, maintenant)`
+- L1207  `def _vue_message(texte, couleur)`
+- L1321  `def vue_confirmer(texte, libelle, action, auteur_id, *, icone, style)`
+- L1399  `async def _effacer(g, d)`
+- L1427  `async def _effacer_carte(porteur, d)`
+- L1448  `async def _existe(g, d)`
+- L1463  `async def entretenir(g, maintenant)`
+- L1539  `def releve()`
+- L1544  `async def _rafraichir_reperes(g, ouvertes)`
+- L1558  `async def sur_message(msg)`
+- L1580  `async def sur_suppression(guild_id, message_id)`
+- L1593  `async def fermer_anciennes(g, note)`
+- L1603  `async def sur_depart(member)`
+- L1613  `def _nom_panneau(cle)`
+- L1618  `async def _panneau_forum(g, cf, cle, forum, forcer)`
+- L1658  `async def _panneau_conteneur(g, cf, cle, ch, forcer)`
+- L1683  `async def reposer_panneau(g, cle)`
+- L1704  `async def assurer_panneaux(g, forcer)`
+- L1724  `def droits_zone(g)`
+- L1736  `async def completer_droits(ch, g, droits, raison)`
+- L1750  `def sujet(cle, cf)`
+- L1757  `def categorie_communautaire(g)`
+- L1765  `async def categorie_cible(g)`
+- L1771  `async def installer(g, *, forum, categorie, creer_salons)`
+- L1817  `def _copie_etiquette(t)`
+- L1825  `def _signature_etiquettes(tags)`
+- L1829  `def etiquettes_a_jour(existantes, cle)`
+- L1850  `async def mettre_a_niveau(g, categorie)`
+- L1882  `async def migrer_v2(g)`
 - L132  `class Champ` @dataclass
     - L143  `def libelle(self, langue)`
     - L146  `def exemple(self, langue)`
 - L151  `class Zone` @dataclass
     - L170  `def libelle(self)` @property
-- L839  `class Formulaire(discord.ui.Modal)`
-    - L840  `def __init__(self, z, langue, valeurs)`
-    - L852  `async def on_submit(self, i)`
-- L934  `class BoutonNouvelle(discord.ui.DynamicItem[Button])`
-    - L935  `def __init__(self, zone, z)`
-    - L943  `async def from_custom_id(cls, interaction, item, match)` @classmethod
-    - L946  `async def callback(self, i)`
-- L1033  `class BoutonRejoindre(discord.ui.DynamicItem[Button])`
-    - L1034  `def __init__(self, did, z)`
-    - L1041  `async def from_custom_id(cls, interaction, item, match)` @classmethod
-    - L1044  `async def callback(self, i)`
-- L1083  `class BoutonMiddleman(discord.ui.DynamicItem[Button])`
-    - L1084  `def __init__(self, did)`
-    - L1090  `async def from_custom_id(cls, interaction, item, match)` @classmethod
-    - L1093  `async def callback(self, i)`
-- L1200  `class VueCertifier(LayoutView)`
-    - L1203  `def __init__(self, d, z, par, langue)`
-    - L1222  `async def interaction_check(self, i)`
-    - L1225  `async def _cb_qui(self, i)`
-    - L1229  `async def _cb_ok(self, i)`
-    - L1241  `async def _cb_non(self, i)`
-- L1245  `class VueCloturer(LayoutView)`
-    - L1250  `def __init__(self, d, z, membre, langue, sienne)`
-    - L1279  `async def interaction_check(self, i)`
-    - L1282  `async def _fin(self, i, texte)`
-    - L1285  `async def _cb_avec(self, i)`
-    - L1289  `async def _cb_regle(self, i)`
-    - L1296  `async def _cb_annuler(self, i)`
-    - L1301  `async def _cb_autre(self, i)`
-- L1332  `class BoutonCertifier(discord.ui.DynamicItem[Button])`
-    - L1333  `def __init__(self, did, z)`
-    - L1339  `async def from_custom_id(cls, interaction, item, match)` @classmethod
-    - L1342  `async def callback(self, i)`
-- L1356  `class BoutonFermer(discord.ui.DynamicItem[Button])`
-    - L1357  `def __init__(self, did)`
-    - L1363  `async def from_custom_id(cls, interaction, item, match)` @classmethod
-    - L1366  `async def callback(self, i)`
-- L1936  `class EntraidePanelV2(LayoutView)`
-    - L1937  `def __init__(self, u, g)`
-    - L1941  `async def interaction_check(self, i)`
-    - L1944  `async def render_to(self, i, *, edit)`
-    - L2023  `async def _cb_zone(self, i)`
-    - L2028  `async def _cb_role(self, i)`
-    - L2042  `async def _cb_delai(self, i)`
-    - L2052  `async def _cb_ping(self, i)`
-    - L2060  `async def _cb_garder(self, i)`
-    - L2065  `async def _cb_installer(self, i)`
-    - L2091  `async def _cb_panneaux(self, i)`
-    - L2097  `async def _cb_retour(self, i)`
+- L852  `class Formulaire(discord.ui.Modal)`
+    - L853  `def __init__(self, z, langue, valeurs)`
+    - L865  `async def on_submit(self, i)`
+- L947  `class BoutonNouvelle(discord.ui.DynamicItem[Button])`
+    - L948  `def __init__(self, zone, z)`
+    - L956  `async def from_custom_id(cls, interaction, item, match)` @classmethod
+    - L959  `async def callback(self, i)`
+- L1046  `class BoutonRejoindre(discord.ui.DynamicItem[Button])`
+    - L1047  `def __init__(self, did, z)`
+    - L1054  `async def from_custom_id(cls, interaction, item, match)` @classmethod
+    - L1057  `async def callback(self, i)`
+- L1096  `class BoutonMiddleman(discord.ui.DynamicItem[Button])`
+    - L1097  `def __init__(self, did)`
+    - L1103  `async def from_custom_id(cls, interaction, item, match)` @classmethod
+    - L1106  `async def callback(self, i)`
+- L1213  `class VueCertifier(LayoutView)`
+    - L1216  `def __init__(self, d, z, par, langue)`
+    - L1235  `async def interaction_check(self, i)`
+    - L1238  `async def _cb_qui(self, i)`
+    - L1242  `async def _cb_ok(self, i)`
+    - L1254  `async def _cb_non(self, i)`
+- L1258  `class VueCloturer(LayoutView)`
+    - L1263  `def __init__(self, d, z, membre, langue, sienne)`
+    - L1292  `async def interaction_check(self, i)`
+    - L1295  `async def _fin(self, i, texte)`
+    - L1298  `async def _cb_avec(self, i)`
+    - L1302  `async def _cb_regle(self, i)`
+    - L1309  `async def _cb_annuler(self, i)`
+    - L1314  `async def _cb_autre(self, i)`
+- L1345  `class BoutonCertifier(discord.ui.DynamicItem[Button])`
+    - L1346  `def __init__(self, did, z)`
+    - L1352  `async def from_custom_id(cls, interaction, item, match)` @classmethod
+    - L1355  `async def callback(self, i)`
+- L1369  `class BoutonFermer(discord.ui.DynamicItem[Button])`
+    - L1370  `def __init__(self, did)`
+    - L1376  `async def from_custom_id(cls, interaction, item, match)` @classmethod
+    - L1379  `async def callback(self, i)`
+- L1949  `class EntraidePanelV2(LayoutView)`
+    - L1950  `def __init__(self, u, g)`
+    - L1954  `async def interaction_check(self, i)`
+    - L1957  `async def render_to(self, i, *, edit)`
+    - L2036  `async def _cb_zone(self, i)`
+    - L2041  `async def _cb_role(self, i)`
+    - L2055  `async def _cb_delai(self, i)`
+    - L2065  `async def _cb_ping(self, i)`
+    - L2073  `async def _cb_garder(self, i)`
+    - L2078  `async def _cb_installer(self, i)`
+    - L2104  `async def _cb_panneaux(self, i)`
+    - L2110  `async def _cb_retour(self, i)`
 
 ### `equipages.py`
 
@@ -10147,15 +10465,15 @@
 - L2341  `def _valeurs_site(v)`
 - L2347  `async def _vers_site(g, e, comptes, dests)`
 - L2378  `def _refus(g, auteur)`
-- L2424  `async def route_evenements(g, auteur, requete, corps)`
-- L2479  `async def route_brouillon(g, auteur, requete, corps)`
-- L2543  `async def route_supprimer_brouillon(g, auteur, requete, corps)`
-- L2581  `def _carte_site(carte)`
-- L2608  `def _noms_cartes(g, cartes_)`
-- L2626  `async def route_apercu(g, auteur, requete, corps)`
-- L2689  `async def route_publier(g, auteur, requete, corps)`
-- L2709  `async def route_modifier(g, auteur, requete, corps)`
-- L2723  `async def route_annuler(g, auteur, requete, corps)`
+- L2475  `async def route_evenements(g, auteur, requete, corps)`
+- L2530  `async def route_brouillon(g, auteur, requete, corps)`
+- L2594  `async def route_supprimer_brouillon(g, auteur, requete, corps)`
+- L2632  `def _carte_site(carte)`
+- L2659  `def _noms_cartes(g, cartes_)`
+- L2677  `async def route_apercu(g, auteur, requete, corps)`
+- L2740  `async def route_publier(g, auteur, requete, corps)`
+- L2760  `async def route_modifier(g, auteur, requete, corps)`
+- L2774  `async def route_annuler(g, auteur, requete, corps)`
 - L1396  `class BoutonReponse(discord.ui.DynamicItem[Button])`
     - L1399  `def __init__(self, eid, choix, *, label, style, emoji)`
     - L1406  `async def from_custom_id(cls, interaction, item, match)` @classmethod
@@ -10167,33 +10485,29 @@
 
 ### `faq.py`
 
-- L176  `def setup(*, cfg, destinations, est_staff, langue, log)`
-- L186  `def set_hooks(*, exclus, effacer_plus_tard)`
-- L193  `def _attente(cle, delai, registre, t)`
-- L197  `def langue_du_texte(t)`
-- L206  `def reconnaitre(texte)`
-- L218  `def salons_du_serveur(salons, mots_jeux)`
-- L243  `def jeux_nommes(texte, jeux)`
-- L248  `def jeux_du_salon(salon, jeux)`
-- L255  `def reponse(s, texte, salon, liens, langue)`
-- L298  `def vue_reponse(titre, corps, boutons)`
-- L307  `def vue(s, langue, lien, type_clan)`
-- L316  `def _libre(cle, delai, registre, t)`
-- L326  `async def sur_message(msg, maintenant)`
-- L37  `class Sujet` @dataclass
+- L188  `def _t(gid, cle, **valeurs)`
+- L193  `def langue_du_texte(t)`
+- L202  `def reconnaitre(texte)`
+- L214  `def salons_du_serveur(salons, mots_jeux)`
+- L239  `def jeux_nommes(texte, jeux)`
+- L244  `def jeux_du_salon(salon, jeux)`
+- L251  `def reponse(s, texte, salon, liens, langue, gid)`
+- L295  `def vue_reponse(titre, corps, boutons, pied)`
+- L305  `def vue(s, langue, lien, type_clan)`
+- L38  `class Sujet` @dataclass
 
 ### `gdpr.py`
 
-- L208  `def _safe_ident(name)`
-- L215  `async def _columns(db, table)`
-- L228  `def _has_guild(cols)`
-- L232  `async def _exec(db, sql, params, summary, bucket, table)`
-- L245  `async def purge_user(db, guild_id, user_id, *, hmac_user, commit)`
-- L369  `async def _filter_blob(db, gid, uid, table, col, kind, summary)`
-- L406  `def _strip_uid(data, uid, kind)`
-- L432  `def _deep_strip(obj, suid, uid)`
-- L463  `async def validate_map(db)`
-- L501  `async def run_retention(db, *, now_ts, commit)`
+- L216  `def _safe_ident(name)`
+- L223  `async def _columns(db, table)`
+- L236  `def _has_guild(cols)`
+- L240  `async def _exec(db, sql, params, summary, bucket, table)`
+- L253  `async def purge_user(db, guild_id, user_id, *, hmac_user, commit)`
+- L377  `async def _filter_blob(db, gid, uid, table, col, kind, summary)`
+- L414  `def _strip_uid(data, uid, kind)`
+- L440  `def _deep_strip(obj, suid, uid)`
+- L471  `async def validate_map(db)`
+- L509  `async def run_retention(db, *, now_ts, commit)`
 
 ### `generate_index.py`
 
@@ -10221,6 +10535,68 @@
 - L302  `async def _entetes_securite(request, response)`
 - L315  `def construire_app()`
 - L369  `async def start(bot_instance, port)`
+
+### `hierarchie.py`
+
+- L133  `def setup(*, get_db, cfg, log)`
+- L143  `def pret()`
+- L147  `def connu(g)`
+- L152  `def _signaler(code, message, ex, detail)`
+- L160  `def _verrou_ecriture()`
+- L169  `async def init_db()`
+- L196  `def cle_grade(nom)`
+- L203  `def _type_grade(types)`
+- L213  `def nom_du_grade(grade)`
+- L225  `def _sans_emoji(texte)`
+- L230  `def _tete()`
+- L237  `def _role_lie(g, r)`
+- L242  `def _haut_du_bot(g)`
+- L254  `async def _assurer_depart(gid)`
+- L290  `async def _renumeroter(db, gid)`
+- L299  `async def _charger(gid, clan_role)`
+- L328  `async def _lire_grades(g, st)`
+- L365  `def affiches_changees(guild_id)`
+- L372  `def _rang_du_nom(st, nom)`
+- L379  `async def assurer(g)`
+- L408  `def _au_clan(m, st)`
+- L414  `def _par_site(g, r)`
+- L420  `def _rang_et_source(g, st, mid)`
+- L449  `def rang_de(g, membre_id)`
+- L455  `def _court(r)`
+- L459  `def rang_affiche(g, a)`
+- L469  `def grade_affiche(g, a)`
+- L476  `def ordre_de(g, membre_id)`
+- L485  `def _gens(g, st)`
+- L494  `def _composition(g, st)`
+- L516  `def _sortie_role(g, st, r)`
+- L531  `def _sortie_rang(g, st, r)`
+- L536  `def _personne(g, mid)`
+- L542  `async def _liens_catalogue(g)`
+- L546  `async def sortie_direction(g, st)`
+- L584  `def _sortie_publique(r)`
+- L589  `async def vue_equipage(g, lignes)`
+- L607  `async def vue_publique(g, lignes, jetons)`
+- L628  `def _refus_general(role, liens_catalogue)`
+- L642  `async def _refus_lien(g, st, rang, role)`
+- L662  `def _refus_role_bot(g, role)`
+- L673  `def _roles_a_changer(g, st, m, rang)`
+- L691  `async def _appliquer_roles(g, auteur, m, donner, retirer)`
+- L719  `def _apres_ecriture(g)`
+- L728  `async def _ecrire_rang(db, gid, st, mid, rang_id, t, par)`
+- L735  `def _ident(v, champ)`
+- L741  `def _valider_rang(corps)`
+- L756  `async def _rapprocher(db, g, st)`
+- L770  `async def _route_hierarchie(g, auteur, requete, corps)`
+- L778  `async def _route_rang(g, auteur, requete, corps)`
+- L837  `async def _role_suit_le_rang(g, auteur, avant, apres)`
+- L860  `async def _route_rang_supprimer(g, auteur, requete, corps)`
+- L893  `async def _route_rang_deplacer(g, auteur, requete, corps)`
+- L931  `async def _route_rang_role(g, auteur, requete, corps)`
+- L1018  `def _lire_affectations(corps)`
+- L1040  `async def _route_attribuer(g, auteur, requete, corps)`
+- L1120  `async def _route_reprise(g, auteur, requete, corps)`
+- L1185  `def _cle_verrou(genre)`
+- L1195  `def _verrou_membres(corps)`
 
 ### `honeypot.py`
 
@@ -10263,17 +10639,21 @@
 
 ### `insult_filter.py`
 
-- L191  `def _compile_abbr(terms)`
-- L204  `def _ferme_la(texte)`
-- L215  `def _fold(s)`
-- L222  `def _is_cjk(t)`
-- L229  `def _compile_pair(terms)`
-- L260  `def _load()`
-- L291  `def _hit(pair, text)`
-- L308  `def scan(raw, normalized)`
-- L357  `def ableist_hit(raw, normalized)`
-- L384  `def threat_hit(raw, normalized)`
-- L410  `def threat_soft_hit(raw, normalized)`
+- L217  `def _plier_texte(texte)`
+- L228  `def langue(texte, defaut)`
+- L270  `def ambigus(texte, lg, defaut)`
+- L280  `def validisme_en_contexte(texte, lg, defaut)`
+- L298  `def _compile_abbr(terms)`
+- L311  `def _ferme_la(texte)`
+- L322  `def _fold(s)`
+- L329  `def _is_cjk(t)`
+- L336  `def _compile_pair(terms)`
+- L367  `def _load()`
+- L398  `def _hit(pair, text)`
+- L415  `def scan(raw, normalized, lg)`
+- L469  `def ableist_hit(raw, normalized, lg)`
+- L496  `def threat_hit(raw, normalized)`
+- L522  `def threat_soft_hit(raw, normalized)`
 
 ### `invitations.py`
 
@@ -10384,79 +10764,85 @@
 
 ### `metiers.py`
 
-- L200  `def _t(guild_id, cle, **valeurs)`
-- L205  `def _reponse(i, cle, **valeurs)`
-- L219  `def setup(*, get_db, cfg, db_set, role_clan, sanctionnes, journal, guide, epargnes, log)`
-- L232  `def pret()`
-- L236  `def _verrou(cle)`
-- L245  `def _verrou_membre(guild_id, membre_id)`
-- L250  `def _signaler(code, message, detail)`
-- L256  `async def _noter(g, type_, texte, **kw)`
-- L266  `async def _noter_panne(g, membre, type_, panne, texte)`
-- L280  `def reglages_de(c)`
-- L292  `async def reglages(g)`
-- L296  `async def max_metiers(g)`
-- L300  `async def role_du_clan(g, c)`
-- L311  `async def gere(g)`
-- L316  `def _du_clan(membre, clan)`
-- L320  `async def _sanctionnes_de(g)`
-- L331  `async def sous_sanction(g, membre)`
-- L336  `async def epargne(g, membre)`
-- L349  `def _haut_du_bot(g)`
-- L353  `def _amovible(g, role)`
-- L366  `async def metiers_du_catalogue(actifs)`
-- L375  `def _norme(s)`
-- L380  `def noms_choisis(c)`
-- L389  `async def retenir_noms(g, noms)`
-- L398  `def nom_du_role(e, noms)`
-- L411  `def couleur_du_role(e)`
-- L419  `def _emoji(cle)`
-- L424  `def _icone_maison(nom)`
-- L430  `async def options_selecteur(g)`
-- L446  `async def _liens_metiers(guild_id)`
-- L451  `async def _lier(guild_id, cle, role_id, par)`
-- L458  `async def ids_roles_clan(g, c)`
-- L466  `def _role_du_meme_nom(g, nom, exclus)`
-- L476  `async def role_du_metier(g, cle, *, creer, auteur)`
-- L525  `async def _creer_role(g, e, nom, clan)`
-- L548  `async def placer_sous_le_clan(g, role, clan)`
-- L592  `async def icone_du_role(e)`
-- L618  `def _png_carre(data)`
-- L644  `async def appliquer(g, membre, metiers, *, auteur, cause, creer, trace, journaliser)`
-- L672  `async def retirer_roles_clan(g, membre, *, cause, journaliser)`
-- L699  `async def effectifs(g, membre, metiers)`
-- L712  `async def apres_affiche(g, auteur, membre, affiche)`
-- L736  `async def sur_maj_membre(before, after)`
-- L768  `async def reconcilier(g, *, auteur)`
-- L861  `async def donner_aux_affiches(g, cles, *, cause, auteur)`
-- L900  `def planifier_attribution(g, cle, auteur)`
-- L915  `def phrase_bilan(b)`
-- L937  `def _emoji_option(texte)`
-- L968  `def _vue_avis(texte, couleur)`
-- L974  `def _effacer_plus_tard(i, delai)`
-- L991  `async def _avis(i, texte, couleur, delai)`
-- L1000  `async def _sans_echec(i, travail)`
-- L1014  `def _texte_choix(choisis, auto, res, deja, choisis_noms, guild_id)`
-- L1029  `async def choisir(i, valeurs)`
-- L1079  `async def section_guide(g, c)`
-- L1104  `def _texte_change(g, cle)`
-- L1112  `def planifier_guide(g)`
-- L1136  `def lien_guide(g, c)`
-- L1141  `async def invitation(g, membre)`
-- L1157  `async def metiers_du_membre(g, membre)`
-- L1165  `async def inviter_au_choix(g, ch, membre)`
-- L1191  `def _role_sortie(r)`
-- L1197  `async def etat(g)`
-- L1236  `async def _valider_rattaches(g, c, v)`
-- L1258  `async def route_reglages(g, auteur, requete, corps)`
-- L1262  `async def route_regler(g, auteur, requete, corps)`
-- L1292  `def _sans_zeros(d, toujours)`
-- L1298  `async def route_installer(g, auteur, requete, corps)`
-- L1334  `async def route_reconcilier(g, auteur, requete, corps)`
-- L945  `class ChoixMetier(discord.ui.DynamicItem[discord.ui.Select])`
-    - L948  `def __init__(self, options, maxi, placeholder, aucun)`
-    - L960  `async def from_custom_id(cls, interaction, item, match)` @classmethod
-    - L963  `async def callback(self, i)`
+- L237  `def _t(guild_id, cle, **valeurs)`
+- L242  `def _reponse(i, cle, **valeurs)`
+- L256  `def setup(*, get_db, cfg, db_set, role_clan, sanctionnes, journal, guide, epargnes, log)`
+- L269  `def pret()`
+- L273  `def _verrou(cle)`
+- L282  `def _verrou_membre(guild_id, membre_id)`
+- L287  `def _signaler(code, message, detail)`
+- L293  `async def _noter(g, type_, texte, **kw)`
+- L303  `async def _noter_panne(g, membre, type_, panne, texte)`
+- L317  `def reglages_de(c)`
+- L335  `async def reglages(g)`
+- L339  `async def max_metiers(g)`
+- L343  `async def role_du_clan(g, c)`
+- L354  `async def gere(g)`
+- L359  `def _du_clan(membre, clan)`
+- L363  `async def _sanctionnes_de(g)`
+- L374  `async def sous_sanction(g, membre)`
+- L379  `async def epargne(g, membre)`
+- L392  `def _haut_du_bot(g)`
+- L396  `def _amovible(g, role)`
+- L409  `async def metiers_du_catalogue(actifs)`
+- L418  `def _norme(s)`
+- L423  `def noms_choisis(c)`
+- L432  `async def retenir_noms(g, noms)`
+- L441  `def nom_du_role(e, noms)`
+- L454  `def couleur_du_role(e)`
+- L462  `def _emoji(cle)`
+- L467  `def _icone_maison(nom)`
+- L473  `async def options_selecteur(g)`
+- L489  `async def occupes(g, c)`
+- L503  `async def places(g, c)`
+- L516  `async def champs_avec_places(g, champs)`
+- L538  `def metier_des_reponses(metiers, reponses, noms)`
+- L556  `async def _liens_metiers(guild_id)`
+- L561  `async def _lier(guild_id, cle, role_id, par)`
+- L568  `async def ids_roles_clan(g, c)`
+- L576  `def _role_du_meme_nom(g, nom, exclus)`
+- L586  `async def role_du_metier(g, cle, *, creer, auteur)`
+- L635  `async def _creer_role(g, e, nom, clan)`
+- L658  `async def placer_sous_le_clan(g, role, clan)`
+- L702  `async def icone_du_role(e)`
+- L728  `def _png_carre(data)`
+- L754  `async def appliquer(g, membre, metiers, *, auteur, cause, creer, trace, journaliser)`
+- L782  `async def retirer_roles_clan(g, membre, *, cause, journaliser)`
+- L809  `async def effectifs(g, membre, metiers)`
+- L822  `async def apres_affiche(g, auteur, membre, affiche)`
+- L846  `async def sur_maj_membre(before, after)`
+- L878  `async def reconcilier(g, *, auteur)`
+- L971  `async def donner_aux_affiches(g, cles, *, cause, auteur)`
+- L1010  `def planifier_attribution(g, cle, auteur)`
+- L1025  `def phrase_bilan(b)`
+- L1047  `def _emoji_option(texte)`
+- L1078  `def _vue_avis(texte, couleur)`
+- L1084  `def _effacer_plus_tard(i, delai)`
+- L1101  `async def _avis(i, texte, couleur, delai)`
+- L1110  `async def _sans_echec(i, travail)`
+- L1124  `def _texte_choix(choisis, auto, res, deja, choisis_noms, guild_id)`
+- L1139  `async def choisir(i, valeurs)`
+- L1191  `async def section_guide(g, c)`
+- L1216  `def _texte_change(g, cle)`
+- L1224  `def planifier_guide(g)`
+- L1248  `def lien_guide(g, c)`
+- L1253  `async def invitation(g, membre, reponses)`
+- L1271  `async def _attribuer_au_recrutement(g, c, membre, reponses, lien)`
+- L1298  `async def metiers_du_membre(g, membre)`
+- L1306  `async def inviter_au_choix(g, ch, membre)`
+- L1332  `def _role_sortie(r)`
+- L1338  `async def etat(g)`
+- L1382  `async def _valider_rattaches(g, c, v)`
+- L1404  `async def _valider_places(v)`
+- L1421  `async def route_reglages(g, auteur, requete, corps)`
+- L1425  `async def route_regler(g, auteur, requete, corps)`
+- L1461  `def _sans_zeros(d, toujours)`
+- L1467  `async def route_installer(g, auteur, requete, corps)`
+- L1503  `async def route_reconcilier(g, auteur, requete, corps)`
+- L1055  `class ChoixMetier(discord.ui.DynamicItem[discord.ui.Select])`
+    - L1058  `def __init__(self, options, maxi, placeholder, aucun)`
+    - L1070  `async def from_custom_id(cls, interaction, item, match)` @classmethod
+    - L1073  `async def callback(self, i)`
 
 ### `mod_dashboard.py`
 
@@ -11035,21 +11421,23 @@
 - L211  `def _base(chemin)`
 - L222  `async def _appeler_setup(module, deps)`
 - L240  `async def construire(dossier, port, qui, lourd)`
-- L687  `def _boutons_de(vue)`
-- L704  `def _messages_du_faux(salon)`
-- L726  `async def _tables_du_bot(get_db)`
-- L754  `def _date(t)`
-- L758  `async def _remplir(get_db, g, clan_r, salon_annonces, X)`
-- L840  `async def _recrutement_demo(get_db, g, ticket_ouvert, chemin, lourd)`
-- L904  `def _par_tiers(questions)`
-- L919  `async def _candidature_demo(get_db, g, ticket_ouvert)`
-- L990  `async def _chef_demo(get_db, g)`
-- L1016  `async def _affiches_demo(g, X)`
-- L1072  `async def _evenements_demo(ev, g, clan_r, get_db)`
-- L1168  `async def _equipage_demo(g)`
-- L1248  `async def _equipes_demo(g, lourd)`
-- L1298  `async def _remplir_lourd(get_db, g, clan_r, salon)`
-- L1429  `def main()`
+- L707  `def _boutons_de(vue)`
+- L724  `def _messages_du_faux(salon)`
+- L746  `async def _tables_du_bot(get_db)`
+- L774  `def _date(t)`
+- L778  `async def _remplir(get_db, g, clan_r, salon_annonces, X)`
+- L870  `async def _recrutement_demo(get_db, g, ticket_ouvert, chemin, lourd)`
+- L934  `async def _interdictions_demo(g)`
+- L948  `def _par_tiers(questions)`
+- L963  `async def _candidature_demo(get_db, g, ticket_ouvert)`
+- L1034  `async def _chef_demo(get_db, g)`
+- L1060  `async def _affiches_demo(g, X)`
+- L1116  `async def _evenements_demo(ev, g, clan_r, get_db)`
+- L1212  `async def _hierarchie_demo(g)`
+- L1225  `async def _equipage_demo(g)`
+- L1305  `async def _equipes_demo(g, lourd)`
+- L1355  `async def _remplir_lourd(get_db, g, clan_r, salon)`
+- L1486  `def main()`
 
 ### `outils/site_local_port.py`
 
@@ -11366,353 +11754,367 @@
 
 ### `questionnaire.py`
 
-- L629  `def _t(guild_id, cle, **valeurs)`
-- L634  `def _questions_txt(n)`
-- L647  `def _gid(i)`
-- L669  `def setup(*, get_db, cfg, panneaux, ticket_ouvert, decider, autorise, lien, journal, fichier_banque, fichier_liens, log, extras, liste_noire, web, metier, est_tete, clan, metiers, metiers_membre)`
-- L703  `def pret()`
-- L812  `async def init_db()`
-- L841  `def _normaliser(texte)` @functools.lru_cache
-- L857  `def normaliser(texte)`
-- L862  `def distance(a, b)`
-- L880  `def _ressemblance(a, b)`
-- L891  `def _mot_proche(mot, mots)`
-- L900  `def _comparer(cand, att, nombre, liste)`
-- L930  `def _indication(reponse, attendue, variantes, type_)` @functools.lru_cache
-- L950  `def indication(reponse_candidat, attendue, variantes, type_)`
-- L959  `def fuite(question, reponse, variantes)`
-- L982  `def _maintenant()`
-- L986  `def _net(texte, lignes)`
-- L995  `def _cle(texte)`
-- L1000  `def extrait(texte, n)`
-- L1010  `def _md(texte)`
-- L1015  `def _theme(texte)`
-- L1024  `def _difficulte(valeur)`
-- L1033  `def _type(valeur)`
-- L1040  `def _url(valeur)`
-- L1045  `def _variantes(brut, reponse)`
-- L1071  `def _json_liste(texte)`
-- L1079  `def _texte(corps, cle, *, mini, maxi, requis, lignes)`
-- L1098  `def _chiffres(v, longueur)`
-- L1110  `def _entier(corps, cle, *, requis, mini, maxi)`
-- L1123  `def _booleen(corps, cle, defaut)`
-- L1130  `def _ident_question(corps, cle, requis)`
-- L1141  `def _ids(brut, cle)`
-- L1152  `def _erreur(message, status, **extra)`
-- L1156  `async def _lire(sql, args)`
-- L1162  `async def _un(sql, args)`
-- L1167  `async def _lire_tolerant(sql, args)`
-- L1180  `async def _lire_dans(db, sql, args, tolerant)`
-- L1192  `async def _par_paquets(db, sql, avant, ids, tolerant)`
-- L1203  `def _verrou(gid, tid)`
-- L1214  `def _garder(coro)`
-- L1221  `async def _au_journal(g, type_, texte, membre_id, auteur_id)`
-- L1231  `async def _noter(guild_id, tid, quoi, par, detail)`
-- L1239  `def _qui(g, uid)`
-- L1246  `def _ident(g, uid)`
-- L1257  `def _ping(uid)`
-- L1262  `def _icone(nom)`
-- L1268  `def _lien_discord(g, salon, message)`
-- L1284  `def _lire_fichier(chemin, cles)`
-- L1298  `def depuis_fichier(x, ordre)`
-- L1322  `def _empreinte(q)`
-- L1327  `def _lien_depuis_fichier(x)`
-- L1339  `async def semer(guild_id)`
-- L1406  `async def _assurer(guild_id)`
-- L1418  `def _question(row)`
-- L1426  `def posable(q)`
-- L1431  `async def questions(guild_id)`
-- L1438  `async def reglages(guild_id)`
-- L1449  `async def liens(guild_id)`
-- L1456  `async def modeles(guild_id)`
-- L1464  `async def derniere_selection(guild_id)`
-- L1485  `def _defauts(panneau)`
-- L1493  `async def parcours(guild_id, panneau)`
-- L1514  `def _delai(p)`
-- L1519  `def fiche_du_panneau(pnl)`
-- L1535  `def fiche_effective(p, pnl)`
-- L1540  `def avertissements_fiche(champs)`
-- L1553  `def _champ_fiche(x)`
-- L1596  `def _etape_gabarit(x)`
-- L1621  `async def enregistrer_parcours(g, auteur, corps)`
-- L1686  `def texte_des_liens(liens_)`
-- L1690  `def _conflit(q, gardees, dans_liens, accueil)`
-- L1710  `def _sans_devoiler(qs, liens_, contexte)`
-- L1727  `def _automatique(banque, nombre, liens_, contexte, *, deja, theme)`
-- L1757  `def etapes_de(e)`
-- L1773  `def _filtrer(ids, par_id, motifs, vus)`
-- L1794  `def _assembler(lots, liens_, contexte, motifs, origine, ids_demandes)`
-- L1821  `async def _par_defaut(guild_id, banque, liens_, contexte, deja)`
-- L1830  `async def selection(guild_id, corps, contexte, panneau, personnelles)`
-- L1912  `async def _selon_gabarit(guild_id, gabarit, banque, par_id, liens_, contexte)`
-- L1952  `async def annonce(guild_id, contexte, panneau)`
-- L1958  `async def annonce_detail(guild_id, contexte, panneau)`
-- L1970  `def nb_pages(n)`
-- L1974  `def questions_de_la_page(qs, page)`
-- L1978  `def pages_envoi(qs)`
-- L1994  `def premiere_incomplete(qs, reponses)`
-- L2002  `def _couper(texte, n)`
-- L2017  `def _ajuster(parts, budget, ordre)`
-- L2033  `def _bloc_liens(liens_, guild_id, budget)`
-- L2058  `def _wiki_et_liens(liens_, guild_id, budget)`
-- L2063  `def _etapes_txt(n)`
-- L2069  `def _questions_en(n)`
-- L2074  `def _variables_nombres(nb_etapes, nb_questions)`
-- L2080  `def _texte_fiche(guild_id, reponses)`
-- L2090  `def _entete_etape(guild_id, etape)`
-- L2100  `def _bouton(gid, tid, code, cle)`
-- L2104  `def _etat_equipe(d)`
-- L2145  `def carte_affiche(d)`
-- L2192  `def carte_etape1(tid, etat, *, nombre, par, candidat, quand, guild_id)`
-- L2228  `def _groupes(qs, guild_id, etapes)`
-- L2249  `def cartes_etape2(envoi, etat, *, quand)`
-- L2293  `def carte_invitation(envoi)`
-- L2309  `def carte_apercu(envoi, page, reponses, *, corriger)`
-- L2364  `def _vue_decision(texte, couleur, boutons)`
-- L2374  `def _numeros(e, fiche)`
-- L2386  `def panneau_direction(d)`
-- L2409  `def carte_etape(e, etat, *, quand)`
-- L2454  `def _vue_texte(texte, couleur, boutons)`
-- L2469  `def _effacer_plus_tard(i, delai)`
-- L2485  `async def _acquitter(i)`
-- L2491  `async def _avis(i, texte, *, efface, delai, couleur, boutons)`
-- L2503  `async def _sans_echec(i, travail)`
-- L2604  `async def _formulaire_en_echec(i, ou, error)`
-- L2670  `def _banniere()`
-- L2676  `async def _charger_textes(guild_id)`
-- L2681  `def _web()`
-- L2706  `def _page_candidat()`
-- L2711  `async def _donnees_affiche(g, tid, s, pris_par)`
-- L2754  `async def vue_direction(g, tid)`
-- L2762  `async def citer_sur_affiche(g, ch, tid, mentions, autorises)`
-- L2776  `async def reprendre_affiche(g, ch, tid)`
-- L2784  `async def vue_affiche(g, tid, *, pris_par, s)`
-- L2792  `async def est_affiche(guild_id, tid)`
-- L2798  `async def poser_affiche(g, ch, tid, candidat_id, pnl, panneau)`
-- L2834  `async def poser_etape1(g, ch, tid, candidat_id, *, nombre)`
-- L2869  `async def _suivi(guild_id, tid)`
-- L2875  `async def _suivi_ou_creer(g, tid, tk, ch)`
-- L2887  `def _envoi_dict(r)`
-- L2897  `async def _envoi(eid)`
-- L2902  `async def _envois_du_ticket(guild_id, tid)`
-- L2908  `def _reponse_lue(texte, recu)`
-- L2912  `def _correction_lue(juste, par, le, version)`
-- L2917  `async def _reponses(eid)`
-- L2922  `async def _corrections(eid)`
-- L2928  `async def _envois_complets(db, ids)`
-- L2944  `async def _transcripts_lots(db, guild_id, tids)`
-- L2960  `def bilan(questions_, reponses_, corrections_, exigence)`
-- L2975  `async def _bilan_courant(s, exigence)`
-- L2984  `async def _editer(ch, mid, vue)`
-- L2997  `async def _editer_carte_staff(g, ch, s, etat, **kw)`
-- L3009  `async def _editer_cartes(ch, e, etat, quand)`
-- L3028  `def _invitation(e)`
-- L3033  `async def _poster_cartes(ch, e)`
-- L3053  `async def _ticket(g, tid)`
-- L3069  `def _texte_etape(etape)`
-- L3078  `def _mode(s)`
-- L3084  `async def _personnelles(g, auteur, corps)`
-- L3130  `async def _mp(g, uid, texte, boutons)`
-- L3153  `async def _publier(g, ch, s, e)`
-- L3163  `async def _retirer_message_etape(ch, e)`
-- L3182  `async def _salon_ticket(g, e)`
-- L3195  `async def clore_envoi(e, t)`
-- L3211  `async def annoncer_reponses(g, e, t)`
-- L3229  `async def etape_recue(g, e, etape)`
-- L3248  `async def etape_suivante(g, envoi_id, auteur)`
-- L3310  `async def _etape_complete(i, e)`
-- L3327  `async def _tete(i)`
-- L3335  `async def _apercu(i, e, page)`
-- L3344  `async def apercu_page(i, eid, page)`
-- L3356  `async def _lien_web_candidat(i, e, fn)`
-- L3373  `async def envoyer(g, tid, auteur, corps, *, depuis)`
-- L3478  `async def refuser(g, tid, auteur, *, depuis, note)`
-- L3542  `def _vue_candidat(uid, texte)`
-- L3548  `def _planifier_fermeture(g, tid, delai, essai)`
-- L3556  `async def _decider_avec(g, tid, auteur, accepte, motif, **kw)`
-- L3567  `async def _fermer_plus_tard(g, tid, delai, essai)`
-- L3595  `async def accepter(g, tid, auteur, *, forcer)`
-- L3674  `async def sur_liste_noire(guild_id, membre_id)`
-- L3683  `async def _ecrire_liste_noire_cfg(g, membre_id, ajouter)`
-- L3696  `async def mettre_sur_liste_noire(g, membre_id, *, motif, par, ticket)`
-- L3713  `async def liste_noire_site(g)`
-- L3754  `async def lever_liste_noire(g, auteur, corps)`
-- L3788  `def eliminatoire(champs, reponses)`
-- L3801  `async def eliminer(g, membre, panneau, champ, reponse)`
-- L3824  `async def fiche_ouverture(guild_id, panneau, pnl)`
-- L3886  `async def _clan_role(g)`
-- L3897  `async def du_clan(g, membre)`
-- L3904  `async def _liste_metiers(g)`
-- L3916  `async def _metiers_de(g, membre)`
-- L3931  `def _question_chef(row)`
-- L3941  `async def questions_chef(guild_id)`
-- L3947  `def _pour_metier(q, metier)`
-- L3951  `async def enregistrer_question_chef(g, auteur, corps)`
-- L4012  `async def retirer_question_chef(g, auteur, corps)`
-- L4030  `async def _gabarits_chef(guild_id)`
-- L4037  `def _etapes_ids(brut)`
-- L4053  `async def enregistrer_gabarit_chef(g, auteur, corps)`
-- L4086  `async def _roles_chef(guild_id)`
-- L4091  `def _refus_role_chef(g, role)`
-- L4113  `async def regler_role_chef(g, auteur, corps)`
-- L4158  `async def chefs(guild_id)`
-- L4168  `async def badges_chefs(guild_id)`
-- L4180  `async def chef_de(g, membre_id)`
-- L4189  `async def proposition_chef(g, membre_id, metier)`
-- L4205  `async def proposer_chef(g, auteur, corps)`
-- L4270  `async def _chef_candidature(g, eid)`
-- L4279  `async def decider_chef(g, auteur, corps)`
-- L4359  `async def retirer_chef(g, auteur, corps)`
-- L4392  `async def chefs_site(g)`
-- L4436  `async def chef_dossier(g, eid)`
-- L4466  `async def reprendre_fermetures()`
-- L4480  `async def purger(jours)`
-- L4497  `async def _vieux_envois(db, guild_id, limite)`
-- L4514  `async def nettoyer_regle(guild_id, jours, maintenant)`
-- L4533  `async def compter_regle(guild_id, jours, maintenant)`
-- L4539  `async def _tables(db)`
-- L4552  `async def _candidatures_par_membre(g)`
-- L4613  `def _taille_transcripts(urls)`
-- L4633  `def _effacer_transcripts(urls)`
-- L4657  `async def _concernes_purge(g)`
-- L4674  `async def purge_apercu(g)`
-- L4689  `async def purge_executer(g, auteur, corps)`
-- L4771  `async def nettoyer_liste_noire(guild_id, jours, maintenant)`
-- L4786  `async def compter_liste_noire(guild_id, jours, maintenant)`
-- L4802  `async def nettoyage_site(g)`
-- L4815  `async def nettoyer_maintenant(g, auteur)`
-- L4839  `async def demarrer(bot)`
-- L4856  `async def _peut(i)`
-- L4860  `async def etape1_bouton(i, d, tid)`
-- L4909  `async def _refuser_depuis_discord(i, tid, note)`
-- L4922  `async def _lien_site(i, tid)`
-- L4934  `async def ouvrir_formulaire(i, eid, page)`
-- L4972  `async def _garder_page(e, textes)`
-- L4990  `async def soumettre_page(i, eid, page, valeurs)`
-- L5034  `async def _terminer(i, e)`
-- L5046  `def etape_de_question(q)`
-- L5054  `def derniere_etape(e)`
-- L5059  `def _textes_complets(e, reponses, etape)`
-- L5073  `async def _garder_reponses(db, e, textes, t)`
-- L5080  `async def envoyer_etape(e, t, etape, reponses, g)`
-- L5112  `async def envoyer_tout(e, t, reponses, g)`
-- L5138  `def page_web(url)`
-- L5150  `def _question_site(g, q, dans_liens, pages_liens)`
-- L5161  `def _modele_site(g, m, par_id)`
-- L5167  `async def banque(g)`
-- L5214  `def _blocs(vue)`
-- L5246  `def _texte_blocs(gid, *textes, couleur, boutons)`
-- L5255  `async def _messages_parcours(g, pid, p, pnl, fiche, nb_e, nb_q)`
-- L5348  `async def parcours_site(g, pid)`
-- L5366  `async def parcours_tous(g)`
-- L5381  `def _q_resume(q)`
-- L5387  `async def proposition(g, tid)`
-- L5408  `async def apercu_candidat(g, *, ticket, envoi)`
-- L5448  `async def _question_par_id(g, qid)`
-- L5453  `async def enregistrer_question(g, auteur, corps)`
-- L5523  `async def retirer_question(g, auteur, corps)`
-- L5543  `async def enregistrer_liens(g, auteur, corps)`
-- L5587  `async def enregistrer_reglages(g, auteur, corps)`
-- L5607  `async def enregistrer_modele(g, auteur, corps)`
-- L5669  `async def retirer_modele(g, auteur, corps)`
-- L5684  `def _indications(qs, reps)`
-- L5690  `async def _envoi_site(g, e, exigence)`
-- L5721  `def _vue_direct()`
-- L5725  `async def dossier(g, tid)`
-- L5802  `async def suivi(g, recents)`
-- L5859  `async def corriger(g, auteur, corps)`
-- L5918  `async def _transcript_du_ticket(g, tid)`
-- L5933  `def _action(etape, e)`
-- L5958  `async def decidees(g, requete)`
-- L6012  `def _ticket_requis(source, cle)`
-- L6016  `async def _r_banque(g, auteur, requete, corps)`
-- L6020  `async def _r_modeles(g, auteur, requete, corps)`
-- L6025  `def _avec_journal(status, rep, texte)`
-- L6033  `async def _r_question(g, auteur, requete, corps)`
-- L6040  `async def _r_question_retirer(g, auteur, requete, corps)`
-- L6047  `async def _r_liens(g, auteur, requete, corps)`
-- L6052  `async def _r_reglages(g, auteur, requete, corps)`
-- L6058  `async def _r_modele(g, auteur, requete, corps)`
-- L6066  `async def _r_modele_retirer(g, auteur, requete, corps)`
-- L6071  `async def _r_dossier(g, auteur, requete, corps)`
-- L6080  `async def _r_suivi(g, auteur, requete, corps)`
-- L6084  `async def _r_etape1(g, auteur, requete, corps)`
-- L6098  `async def _r_corriger(g, auteur, requete, corps)`
-- L6105  `async def _r_decision(g, auteur, requete, corps)`
-- L6128  `async def _r_parcours(g, auteur, requete, corps)`
-- L6132  `async def _r_parcours_ecrire(g, auteur, requete, corps)`
-- L6139  `async def _r_proposition(g, auteur, requete, corps)`
-- L6147  `async def _r_apercu(g, auteur, requete, corps)`
-- L6155  `async def _r_etape_suivante(g, auteur, requete, corps)`
-- L6179  `async def _r_decidees(g, auteur, requete, corps)`
-- L6183  `async def _r_liste_noire(g, auteur, requete, corps)`
-- L6187  `async def _r_liste_noire_lever(g, auteur, requete, corps)`
-- L6191  `async def _r_nettoyage(g, auteur, requete, corps)`
-- L6195  `async def _r_nettoyage_lancer(g, auteur, requete, corps)`
-- L6199  `async def _r_purge(g, auteur, requete, corps)`
-- L6203  `async def _r_purge_lancer(g, auteur, requete, corps)`
-- L6207  `async def _r_chefs(g, auteur, requete, corps)`
-- L6211  `async def _r_chef_question(g, auteur, requete, corps)`
-- L6218  `async def _r_chef_question_retirer(g, auteur, requete, corps)`
-- L6225  `async def _r_chef_gabarit(g, auteur, requete, corps)`
-- L6230  `async def _r_chef_proposition(g, auteur, requete, corps)`
-- L6241  `async def _r_chef_proposer(g, auteur, requete, corps)`
-- L6245  `async def _r_chef_dossier(g, auteur, requete, corps)`
-- L6253  `async def _r_chef_decision(g, auteur, requete, corps)`
-- L6257  `async def _r_chef_retirer(g, auteur, requete, corps)`
-- L6261  `async def _r_chef_role(g, auteur, requete, corps)`
-- L6265  `async def _r_chef(g, auteur, requete, corps)`
-- L6272  `def _objet(genre, valeur)`
-- L6277  `async def _v_corriger(c)`
-- L6288  `def _v_suivante(c)`
-- L6293  `def _route(methode, fn, *, hors_ligne, corps_max, grave, verrou)`
-- L978  `class _Invalide(Exception)`
-- L2521  `class BoutonEtape1(discord.ui.DynamicItem[discord.ui.Button])`
-    - L2534  `def __init__(self, d, ticket, libelle)`
-    - L2541  `async def from_custom_id(cls, interaction, item, match)` @classmethod
-    - L2544  `async def callback(self, i)`
-- L2548  `class BoutonRepondre(discord.ui.DynamicItem[discord.ui.Button])`
-    - L2553  `def __init__(self, envoi, libelle)`
-    - L2559  `async def from_custom_id(cls, interaction, item, match)` @classmethod
-    - L2562  `async def callback(self, i)`
-- L2566  `class BoutonPage(discord.ui.DynamicItem[discord.ui.Button])`
-    - L2569  `def __init__(self, envoi, page, pages, libelle)`
-    - L2576  `async def from_custom_id(cls, interaction, item, match)` @classmethod
-    - L2579  `async def callback(self, i)`
-- L2583  `class BoutonApercu(discord.ui.DynamicItem[discord.ui.Button])`
-    - L2586  `def __init__(self, envoi, page, libelle, desactive, cote)`
-    - L2594  `async def from_custom_id(cls, interaction, item, match)` @classmethod
-    - L2597  `async def callback(self, i)`
-- L2615  `class FormulaireRefus(discord.ui.Modal)`
-    - L2619  `def __init__(self, ticket, guild_id, candidature)`
-    - L2630  `async def on_submit(self, i)`
-    - L2633  `async def on_error(self, i, error)`
-- L2637  `class FormulairePage(discord.ui.Modal)`
-    - L2641  `def __init__(self, envoi, page)`
-    - L2658  `async def on_submit(self, i)`
-    - L2662  `async def on_error(self, i, error)`
-- L3829  `class FormulaireFiche(discord.ui.Modal)`
-    - L3834  `def __init__(self, champs, *, guild_id, sur_envoi)`
-    - L3854  `def valeurs(self)`
-    - L3869  `async def on_submit(self, i)`
-    - L3873  `async def on_error(self, i, error)`
+- L659  `def _t(guild_id, cle, **valeurs)`
+- L664  `def _questions_txt(n)`
+- L677  `def _gid(i)`
+- L700  `def setup(*, get_db, cfg, panneaux, ticket_ouvert, decider, autorise, lien, journal, fichier_banque, fichier_liens, log, extras, liste_noire, web, metier, est_tete, clan, metiers, metiers_membre, fermer_ticket)`
+- L735  `def pret()`
+- L848  `async def init_db()`
+- L877  `def _normaliser(texte)` @functools.lru_cache
+- L893  `def normaliser(texte)`
+- L898  `def distance(a, b)`
+- L916  `def _ressemblance(a, b)`
+- L927  `def _mot_proche(mot, mots)`
+- L936  `def _comparer(cand, att, nombre, liste)`
+- L966  `def _indication(reponse, attendue, variantes, type_)` @functools.lru_cache
+- L986  `def indication(reponse_candidat, attendue, variantes, type_)`
+- L995  `def fuite(question, reponse, variantes)`
+- L1018  `def _maintenant()`
+- L1022  `def _net(texte, lignes)`
+- L1031  `def _cle(texte)`
+- L1036  `def extrait(texte, n)`
+- L1046  `def _md(texte)`
+- L1051  `def _theme(texte)`
+- L1060  `def _difficulte(valeur)`
+- L1069  `def _type(valeur)`
+- L1076  `def _url(valeur)`
+- L1081  `def _variantes(brut, reponse)`
+- L1107  `def _json_liste(texte)`
+- L1115  `def _texte(corps, cle, *, mini, maxi, requis, lignes)`
+- L1134  `def _chiffres(v, longueur)`
+- L1146  `def _entier(corps, cle, *, requis, mini, maxi)`
+- L1159  `def _booleen(corps, cle, defaut)`
+- L1166  `def _ident_question(corps, cle, requis)`
+- L1177  `def _ids(brut, cle)`
+- L1188  `def _erreur(message, status, **extra)`
+- L1192  `async def _lire(sql, args)`
+- L1198  `async def _un(sql, args)`
+- L1203  `async def _lire_tolerant(sql, args)`
+- L1216  `async def _lire_dans(db, sql, args, tolerant)`
+- L1228  `async def _par_paquets(db, sql, avant, ids, tolerant)`
+- L1239  `def _verrou(gid, tid)`
+- L1250  `def _garder(coro)`
+- L1257  `async def _au_journal(g, type_, texte, membre_id, auteur_id)`
+- L1267  `async def _noter(guild_id, tid, quoi, par, detail)`
+- L1275  `def _qui(g, uid)`
+- L1282  `def _ident(g, uid)`
+- L1293  `def _ping(uid)`
+- L1298  `def _icone(nom)`
+- L1304  `def _lien_discord(g, salon, message)`
+- L1320  `def _lire_fichier(chemin, cles)`
+- L1334  `def depuis_fichier(x, ordre)`
+- L1358  `def _empreinte(q)`
+- L1363  `def _lien_depuis_fichier(x)`
+- L1375  `async def semer(guild_id)`
+- L1442  `async def _assurer(guild_id)`
+- L1454  `def _question(row)`
+- L1462  `def posable(q)`
+- L1467  `async def questions(guild_id)`
+- L1474  `async def reglages(guild_id)`
+- L1485  `async def liens(guild_id)`
+- L1492  `async def modeles(guild_id)`
+- L1500  `async def derniere_selection(guild_id)`
+- L1521  `def _defauts(panneau)`
+- L1529  `async def parcours(guild_id, panneau)`
+- L1550  `def _delai(p)`
+- L1555  `def fiche_du_panneau(pnl)`
+- L1571  `def fiche_effective(p, pnl)`
+- L1576  `def avertissements_fiche(champs)`
+- L1589  `def _champ_fiche(x)`
+- L1632  `def _etape_gabarit(x)`
+- L1657  `async def enregistrer_parcours(g, auteur, corps)`
+- L1722  `def texte_des_liens(liens_)`
+- L1726  `def _conflit(q, gardees, dans_liens, accueil)`
+- L1746  `def _sans_devoiler(qs, liens_, contexte)`
+- L1763  `def _automatique(banque, nombre, liens_, contexte, *, deja, theme)`
+- L1793  `def etapes_de(e)`
+- L1809  `def _filtrer(ids, par_id, motifs, vus)`
+- L1830  `def _assembler(lots, liens_, contexte, motifs, origine, ids_demandes)`
+- L1857  `async def _par_defaut(guild_id, banque, liens_, contexte, deja)`
+- L1866  `async def selection(guild_id, corps, contexte, panneau, personnelles)`
+- L1948  `async def _selon_gabarit(guild_id, gabarit, banque, par_id, liens_, contexte)`
+- L1988  `async def annonce(guild_id, contexte, panneau)`
+- L1994  `async def annonce_detail(guild_id, contexte, panneau)`
+- L2006  `def nb_pages(n)`
+- L2010  `def questions_de_la_page(qs, page)`
+- L2014  `def pages_envoi(qs)`
+- L2030  `def premiere_incomplete(qs, reponses)`
+- L2038  `def _couper(texte, n)`
+- L2053  `def _ajuster(parts, budget, ordre)`
+- L2069  `def _bloc_liens(liens_, guild_id, budget)`
+- L2094  `def _wiki_et_liens(liens_, guild_id, budget)`
+- L2099  `def _etapes_txt(n)`
+- L2105  `def _questions_en(n)`
+- L2110  `def _variables_nombres(nb_etapes, nb_questions)`
+- L2116  `def _texte_fiche(guild_id, reponses)`
+- L2126  `def _entete_etape(guild_id, etape)`
+- L2136  `def _bouton(gid, tid, code, cle)`
+- L2140  `def _etat_equipe(d)`
+- L2181  `def carte_affiche(d)`
+- L2228  `def carte_etape1(tid, etat, *, nombre, par, candidat, quand, guild_id)`
+- L2264  `def _groupes(qs, guild_id, etapes)`
+- L2285  `def cartes_etape2(envoi, etat, *, quand)`
+- L2329  `def carte_invitation(envoi)`
+- L2345  `def carte_apercu(envoi, page, reponses, *, corriger)`
+- L2400  `def _vue_decision(texte, couleur, boutons)`
+- L2410  `def _numeros(e, fiche)`
+- L2422  `def panneau_direction(d)`
+- L2445  `def carte_etape(e, etat, *, quand)`
+- L2490  `def _vue_texte(texte, couleur, boutons)`
+- L2505  `def _effacer_plus_tard(i, delai)`
+- L2521  `async def _acquitter(i)`
+- L2527  `async def _avis(i, texte, *, efface, delai, couleur, boutons)`
+- L2539  `async def _sans_echec(i, travail)`
+- L2640  `async def _formulaire_en_echec(i, ou, error)`
+- L2706  `def _banniere()`
+- L2712  `async def _charger_textes(guild_id)`
+- L2717  `def _web()`
+- L2742  `def _page_candidat()`
+- L2747  `async def _donnees_affiche(g, tid, s, pris_par)`
+- L2790  `async def vue_direction(g, tid)`
+- L2798  `async def citer_sur_affiche(g, ch, tid, mentions, autorises)`
+- L2812  `async def reprendre_affiche(g, ch, tid)`
+- L2820  `async def vue_affiche(g, tid, *, pris_par, s)`
+- L2828  `async def est_affiche(guild_id, tid)`
+- L2834  `async def poser_affiche(g, ch, tid, candidat_id, pnl, panneau)`
+- L2870  `async def poser_etape1(g, ch, tid, candidat_id, *, nombre)`
+- L2905  `async def _suivi(guild_id, tid)`
+- L2911  `async def _suivi_ou_creer(g, tid, tk, ch)`
+- L2923  `def _envoi_dict(r)`
+- L2933  `async def _envoi(eid)`
+- L2938  `async def _envois_du_ticket(guild_id, tid)`
+- L2944  `def _reponse_lue(texte, recu)`
+- L2948  `def _correction_lue(juste, par, le, version)`
+- L2953  `async def _reponses(eid)`
+- L2958  `async def _corrections(eid)`
+- L2964  `async def _envois_complets(db, ids)`
+- L2980  `async def _transcripts_lots(db, guild_id, tids)`
+- L2996  `def bilan(questions_, reponses_, corrections_, exigence)`
+- L3011  `async def _bilan_courant(s, exigence)`
+- L3020  `async def _editer(ch, mid, vue)`
+- L3033  `async def _editer_carte_staff(g, ch, s, etat, **kw)`
+- L3045  `async def _editer_cartes(ch, e, etat, quand)`
+- L3064  `def _invitation(e)`
+- L3069  `async def _poster_cartes(ch, e)`
+- L3089  `async def _ticket(g, tid)`
+- L3105  `def _texte_etape(etape)`
+- L3114  `def _mode(s)`
+- L3120  `async def _personnelles(g, auteur, corps)`
+- L3166  `async def _mp(g, uid, texte, boutons)`
+- L3189  `async def _publier(g, ch, s, e)`
+- L3199  `async def _retirer_message_etape(ch, e)`
+- L3218  `async def _salon_ticket(g, e)`
+- L3231  `async def clore_envoi(e, t)`
+- L3247  `async def annoncer_reponses(g, e, t)`
+- L3265  `async def etape_recue(g, e, etape)`
+- L3284  `async def etape_suivante(g, envoi_id, auteur)`
+- L3346  `async def _etape_complete(i, e)`
+- L3363  `async def _tete(i)`
+- L3371  `async def _apercu(i, e, page)`
+- L3380  `async def apercu_page(i, eid, page)`
+- L3392  `async def _lien_web_candidat(i, e, fn)`
+- L3409  `async def envoyer(g, tid, auteur, corps, *, depuis)`
+- L3514  `async def refuser(g, tid, auteur, *, depuis, note)`
+- L3577  `def _vue_candidat(uid, texte)`
+- L3583  `def _planifier_fermeture(g, tid, delai, essai)`
+- L3591  `async def _decider_avec(g, tid, auteur, accepte, motif, **kw)`
+- L3602  `async def _fermer_plus_tard(g, tid, delai, essai)`
+- L3630  `async def accepter(g, tid, auteur, *, forcer)`
+- L3710  `async def sur_liste_noire(guild_id, membre_id)`
+- L3719  `async def entree_liste_noire(guild_id, membre_id)`
+- L3730  `async def _ecrire_liste_noire_cfg(g, membre_id, ajouter)`
+- L3743  `async def mettre_sur_liste_noire(g, membre_id, *, motif, par, ticket)`
+- L3760  `async def liste_noire_site(g)`
+- L3801  `async def lever_liste_noire(g, auteur, corps)`
+- L3835  `def eliminatoire(champs, reponses)`
+- L3848  `async def eliminer(g, membre, panneau, champ, reponse)`
+- L3869  `async def fiche_ouverture(guild_id, panneau, pnl)`
+- L3933  `async def _clan_role(g)`
+- L3944  `async def du_clan(g, membre)`
+- L3951  `async def _liste_metiers(g)`
+- L3963  `async def _metiers_de(g, membre)`
+- L3978  `def _question_chef(row)`
+- L3988  `async def questions_chef(guild_id)`
+- L3994  `def _pour_metier(q, metier)`
+- L3998  `async def enregistrer_question_chef(g, auteur, corps)`
+- L4059  `async def retirer_question_chef(g, auteur, corps)`
+- L4077  `async def _gabarits_chef(guild_id)`
+- L4084  `def _etapes_ids(brut)`
+- L4100  `async def enregistrer_gabarit_chef(g, auteur, corps)`
+- L4133  `async def _roles_chef(guild_id)`
+- L4138  `def _refus_role_chef(g, role)`
+- L4160  `async def regler_role_chef(g, auteur, corps)`
+- L4205  `async def chefs(guild_id)`
+- L4215  `async def badges_chefs(guild_id)`
+- L4227  `async def chef_de(g, membre_id)`
+- L4236  `async def proposition_chef(g, membre_id, metier)`
+- L4252  `async def proposer_chef(g, auteur, corps)`
+- L4317  `async def _chef_candidature(g, eid)`
+- L4326  `async def decider_chef(g, auteur, corps)`
+- L4406  `async def retirer_chef(g, auteur, corps)`
+- L4439  `async def chefs_site(g)`
+- L4483  `async def chef_dossier(g, eid)`
+- L4513  `async def reprendre_fermetures()`
+- L4527  `async def purger(jours)`
+- L4544  `async def _vieux_envois(db, guild_id, limite)`
+- L4561  `async def nettoyer_regle(guild_id, jours, maintenant)`
+- L4580  `async def compter_regle(guild_id, jours, maintenant)`
+- L4586  `async def _tables(db)`
+- L4599  `async def _candidatures_par_membre(g)`
+- L4660  `def _taille_transcripts(urls)`
+- L4680  `def _effacer_transcripts(urls)`
+- L4704  `async def _concernes_purge(g)`
+- L4721  `async def purge_apercu(g)`
+- L4736  `async def purge_executer(g, auteur, corps)`
+- L4818  `async def nettoyer_liste_noire(guild_id, jours, maintenant)`
+- L4833  `async def compter_liste_noire(guild_id, jours, maintenant)`
+- L4849  `async def nettoyage_site(g)`
+- L4862  `async def nettoyer_maintenant(g, auteur)`
+- L4886  `async def demarrer(bot)`
+- L4920  `def decision_relance(activite, relance, t, apres, fermeture)`
+- L4929  `async def reglages_relance(guild_id)`
+- L4940  `async def _activite(e_id, envoye_le)`
+- L4950  `async def veiller_relances(g, maintenant)`
+- L4979  `async def _relancer(g, tid, uid, salon_id, t, reg)`
+- L5001  `async def _fermer_abandon(g, tid, uid)`
+- L5029  `async def relances_site(g, maintenant)`
+- L5054  `async def regler_relances(g, auteur, corps)`
+- L5083  `async def _veiller_toujours()`
+- L5102  `async def _peut(i)`
+- L5106  `async def etape1_bouton(i, d, tid)`
+- L5155  `async def _refuser_depuis_discord(i, tid, note)`
+- L5168  `async def _lien_site(i, tid)`
+- L5180  `async def ouvrir_formulaire(i, eid, page)`
+- L5218  `async def _garder_page(e, textes)`
+- L5236  `async def soumettre_page(i, eid, page, valeurs)`
+- L5280  `async def _terminer(i, e)`
+- L5292  `def etape_de_question(q)`
+- L5300  `def derniere_etape(e)`
+- L5305  `def _textes_complets(e, reponses, etape)`
+- L5319  `async def _garder_reponses(db, e, textes, t)`
+- L5326  `async def envoyer_etape(e, t, etape, reponses, g)`
+- L5358  `async def envoyer_tout(e, t, reponses, g)`
+- L5384  `def page_web(url)`
+- L5396  `def _question_site(g, q, dans_liens, pages_liens)`
+- L5407  `def _modele_site(g, m, par_id)`
+- L5413  `async def banque(g)`
+- L5460  `def _blocs(vue)`
+- L5492  `def _texte_blocs(gid, *textes, couleur, boutons)`
+- L5501  `async def _messages_parcours(g, pid, p, pnl, fiche, nb_e, nb_q)`
+- L5594  `async def parcours_site(g, pid)`
+- L5612  `async def parcours_tous(g)`
+- L5627  `def _q_resume(q)`
+- L5633  `async def proposition(g, tid)`
+- L5654  `async def apercu_candidat(g, *, ticket, envoi)`
+- L5694  `async def _question_par_id(g, qid)`
+- L5699  `async def enregistrer_question(g, auteur, corps)`
+- L5769  `async def retirer_question(g, auteur, corps)`
+- L5789  `async def enregistrer_liens(g, auteur, corps)`
+- L5833  `async def enregistrer_reglages(g, auteur, corps)`
+- L5853  `async def enregistrer_modele(g, auteur, corps)`
+- L5915  `async def retirer_modele(g, auteur, corps)`
+- L5930  `def _indications(qs, reps)`
+- L5936  `async def _envoi_site(g, e, exigence)`
+- L5967  `def _vue_direct()`
+- L5971  `async def dossier(g, tid)`
+- L6048  `async def suivi(g, recents)`
+- L6105  `async def corriger(g, auteur, corps)`
+- L6164  `async def _transcript_du_ticket(g, tid)`
+- L6179  `def _action(etape, e)`
+- L6204  `async def decidees(g, requete)`
+- L6258  `def _ticket_requis(source, cle)`
+- L6262  `async def _r_banque(g, auteur, requete, corps)`
+- L6266  `async def _r_modeles(g, auteur, requete, corps)`
+- L6271  `def _avec_journal(status, rep, texte)`
+- L6279  `async def _r_question(g, auteur, requete, corps)`
+- L6286  `async def _r_question_retirer(g, auteur, requete, corps)`
+- L6293  `async def _r_liens(g, auteur, requete, corps)`
+- L6298  `async def _r_reglages(g, auteur, requete, corps)`
+- L6304  `async def _r_modele(g, auteur, requete, corps)`
+- L6312  `async def _r_modele_retirer(g, auteur, requete, corps)`
+- L6317  `async def _r_dossier(g, auteur, requete, corps)`
+- L6326  `async def _r_suivi(g, auteur, requete, corps)`
+- L6330  `async def _r_etape1(g, auteur, requete, corps)`
+- L6344  `async def _r_corriger(g, auteur, requete, corps)`
+- L6351  `async def _r_decision(g, auteur, requete, corps)`
+- L6374  `async def _r_parcours(g, auteur, requete, corps)`
+- L6378  `async def _r_parcours_ecrire(g, auteur, requete, corps)`
+- L6385  `async def _r_proposition(g, auteur, requete, corps)`
+- L6393  `async def _r_apercu(g, auteur, requete, corps)`
+- L6401  `async def _r_etape_suivante(g, auteur, requete, corps)`
+- L6425  `async def _r_decidees(g, auteur, requete, corps)`
+- L6429  `async def _r_relances(g, auteur, requete, corps)`
+- L6433  `async def _r_relances_regler(g, auteur, requete, corps)`
+- L6437  `async def _r_liste_noire(g, auteur, requete, corps)`
+- L6441  `async def _r_liste_noire_lever(g, auteur, requete, corps)`
+- L6445  `async def _r_nettoyage(g, auteur, requete, corps)`
+- L6449  `async def _r_nettoyage_lancer(g, auteur, requete, corps)`
+- L6453  `async def _r_purge(g, auteur, requete, corps)`
+- L6457  `async def _r_purge_lancer(g, auteur, requete, corps)`
+- L6461  `async def _r_chefs(g, auteur, requete, corps)`
+- L6465  `async def _r_chef_question(g, auteur, requete, corps)`
+- L6472  `async def _r_chef_question_retirer(g, auteur, requete, corps)`
+- L6479  `async def _r_chef_gabarit(g, auteur, requete, corps)`
+- L6484  `async def _r_chef_proposition(g, auteur, requete, corps)`
+- L6495  `async def _r_chef_proposer(g, auteur, requete, corps)`
+- L6499  `async def _r_chef_dossier(g, auteur, requete, corps)`
+- L6507  `async def _r_chef_decision(g, auteur, requete, corps)`
+- L6511  `async def _r_chef_retirer(g, auteur, requete, corps)`
+- L6515  `async def _r_chef_role(g, auteur, requete, corps)`
+- L6519  `async def _r_chef(g, auteur, requete, corps)`
+- L6526  `def _objet(genre, valeur)`
+- L6531  `async def _v_corriger(c)`
+- L6542  `def _v_suivante(c)`
+- L6547  `def _route(methode, fn, *, hors_ligne, corps_max, grave, verrou)`
+- L1014  `class _Invalide(Exception)`
+- L2557  `class BoutonEtape1(discord.ui.DynamicItem[discord.ui.Button])`
+    - L2570  `def __init__(self, d, ticket, libelle)`
+    - L2577  `async def from_custom_id(cls, interaction, item, match)` @classmethod
+    - L2580  `async def callback(self, i)`
+- L2584  `class BoutonRepondre(discord.ui.DynamicItem[discord.ui.Button])`
+    - L2589  `def __init__(self, envoi, libelle)`
+    - L2595  `async def from_custom_id(cls, interaction, item, match)` @classmethod
+    - L2598  `async def callback(self, i)`
+- L2602  `class BoutonPage(discord.ui.DynamicItem[discord.ui.Button])`
+    - L2605  `def __init__(self, envoi, page, pages, libelle)`
+    - L2612  `async def from_custom_id(cls, interaction, item, match)` @classmethod
+    - L2615  `async def callback(self, i)`
+- L2619  `class BoutonApercu(discord.ui.DynamicItem[discord.ui.Button])`
+    - L2622  `def __init__(self, envoi, page, libelle, desactive, cote)`
+    - L2630  `async def from_custom_id(cls, interaction, item, match)` @classmethod
+    - L2633  `async def callback(self, i)`
+- L2651  `class FormulaireRefus(discord.ui.Modal)`
+    - L2655  `def __init__(self, ticket, guild_id, candidature)`
+    - L2666  `async def on_submit(self, i)`
+    - L2669  `async def on_error(self, i, error)`
+- L2673  `class FormulairePage(discord.ui.Modal)`
+    - L2677  `def __init__(self, envoi, page)`
+    - L2694  `async def on_submit(self, i)`
+    - L2698  `async def on_error(self, i, error)`
+- L3874  `class FormulaireFiche(discord.ui.Modal)`
+    - L3879  `def __init__(self, champs, *, guild_id, sur_envoi)`
+    - L3901  `def valeurs(self)`
+    - L3916  `async def on_submit(self, i)`
+    - L3920  `async def on_error(self, i, error)`
 
 ### `questions.py`
 
-- L50  `def setup(*, get_db, est_staff, log)`
-- L58  `async def init_db()`
-- L70  `def nettoyer(texte)`
-- L77  `def est_question(texte)`
-- L87  `def salon_public(ch)`
-- L102  `def _staff(g, membre, c)`
-- L111  `async def _charger(guild_id, salon_id, t)`
-- L122  `async def _clore(q, statut, par, par_staff, lien, t)`
-- L129  `async def sur_message(msg, c, maintenant)`
-- L187  `async def marquer(guild_id, qid, statut, par, maintenant)`
-- L220  `async def _lignes(sql, args)`
-- L226  `def _lien(guild_id, q)`
-- L230  `async def lister(guild_id, maintenant)`
-- L249  `async def du_membre(guild_id, membre_id)`
+- L72  `def setup(*, get_db, est_staff, log)`
+- L80  `async def init_db()`
+- L92  `def nettoyer(texte)`
+- L99  `def plat(texte)`
+- L106  `def est_question(texte)`
+- L116  `def salon_public(ch)`
+- L131  `def _staff(g, membre, c)`
+- L140  `async def _charger(guild_id, salon_id, t)`
+- L151  `async def _clore(q, statut, par, par_staff, lien, t)`
+- L158  `async def sur_message(msg, c, maintenant)`
+- L216  `async def marquer(guild_id, qid, statut, par, maintenant)`
+- L249  `async def marquer_bot(guild_id, message_id, auteur_id, salon_id, maintenant)`
+- L267  `async def _lignes(sql, args)`
+- L273  `def _lien(guild_id, q)`
+- L277  `async def lister(guild_id, maintenant)`
+- L296  `async def du_membre(guild_id, membre_id)`
 
 ### `raid_detector.py`
 
@@ -11886,6 +12288,42 @@
     - L1046  `async def _cb_tableau(self, i)`
     - L1050  `async def _journal(self, g, texte, auteur_id)`
 
+### `reponses_auto.py`
+
+- L118  `def langue_de(texte)`
+- L128  `def _sujet(bas, cles)`
+- L132  `def _nomme_un_jeu(p)`
+- L136  `def classer(texte, jeu_connu)`
+- L168  `def jeux_du_lieu(salon, jeux)`
+- L177  `def jeux_vises(texte, salon, jeux)`
+- L182  `def decider(historique, t, demande, aide)`
+- L232  `def _t(gid, cle, **valeurs)`
+- L248  `def setup(*, get_db, cfg, db_set, destinations, est_staff, langue, exclus, est_ticket, effacer_plus_tard, log)`
+- L262  `def pret()`
+- L266  `async def init_db()`
+- L280  `def _verrou(gid)`
+- L284  `def _staff(g, m, c)`
+- L297  `def lire_reglages(c)`
+- L303  `def coupe_ici(regl, salon, jeux_lieu)`
+- L311  `def _jeux_aide(c, cibles, regl)`
+- L332  `def vue_aide(gid, jeux, langue, rappel, ticket)`
+- L360  `def _adresse_a_quelqu_un(msg, g, c)`
+- L371  `def _observer(msg, staff)`
+- L386  `async def _historique(gid, uid, sujet, depuis)`
+- L393  `async def _deja_note(gid, mid)`
+- L399  `async def _cadence(gid, uid, sid, sujet, t)`
+- L416  `async def _noter(g, msg, t, genre, sujet, jeux, langue, raison, reponse_id)`
+- L429  `async def sur_message(msg, c, maintenant, attente)`
+- L527  `def _personne(g, uid)`
+- L535  `def _nom_salon(g, sid)`
+- L540  `def _libelle(sujet, jeux)`
+- L548  `def _salons_du_site(g, c, regl)`
+- L573  `def _reglages_site(g, c)`
+- L582  `async def surveillance(g, c, maintenant)`
+- L615  `async def regler(g, auteur, corps)`
+- L654  `async def _r_lire(g, auteur, requete, corps)`
+- L658  `async def _r_regler(g, auteur, requete, corps)`
+
 ### `roblox_news.py`
 
 - L113  `def _memoriser(cache, cle, valeur, maximum)`
@@ -12031,224 +12469,228 @@
 
 ### `site_equipage.py`
 
-- L86  `def _t(g, cle, **valeurs)`
-- L217  `def libelles_page(g)`
-- L223  `def textes_page(g)`
-- L228  `def setup(*, get_db, cfg, log)`
-- L235  `def _signaler(code, message, ex, detail)`
-- L243  `def _verrou_ecriture()`
-- L252  `async def init_db()`
-- L299  `def pret()`
-- L307  `async def _role_clan(g, c)`
-- L312  `def _membres_clan(role)`
-- L316  `def _mois(t)`
-- L320  `def _douze_mois(maintenant)`
-- L331  `def _media_sortie(ident)`
-- L339  `def sans_emoji(texte)`
-- L344  `def texte_discord(texte, g, maximum)`
-- L378  `def _type_par(types, cle, motif)`
-- L388  `def _affiche_publique(g, a, elements)`
-- L402  `def _nom_affiche(g, a)`
-- L410  `async def _affiches_actives(g)`
-- L414  `def _cle_tri(g, a)`
-- L425  `def _ligne_bloc(r)`
-- L437  `async def _blocs(guild_id)`
-- L444  `async def _bloc(guild_id, ident)`
-- L452  `def depart()`
-- L473  `async def _assurer_depart(g)`
-- L500  `def _sortie_bloc(b, edition)`
-- L513  `async def _media_valide(g, v, champ, requis)`
-- L529  `async def _valider_contenu(g, type_, d)`
-- L567  `def _titre_bloc(type_, contenu)`
-- L580  `async def _actualites_direction(guild_id, limite)`
-- L588  `def _sortie_actu(a, edition)`
-- L597  `async def _publications(g, maintenant, public)`
-- L634  `async def _recrues(g)`
-- L651  `async def actualites_auto(g, maintenant, publications, recrues, lignes)`
-- L690  `def _repartition(lignes, type_cle, elements)`
-- L704  `def _pas_rond(maximum)`
-- L711  `def _tranches(niveaux)`
-- L719  `def _mediane(valeurs)`
-- L727  `async def analyses(g, maintenant, lignes, publications, recrues)`
-- L803  `def brancher_badges_chef(fn)`
-- L810  `async def badges_chef(guild_id)`
-- L829  `async def _equipes(guild_id)`
-- L846  `def _type_metier(types)`
-- L850  `def type_equipe(brut, elements, tm)`
-- L863  `def rangs_grades(types, elements)`
-- L872  `def cle_hierarchie(a, nom, rangs)`
-- L881  `async def _valider_equipe(g, corps)`
-- L919  `def _nom_membre(g, mid)`
-- L924  `async def equipes_direction(g)`
-- L947  `async def equipes_lues(g, lignes, *, publiques)`
-- L993  `def _sortie_equipe_conflit(e, g)`
-- L999  `async def _route_equipes(g, auteur, requete, corps)`
-- L1004  `async def _route_equipe(g, auteur, requete, corps)`
-- L1065  `async def _route_equipe_supprimer(g, auteur, requete, corps)`
-- L1082  `async def _route_equipe_deplacer(g, auteur, requete, corps)`
-- L1113  `async def lecture_depart(g, membre, session, requete)`
-- L1131  `async def lecture_equipage(g, membre, session, requete)`
-- L1166  `async def lecture_accueil(g, membre, session, requete)`
-- L1208  `async def medias_permis(g)`
-- L1230  `async def medias_utilises(guild_id)`
-- L1252  `async def _accueil_direction(g)`
-- L1256  `def _apres_ecriture(g)`
-- L1261  `def generation(guild_id)`
-- L1267  `async def vitrine_masquees(guild_id)`
-- L1274  `async def _route_bloc(g, auteur, requete, corps)`
-- L1321  `async def _route_bloc_visible(g, auteur, requete, corps)`
-- L1345  `async def _route_bloc_public(g, auteur, requete, corps)`
-- L1371  `async def _route_vitrine_affiche(g, auteur, requete, corps)`
-- L1402  `async def _route_bloc_deplacer(g, auteur, requete, corps)`
-- L1430  `async def _route_bloc_supprimer(g, auteur, requete, corps)`
-- L1447  `async def _route_actualite(g, auteur, requete, corps)`
-- L1492  `async def _route_actualite_retirer(g, auteur, requete, corps)`
-- L1509  `def _cle_verrou(genre)`
-- L1551  `async def lien_equipage(i)`
-- L1569  `def _vue_avis(texte, couleur, lien, bouton)`
-- L1578  `def _effacer_plus_tard(i, delai)`
-- L1595  `async def envoyer_lien(i)`
-- L1640  `def lien_vitrine()`
-- L1645  `async def section_guide(g, c)`
-- L1609  `class BoutonSiteEquipage(discord.ui.DynamicItem[Button])`
-    - L1612  `def __init__(self, libelle)`
-    - L1618  `async def from_custom_id(cls, interaction, item, match)` @classmethod
-    - L1621  `async def callback(self, i)`
+- L87  `def _t(g, cle, **valeurs)`
+- L218  `def libelles_page(g)`
+- L224  `def textes_page(g)`
+- L229  `def setup(*, get_db, cfg, log)`
+- L236  `def _signaler(code, message, ex, detail)`
+- L244  `def _verrou_ecriture()`
+- L253  `async def init_db()`
+- L300  `def pret()`
+- L308  `async def _role_clan(g, c)`
+- L313  `def _membres_clan(role)`
+- L317  `def _mois(t)`
+- L321  `def _douze_mois(maintenant)`
+- L332  `def _media_sortie(ident)`
+- L340  `def sans_emoji(texte)`
+- L345  `def texte_discord(texte, g, maximum)`
+- L379  `def _type_par(types, cle, motif)`
+- L389  `def _affiche_publique(g, a, elements)`
+- L407  `def _nom_affiche(g, a)`
+- L415  `async def _affiches_actives(g)`
+- L419  `def _cle_tri(g, a)`
+- L430  `def _ligne_bloc(r)`
+- L442  `async def _blocs(guild_id)`
+- L449  `async def _bloc(guild_id, ident)`
+- L457  `def depart()`
+- L478  `async def _assurer_depart(g)`
+- L505  `def _sortie_bloc(b, edition)`
+- L518  `async def _media_valide(g, v, champ, requis)`
+- L534  `async def _valider_contenu(g, type_, d)`
+- L572  `def _titre_bloc(type_, contenu)`
+- L585  `async def _actualites_direction(guild_id, limite)`
+- L593  `def _sortie_actu(a, edition)`
+- L602  `async def _publications(g, maintenant, public)`
+- L639  `async def _recrues(g)`
+- L656  `async def actualites_auto(g, maintenant, publications, recrues, lignes)`
+- L695  `def _repartition(lignes, type_cle, elements)`
+- L709  `def _pas_rond(maximum)`
+- L716  `def _tranches(niveaux)`
+- L724  `def _mediane(valeurs)`
+- L732  `async def analyses(g, maintenant, lignes, publications, recrues)`
+- L814  `def brancher_badges_chef(fn)`
+- L821  `async def badges_chef(guild_id)`
+- L840  `async def _equipes(guild_id)`
+- L857  `def _type_metier(types)`
+- L861  `def type_equipe(brut, elements, tm)`
+- L874  `def rangs_grades(types, elements)`
+- L883  `def cle_hierarchie(a, nom, rangs)`
+- L892  `async def _valider_equipe(g, corps)`
+- L930  `def _nom_membre(g, mid)`
+- L935  `async def equipes_direction(g)`
+- L958  `async def equipes_lues(g, lignes, *, publiques)`
+- L1012  `def _sortie_equipe_conflit(e, g)`
+- L1018  `async def _route_equipes(g, auteur, requete, corps)`
+- L1023  `async def _route_equipe(g, auteur, requete, corps)`
+- L1084  `async def _route_equipe_supprimer(g, auteur, requete, corps)`
+- L1101  `async def _route_equipe_deplacer(g, auteur, requete, corps)`
+- L1132  `async def lecture_depart(g, membre, session, requete)`
+- L1150  `async def lecture_equipage(g, membre, session, requete)`
+- L1192  `async def lecture_accueil(g, membre, session, requete)`
+- L1234  `async def medias_permis(g)`
+- L1256  `async def medias_utilises(guild_id)`
+- L1278  `async def _accueil_direction(g)`
+- L1282  `def _apres_ecriture(g)`
+- L1287  `def generation(guild_id)`
+- L1293  `async def vitrine_masquees(guild_id)`
+- L1300  `async def _route_bloc(g, auteur, requete, corps)`
+- L1347  `async def _route_bloc_visible(g, auteur, requete, corps)`
+- L1371  `async def _route_bloc_public(g, auteur, requete, corps)`
+- L1397  `async def _route_vitrine_affiche(g, auteur, requete, corps)`
+- L1428  `async def _route_bloc_deplacer(g, auteur, requete, corps)`
+- L1456  `async def _route_bloc_supprimer(g, auteur, requete, corps)`
+- L1473  `async def _route_actualite(g, auteur, requete, corps)`
+- L1518  `async def _route_actualite_retirer(g, auteur, requete, corps)`
+- L1535  `def _cle_verrou(genre)`
+- L1577  `async def lien_equipage(i)`
+- L1595  `def _vue_avis(texte, couleur, lien, bouton)`
+- L1604  `def _effacer_plus_tard(i, delai)`
+- L1621  `async def envoyer_lien(i)`
+- L1666  `def lien_vitrine()`
+- L1671  `async def section_guide(g, c)`
+- L1635  `class BoutonSiteEquipage(discord.ui.DynamicItem[Button])`
+    - L1638  `def __init__(self, libelle)`
+    - L1644  `async def from_custom_id(cls, interaction, item, match)` @classmethod
+    - L1647  `async def callback(self, i)`
 
 ### `site_vitrine.py`
 
-- L78  `def _signaler(code, message, ex, detail)`
-- L87  `def pret()`
-- L91  `def oublier(guild_id)`
-- L105  `async def _guilde()`
-- L125  `def _jeton(genre, valeur)`
-- L132  `def _trop(request, genre)`
-- L151  `def _verrou(guild_id)`
-- L163  `def _propre(texte, maximum)`
-- L168  `def _nom_public(a)`
-- L173  `async def _construire(g)`
-- L321  `def icone_servie_publique(s, image)`
-- L330  `def _nombre(n)`
-- L334  `def _clan_ids(role)`
-- L339  `async def _entree(g)`
-- L364  `def _reponse(status, texte, **entetes)`
-- L371  `def _refus_cadence()`
-- L375  `def _origine(request)`
-- L383  `async def _ouvrir(request, genre)`
-- L395  `async def vers_vitrine(request)`
-- L401  `async def page(request)`
-- L435  `async def donnees(request)`
-- L455  `async def image(request)`
-- L483  `async def banniere(request)`
-- L522  `def _police(nom, taille)`
-- L541  `def _texture(nom)`
-- L550  `def _couvrir(im, taille)`
-- L560  `def _ajuster(d, texte, nom, taille, largeur, minimum)`
-- L571  `def _espace(d, centre, texte, f, couleur, espace)`
-- L581  `def _berry(d, x, y, taille, couleur)`
-- L591  `def _silhouette(l, h)`
-- L603  `def _avis(a, l, mention)`
-- L657  `def _poser(fond, im, centre, angle)`
-- L672  `def dessiner_banniere(b)`
+- L80  `def _signaler(code, message, ex, detail)`
+- L89  `def pret()`
+- L93  `def oublier(guild_id)`
+- L107  `async def _guilde()`
+- L127  `def _jeton(genre, valeur)`
+- L134  `def _trop(request, genre)`
+- L153  `def _verrou(guild_id)`
+- L174  `def _avatar_discord_age(uid)`
+- L185  `async def _copier_avatars(g, uids)`
+- L214  `async def _prendre_portraits(g, lot)`
+- L227  `def _propre(texte, maximum)`
+- L232  `def _nom_public(a)`
+- L237  `async def _construire(g)`
+- L418  `def icone_servie_publique(s, image)`
+- L427  `def _nombre(n)`
+- L431  `def _clan_ids(role)`
+- L436  `async def _entree(g)`
+- L461  `def _reponse(status, texte, **entetes)`
+- L468  `def _refus_cadence()`
+- L472  `def _origine(request)`
+- L480  `async def _ouvrir(request, genre)`
+- L492  `async def vers_vitrine(request)`
+- L498  `async def page(request)`
+- L532  `async def donnees(request)`
+- L552  `async def image(request)`
+- L580  `async def banniere(request)`
+- L619  `def _police(nom, taille)`
+- L638  `def _texture(nom)`
+- L647  `def _couvrir(im, taille)`
+- L657  `def _ajuster(d, texte, nom, taille, largeur, minimum)`
+- L668  `def _espace(d, centre, texte, f, couleur, espace)`
+- L678  `def _berry(d, x, y, taille, couleur)`
+- L688  `def _silhouette(l, h)`
+- L700  `def _avis(a, l, mention)`
+- L754  `def _poser(fond, im, centre, angle)`
+- L769  `def dessiner_banniere(b)`
 
 ### `social_media.py`
 
-- L466  `def _clean_handle(handle)`
-- L486  `def _clean_yt_handle(handle)`
-- L515  `def extraire_channel_id(html)`
-- L547  `def date_relative(textes)`
-- L570  `def videos_de_la_page(html, handle, maximum)`
-- L1068  `def _subs_path(guild_id)`
-- L1072  `def _anns_path(guild_id)`
-- L1089  `def _lire_json_bloquant(path)`
-- L1093  `async def _read_json(path)`
-- L1097  `def _ecrire_json_bloquant(path, texte)`
-- L1105  `async def _write_json(path, payload)`
-- L1610  `def default_template(platform, post_type)`
-- L1623  `def render_template(sub, post)`
-- L53  `class Platform(str, Enum)`
-- L62  `class PostType(str, Enum)`
-- L102  `class SocialPost` @dataclass
-    - L117  `def unique_key(self)` @property
-    - L120  `def to_dict(self)`
-    - L127  `def from_dict(cls, data)` @classmethod
-- L143  `class Subscription` @dataclass
-    - L161  `def matches(self, post)`
-    - L190  `def to_dict(self)`
-    - L196  `def from_dict(cls, data)` @classmethod
-- L216  `class Announcement` @dataclass
-    - L235  `def unique_key(self)` @property
-    - L238  `def to_dict(self)`
-    - L245  `def from_dict(cls, data)` @classmethod
-- L268  `class PlatformAdapter(ABC)`
-    - L274  `def configured(self)` @property
-    - L278  `async def setup(self, session)`
-    - L282  `async def teardown(self)`
-    - L287  `async def fetch_posts(self, handle)` @abstractmethod
-    - L291  `async def is_post_active(self, post)`
-- L313  `class ManualAdapter(PlatformAdapter)`
-    - L317  `def __init__(self, platform)`
-    - L322  `def configured(self)` @property
-    - L325  `async def fetch_posts(self, handle)`
-- L333  `class TwitchAdapter(PlatformAdapter)`
-    - L341  `def __init__(self, client_id, client_secret)`
-    - L353  `def configured(self)` @property
-    - L356  `async def setup(self, session)`
-    - L363  `async def teardown(self)`
-    - L367  `async def _ensure_token(self)`
-    - L390  `async def fetch_posts(self, handle)`
-- L634  `class RSSHubAdapter(PlatformAdapter)`
-    - L649  `def __init__(self, platform, base_url)`
-    - L659  `def base_url(self)` @property
-    - L667  `def configured(self)` @property
-    - L671  `async def setup(self, session)`
-    - L678  `def feed_url(self, handle)`
-    - L681  `async def _fetch_items(self, handle, url, avertir)`
-    - L781  `async def fetch_posts(self, handle, abonne)`
-    - L810  `async def is_post_active(self, post)`
-- L831  `class YouTubeRSSAdapter(RSSHubAdapter)`
-    - L850  `def __init__(self)`
-    - L861  `def page_url(cid)` @staticmethod
-    - L864  `async def _videos_page(self, handle, cid, cle)`
-    - L886  `def playlist_url(cid)` @staticmethod
-    - L892  `def _recentes(self, items)`
-    - L909  `def _avertir_du_jour(self, cle)`
-    - L918  `def configured(self)` @property
-    - L921  `def feed_url(self, handle)`
-    - L937  `async def _resolve_channel_id(self, handle)`
-    - L984  `async def _fetch_items(self, handle)`
-- L1118  `class SocialMediaManager`
-    - L1121  `def __init__(self, post_callback, delete_callback, poll_interval_seconds, cleanup_interval_seconds)`
-    - L1145  `def register_adapter(self, adapter)`
-    - L1148  `def get_adapter(self, platform)`
-    - L1151  `def configured_platforms(self)`
-    - L1154  `async def setup_all(self, session)`
-    - L1161  `async def teardown_all(self)`
-    - L1170  `def set_post_callback(self, cb)`
-    - L1173  `def set_delete_callback(self, cb)`
-    - L1176  `def set_reservation(self, reserver, confirmer, annuler)`
-    - L1183  `async def load_guild(self, guild_id)`
-    - L1216  `async def _save_subs(self, guild_id)`
-    - L1223  `async def _save_anns(self, guild_id)`
-    - L1230  `async def _ensure_loaded(self, guild_id)`
-    - L1236  `async def add_subscription(self, guild_id, platform, handle, target_channel_id, display_name, role_to_ping, track_lives, track_videos, track_shorts, track_posts, template)`
-    - L1274  `async def remove_subscription(self, guild_id, sub_id)`
-    - L1282  `async def update_subscription(self, guild_id, sub_id, **changes)`
-    - L1295  `async def list_subscriptions(self, guild_id)`
-    - L1299  `def _find_subscription(self, guild_id, platform, handle, channel_id)`
-    - L1313  `async def list_announcements(self, guild_id)`
-    - L1317  `async def has_announcement(self, guild_id, platform, handle, post_id)`
-    - L1324  `async def _record_announcement(self, sub, post, discord_message_id)`
-    - L1352  `async def poll_subscription(self, sub)`
-    - L1383  `async def publier_post(self, sub, post)`
-    - L1422  `def abonnements_youtube(self)`
-    - L1439  `async def poll_all(self)`
-    - L1466  `async def cleanup_announcement(self, ann, sauver)`
-    - L1511  `async def cleanup_all(self)`
-    - L1549  `async def _poll_loop(self)`
-    - L1567  `async def _cleanup_loop(self)`
-    - L1587  `def start_background_tasks(self)`
-    - L1593  `async def stop_background_tasks(self)`
+- L56  `def _signaler_flux(cle, avertir, message)`
+- L487  `def _clean_handle(handle)`
+- L507  `def _clean_yt_handle(handle)`
+- L536  `def extraire_channel_id(html)`
+- L568  `def date_relative(textes)`
+- L591  `def videos_de_la_page(html, handle, maximum)`
+- L1080  `def _subs_path(guild_id)`
+- L1084  `def _anns_path(guild_id)`
+- L1101  `def _lire_json_bloquant(path)`
+- L1105  `async def _read_json(path)`
+- L1109  `def _ecrire_json_bloquant(path, texte)`
+- L1117  `async def _write_json(path, payload)`
+- L1622  `def default_template(platform, post_type)`
+- L1635  `def render_template(sub, post)`
+- L74  `class Platform(str, Enum)`
+- L83  `class PostType(str, Enum)`
+- L123  `class SocialPost` @dataclass
+    - L138  `def unique_key(self)` @property
+    - L141  `def to_dict(self)`
+    - L148  `def from_dict(cls, data)` @classmethod
+- L164  `class Subscription` @dataclass
+    - L182  `def matches(self, post)`
+    - L211  `def to_dict(self)`
+    - L217  `def from_dict(cls, data)` @classmethod
+- L237  `class Announcement` @dataclass
+    - L256  `def unique_key(self)` @property
+    - L259  `def to_dict(self)`
+    - L266  `def from_dict(cls, data)` @classmethod
+- L289  `class PlatformAdapter(ABC)`
+    - L295  `def configured(self)` @property
+    - L299  `async def setup(self, session)`
+    - L303  `async def teardown(self)`
+    - L308  `async def fetch_posts(self, handle)` @abstractmethod
+    - L312  `async def is_post_active(self, post)`
+- L334  `class ManualAdapter(PlatformAdapter)`
+    - L338  `def __init__(self, platform)`
+    - L343  `def configured(self)` @property
+    - L346  `async def fetch_posts(self, handle)`
+- L354  `class TwitchAdapter(PlatformAdapter)`
+    - L362  `def __init__(self, client_id, client_secret)`
+    - L374  `def configured(self)` @property
+    - L377  `async def setup(self, session)`
+    - L384  `async def teardown(self)`
+    - L388  `async def _ensure_token(self)`
+    - L411  `async def fetch_posts(self, handle)`
+- L655  `class RSSHubAdapter(PlatformAdapter)`
+    - L670  `def __init__(self, platform, base_url)`
+    - L680  `def base_url(self)` @property
+    - L688  `def configured(self)` @property
+    - L692  `async def setup(self, session)`
+    - L699  `def feed_url(self, handle)`
+    - L702  `async def _fetch_items(self, handle, url, avertir)`
+    - L793  `async def fetch_posts(self, handle, abonne)`
+    - L822  `async def is_post_active(self, post)`
+- L843  `class YouTubeRSSAdapter(RSSHubAdapter)`
+    - L862  `def __init__(self)`
+    - L873  `def page_url(cid)` @staticmethod
+    - L876  `async def _videos_page(self, handle, cid, cle)`
+    - L898  `def playlist_url(cid)` @staticmethod
+    - L904  `def _recentes(self, items)`
+    - L921  `def _avertir_du_jour(self, cle)`
+    - L930  `def configured(self)` @property
+    - L933  `def feed_url(self, handle)`
+    - L949  `async def _resolve_channel_id(self, handle)`
+    - L996  `async def _fetch_items(self, handle)`
+- L1130  `class SocialMediaManager`
+    - L1133  `def __init__(self, post_callback, delete_callback, poll_interval_seconds, cleanup_interval_seconds)`
+    - L1157  `def register_adapter(self, adapter)`
+    - L1160  `def get_adapter(self, platform)`
+    - L1163  `def configured_platforms(self)`
+    - L1166  `async def setup_all(self, session)`
+    - L1173  `async def teardown_all(self)`
+    - L1182  `def set_post_callback(self, cb)`
+    - L1185  `def set_delete_callback(self, cb)`
+    - L1188  `def set_reservation(self, reserver, confirmer, annuler)`
+    - L1195  `async def load_guild(self, guild_id)`
+    - L1228  `async def _save_subs(self, guild_id)`
+    - L1235  `async def _save_anns(self, guild_id)`
+    - L1242  `async def _ensure_loaded(self, guild_id)`
+    - L1248  `async def add_subscription(self, guild_id, platform, handle, target_channel_id, display_name, role_to_ping, track_lives, track_videos, track_shorts, track_posts, template)`
+    - L1286  `async def remove_subscription(self, guild_id, sub_id)`
+    - L1294  `async def update_subscription(self, guild_id, sub_id, **changes)`
+    - L1307  `async def list_subscriptions(self, guild_id)`
+    - L1311  `def _find_subscription(self, guild_id, platform, handle, channel_id)`
+    - L1325  `async def list_announcements(self, guild_id)`
+    - L1329  `async def has_announcement(self, guild_id, platform, handle, post_id)`
+    - L1336  `async def _record_announcement(self, sub, post, discord_message_id)`
+    - L1364  `async def poll_subscription(self, sub)`
+    - L1395  `async def publier_post(self, sub, post)`
+    - L1434  `def abonnements_youtube(self)`
+    - L1451  `async def poll_all(self)`
+    - L1478  `async def cleanup_announcement(self, ann, sauver)`
+    - L1523  `async def cleanup_all(self)`
+    - L1561  `async def _poll_loop(self)`
+    - L1579  `async def _cleanup_loop(self)`
+    - L1599  `def start_background_tasks(self)`
+    - L1605  `async def stop_background_tasks(self)`
 
 ### `sondages.py`
 
@@ -12399,301 +12841,323 @@
     - L881  `async def _cb_reposer(self, i)`
     - L887  `async def _cb_retour(self, i)`
 
+### `sujets_interdits.py`
+
+- L148  `def _debat_construit()`
+- L323  `def plier(texte, garder_ponctuation)`
+- L338  `def _leet(t)`
+- L342  `def _sans_repetitions(t)`
+- L346  `def _variantes(texte)`
+- L364  `def _liste(bloc)`
+- L370  `def _rx(phrases)`
+- L378  `def _rx_doubles(phrases)`
+- L389  `def _charger()`
+- L433  `def _mot_wallah(mot)`
+- L438  `def _wallah(variantes)`
+- L455  `def _rx_ajoutes(mots)` @functools.lru_cache
+- L459  `def _reglages(r)`
+- L470  `def _retirer(rx, texte)`
+- L474  `def _cherche(rx, variantes)`
+- L484  `def _verdict(famille, terme)`
+- L488  `def juger(texte, *, gif, reglages)`
+- L499  `def _juger(texte, gif, reglages)`
+
 ### `tableau.py`
 
 - L137  `def _message(titre, texte)`
-- L331  `def setup(*, bot, cle, base_url, cfg, get_db, mesurer_groupe, autorise_membre, radie, direction, mis_a_part, tete, actions, alerte_securite, conversation, log)`
-- L357  `async def init_db()`
-- L400  `def a_la_tete(g, user_id)`
-- L407  `def autorise_equipage(g, membre, c)`
-- L418  `def _b64(b)`
-- L422  `def _unb64(s)`
-- L426  `def jeton(guild_id, user_id, portee, maintenant, nonce)`
-- L433  `def lire_jeton(j, maintenant)`
-- L449  `async def suspendu(guild_id, user_id, maintenant)`
-- L465  `async def lien_pour(i, membre_id)`
-- L482  `def _empreinte(sid)`
-- L486  `async def _ouvrir_session(guild_id, user_id, expire, maintenant, portee, appareil, adresse)`
-- L504  `async def _session(request, maintenant, portees)`
-- L514  `async def _lire_session(request, maintenant, cookie)`
-- L556  `def _appareil(request)`
-- L560  `async def _noter_vue(db, request, emp, r, t)`
-- L577  `async def fermer_sessions(guild_id, user_id)`
-- L594  `async def suspendre(g, membre, raison, maintenant)`
-- L623  `def chiffres(s, maxi)`
-- L631  `def _ip(request)`
-- L639  `def _trop_essais(request, compter, maintenant)`
-- L655  `async def _verifier(request, maintenant, medias, portees, statiques, cookie)`
-- L713  `def _elaguer(t)`
-- L732  `async def _action_hors_tete(g, auteur, quoi)`
-- L743  `async def _candidat_autorise(g, m, emp)`
-- L759  `async def _tentative_hors_portee(request, emp, gid, uid, portee, t)`
-- L777  `async def _fermer_session_equipage(emp, g, m)`
-- L789  `def _ident(g, uid, defaut)`
-- L796  `def _nom(g, uid)`
-- L820  `def a_part(g, c)`
-- L826  `def _quand(t)`
-- L830  `def _instant(valeur)`
-- L846  `async def _clan(g, c, apart)`
-- L872  `def _salons_du_clan(g, role)`
-- L881  `async def recherche(request)`
-- L908  `def _mediane(valeurs)`
-- L913  `def _mois_paris(t)`
-- L920  `async def _lignes_tickets(g, filtre, args)`
-- L958  `async def _tickets(g, c, apart, qui)`
-- L1027  `def ticket_ferme(g, qui, ferme, x, nom, est_rell)`
-- L1035  `def _libelle(typ)`
-- L1039  `def _entree_casier(g, iid, typ, raison, duree, quand, est_auto, mod)`
-- L1045  `async def _sanctions(g, apart, qui)`
-- L1149  `def cartes_casier(g, rows, apart, robot, maintenant)`
-- L1172  `def _evenement(g, r, qui)`
-- L1182  `async def _journal(g, qui, membre_id, limite)`
-- L1192  `def _question(g, q, qui)`
-- L1201  `async def _questions(g, qui)`
-- L1208  `async def _alertes(g, qui)`
-- L1221  `async def _casier(g, qui)`
-- L1236  `async def _suggestions(g, qui)`
-- L1247  `async def _entraide(g, qui)`
-- L1266  `async def _annonces(g, qui)`
-- L1284  `async def _droits_salons(g, c)`
-- L1313  `async def _sondages(g, qui)`
-- L1333  `async def _etapes_recrutement(g)`
-- L1356  `def candidatures_en_cours(en_cours, etapes)`
-- L1366  `async def donnees(g, portee)`
-- L1435  `async def fiche(g, uid, auteur)`
-- L1522  `def _csv(entetes, lignes)`
-- L1537  `def _slug(s)`
-- L1541  `async def exporter(g, quoi, auteur, jours, membre, categorie, format_)`
-- L1612  `def _json(corps, status, etag)`
-- L1623  `def _html(texte, status, nonce)`
-- L1636  `async def entree(request)`
-- L1682  `async def _noter_ouverture_equipage(g, m, maintenant)`
-- L1696  `async def page(request)`
-- L1719  `async def vers_espace(request)`
-- L1725  `async def api(request)`
-- L1753  `def _empreinte_donnees(cle, d)`
-- L1765  `async def membre(request)`
-- L1785  `async def conversation(request)`
-- L1802  `async def export(request)`
-- L1829  `def _origine_ok(request)`
-- L1843  `async def limite_grave(g, auteur, genre, n, maintenant)`
-- L1867  `def _genre_grave(nom, corps)`
-- L1885  `async def action(request)`
-- L1938  `async def sortir(request)`
-- L1973  `def _fichiers_site()`
-- L1996  `def empreinte_site(maintenant)`
-- L2020  `def version_page()`
-- L2025  `def _lire_page_site(nom)`
-- L2045  `def _chemin_statique(brut)`
-- L2061  `def lecteurs_statique(rel)`
-- L2071  `def _lire_statique(rel)`
-- L2098  `def _meme_etag(request, etag)`
-- L2103  `def _introuvable(cache)`
-- L2108  `async def statique(request)`
-- L2147  `async def service_worker(request)`
-- L2176  `def _normaliser_route(nom, d)`
-- L2207  `def _normaliser_regle(r)`
-- L2230  `def _definitions(nom, d)`
-- L2238  `def monter(*sources)`
-- L2276  `def _routes_de(nom)`
-- L2283  `def _route(nom, methode)`
-- L2287  `async def _lire_corps(request, maximum)`
-- L2313  `async def _lire_json(request, maximum)`
-- L2326  `def _parametres(request)`
-- L2336  `async def _noter_ecriture(g, auteur, nom, journal)`
-- L2352  `async def _executer(nom, route, g, auteur, requete, corps, maintenant)`
-- L2407  `async def api_site(request)`
-- L2453  `def _resultat_garde(status)`
-- L2459  `async def _op_connue(op_id)`
-- L2472  `async def _garder_op(guild_id, uid, op_id, api, status, corps, t)`
-- L2482  `async def _appliquer_op(g, auteur, uid, op_id, op, maintenant)`
-- L2536  `async def sync(request)`
-- L2574  `def dossier_site(sous)`
-- L2582  `def type_image(data)`
-- L2592  `def reencoder_image(data, cote)`
-- L2631  `def _ecrire_atomique(chemin, data)`
-- L2644  `def _nom_fichier(nom)`
-- L2649  `async def _place_medias(dossier)`
-- L2662  `async def _route_media(g, auteur, requete, corps)`
-- L2724  `async def lire_media(ident)`
-- L2736  `def _chemin_media(ident)`
-- L2757  `async def media(request)`
-- L2794  `def _verrou(nom, fabrique)`
-- L2803  `async def _compter(sql, args)`
-- L2809  `async def _supprimer(sql, args)`
-- L2822  `def _sqlite_date(t)`
-- L2826  `async def jours_regle(guild_id, cle)`
-- L2845  `async def etat_nettoyage(guild_id, maintenant)`
-- L2909  `async def apercu_regle(r, guild_id, jours, t)`
-- L2920  `async def nettoyer(g, auteur, maintenant, seulement)`
-- L2966  `async def nettoyer_si_du(g, maintenant)`
-- L2977  `def _noms_nettoyage(g, etat)`
-- L2987  `async def _route_nettoyage(g, auteur, requete, corps)`
-- L2994  `async def _route_nettoyage_regle(g, auteur, requete, corps)`
-- L3015  `async def _route_nettoyage_lancer(g, auteur, requete, corps)`
-- L3041  `async def _route_nettoyage_apercu(g, auteur, requete, corps)`
-- L3065  `async def _purger_journal_messages(gid, jours, t)`
-- L3070  `async def _compter_journal_messages(gid, jours, t)`
-- L3074  `async def _purger_journal(gid, jours, t)`
-- L3078  `async def _compter_journal(gid, jours, t)`
-- L3083  `async def _compter_archives(gid, jours, t)`
-- L3090  `async def _purger_transcripts(gid, jours, t)`
-- L3094  `async def _compter_transcripts(gid, jours, t)`
-- L3103  `async def _candidatures_refusees(gid, jours, t)`
-- L3110  `async def _purger_candidatures(gid, jours, t)`
-- L3117  `async def _compter_candidatures(gid, jours, t)`
-- L3121  `def _avec_serveur(f)`
-- L3130  `async def _medias_utilises(gid)`
-- L3138  `async def _purger_medias(gid, jours, t)`
-- L3158  `async def _compter_medias(gid, jours, t)`
-- L3162  `async def _purger_ops(gid, jours, t)`
-- L3166  `async def _compter_ops(gid, jours, t)`
-- L3171  `async def _apercu_journal_messages(gid, jours, t)`
-- L3176  `async def _apercu_journal(gid, jours, t)`
-- L3180  `async def _apercu_transcripts(gid, jours, t)`
-- L3196  `async def _apercu_candidatures(gid, jours, t)`
-- L3200  `async def _purger_candidatures_acceptees(gid, jours, t)`
-- L3204  `async def _apercu_candidatures_acceptees(gid, jours, t)`
-- L3208  `async def _apercu_medias(gid, jours, t)`
-- L3217  `async def _apercu_ops(gid, jours, t)`
-- L3221  `async def _apercu_sessions(gid, jours, t)`
-- L3228  `async def _purger_sessions(gid, jours, t)`
-- L3235  `async def _compter_sessions(gid, jours, t)`
-- L3239  `def _regle_interne(**r)`
-- L3245  `def purges_en_regle(purges)`
-- L3260  `def ajouter_regle(**r)`
-- L3325  `def monter_equipage(lectures, medias)`
-- L3347  `async def _media_permis_equipage(g, ident)`
-- L3362  `async def vers_equipage(request)`
-- L3368  `async def page_equipage(request)`
-- L3383  `async def api_equipage(request)`
-- L3415  `async def api_equipage_refus(request)`
-- L3483  `def _fnv(texte)`
-- L3491  `def objet_direct(o)`
-- L3499  `def _titre_direct(t)`
-- L3503  `def _page_direct(p)`
-- L3556  `def _salle_direct(gid)`
-- L3563  `def _texte_direct(m)`
-- L3567  `def _envoyer_a(prise, m)`
-- L3578  `def _diffuser(salle, m, sauf)`
-- L3588  `def _couper(prise, code, raison)`
-- L3597  `def _qui_direct(gid, uid)`
-- L3603  `def _personne_direct(salle, uid)`
-- L3620  `def _verrou_rec(salle, v)`
-- L3625  `def _etat_direct(salle, prise, t)`
-- L3636  `def _place_direct(salle, uid)`
-- L3641  `def _brancher(salle, prise)`
-- L3649  `def _vue_pages(rec)`
-- L3653  `def _delta_page(salle, uid)`
-- L3665  `def _bonjour(salle, prise, page, t, onglet)`
-- L3688  `def _changer_page(salle, prise, page, t)`
-- L3694  `def _liberer(salle, v, t)`
-- L3700  `def _retirer_du_verrou(salle, v, onglets, t)`
-- L3709  `def _bail(prise, t)`
-- L3713  `def _ecrits_n(gid, o)`
-- L3718  `def _ecrit_depuis(gid, o, n, uid)`
-- L3734  `async def _session_direct(prise, t, forcer)`
-- L3761  `def _retirer(salle, prise, t)`
-- L3780  `def _finir(salle, prise, raison, t)`
-- L3786  `def _debrancher(salle, prise, t)`
-- L3796  `async def _ronde(salle)`
-- L3808  `async def _balayer(salle, t)`
-- L3827  `def _cadence_direct(prise, t)`
-- L3835  `async def _prendre(salle, prise, m, t)`
-- L3870  `def _lacher(salle, prise, o, t)`
-- L3877  `def _vivant(salle, prise, cache, t)`
-- L3885  `def _demande(salle, prise, o, t)`
-- L3906  `async def _traiter_direct(salle, prise, m, t)`
-- L3929  `def _origine_direct_ok(request)`
-- L3939  `async def _ecrire_direct(prise)`
-- L3956  `async def direct(request)`
-- L4023  `async def _route_direct_etat(g, auteur, requete, corps)`
-- L4050  `async def _route_direct_envoi(g, auteur, requete, corps)`
-- L4063  `def direct_ecrit(gid, objets, uid)`
-- L4080  `def diffuser_candidat(gid, m)`
-- L4095  `def refus_verrou(gid, objets, uid, maintenant)`
-- L4111  `def _champ_id(c, k)`
-- L4116  `def _objet_si(genre, *valeurs)`
-- L4120  `def _v_affiche(c)`
-- L4127  `async def _v_correction(c)`
-- L4136  `def _v_par_id(genre)`
-- L4171  `async def _objets_ecriture(nom, fn, corps)`
-- L613  `class _Refus(Exception)`
-    - L614  `def __init__(self, status, message, portee)`
-- L803  `class _Personnes(dict)`
-    - L807  `def __init__(self, g)`
-    - L811  `def __call__(self, uid, defaut)`
-- L3058  `class _Serveur`
-    - L3061  `def __init__(self, gid)`
-- L3508  `class _Verrou`
-    - L3512  `def __init__(self, objet, titre, uid, t)`
-- L3517  `class _Prise`
-    - L3523  `def __init__(self, ident, gid, uid, emp, ws, t)`
-    - L3533  `def envoyer(self, texte)`
-- L3542  `class _Salle`
-    - L3547  `def __init__(self, gid)`
+- L336  `def setup(*, bot, cle, base_url, cfg, get_db, mesurer_groupe, autorise_membre, radie, direction, mis_a_part, tete, actions, alerte_securite, conversation, log)`
+- L362  `async def init_db()`
+- L405  `def a_la_tete(g, user_id)`
+- L412  `def autorise_equipage(g, membre, c)`
+- L423  `def _b64(b)`
+- L427  `def _unb64(s)`
+- L431  `def jeton(guild_id, user_id, portee, maintenant, nonce)`
+- L438  `def lire_jeton(j, maintenant)`
+- L454  `async def suspendu(guild_id, user_id, maintenant)`
+- L470  `async def lien_pour(i, membre_id)`
+- L487  `def _empreinte(sid)`
+- L491  `async def _ouvrir_session(guild_id, user_id, expire, maintenant, portee, appareil, adresse)`
+- L509  `async def _session(request, maintenant, portees)`
+- L519  `async def _lire_session(request, maintenant, cookie)`
+- L561  `def _appareil(request)`
+- L565  `async def _noter_vue(db, request, emp, r, t)`
+- L582  `async def fermer_sessions(guild_id, user_id)`
+- L599  `async def suspendre(g, membre, raison, maintenant)`
+- L628  `def chiffres(s, maxi)`
+- L636  `def _ip(request)`
+- L644  `def _trop_essais(request, compter, maintenant)`
+- L660  `async def _verifier(request, maintenant, medias, portees, statiques, cookie)`
+- L718  `def _elaguer(t)`
+- L737  `async def _action_hors_tete(g, auteur, quoi)`
+- L748  `async def _candidat_autorise(g, m, emp)`
+- L764  `async def _tentative_hors_portee(request, emp, gid, uid, portee, t)`
+- L782  `async def _fermer_session_equipage(emp, g, m)`
+- L794  `def _ident(g, uid, defaut)`
+- L801  `def _nom(g, uid)`
+- L825  `def a_part(g, c)`
+- L831  `def _quand(t)`
+- L835  `def _instant(valeur)`
+- L851  `async def _clan(g, c, apart)`
+- L877  `def _salons_du_clan(g, role)`
+- L886  `async def recherche(request)`
+- L913  `def _mediane(valeurs)`
+- L918  `def _mois_paris(t)`
+- L925  `async def _lignes_tickets(g, filtre, args)`
+- L963  `async def _tickets(g, c, apart, qui)`
+- L1032  `def ticket_ferme(g, qui, ferme, x, nom, est_rell)`
+- L1040  `def _libelle(typ)`
+- L1044  `def _entree_casier(g, iid, typ, raison, duree, quand, est_auto, mod)`
+- L1050  `async def _sanctions(g, apart, qui)`
+- L1154  `def cartes_casier(g, rows, apart, robot, maintenant)`
+- L1177  `def _evenement(g, r, qui)`
+- L1187  `async def _journal(g, qui, membre_id, limite)`
+- L1197  `def _question(g, q, qui)`
+- L1206  `async def _questions(g, qui)`
+- L1213  `async def _alertes(g, qui)`
+- L1226  `async def _casier(g, qui)`
+- L1241  `async def _suggestions(g, qui)`
+- L1252  `async def _entraide(g, qui)`
+- L1271  `async def _annonces(g, qui)`
+- L1289  `async def _droits_salons(g, c)`
+- L1318  `async def _sondages(g, qui)`
+- L1338  `async def _etapes_recrutement(g)`
+- L1361  `def candidatures_en_cours(en_cours, etapes)`
+- L1371  `async def donnees(g, portee)`
+- L1440  `async def fiche(g, uid, auteur)`
+- L1527  `def _csv(entetes, lignes)`
+- L1542  `def _slug(s)`
+- L1546  `async def exporter(g, quoi, auteur, jours, membre, categorie, format_)`
+- L1617  `def _json(corps, status, etag)`
+- L1628  `def _html(texte, status, nonce)`
+- L1641  `async def entree(request)`
+- L1687  `async def _noter_ouverture_equipage(g, m, maintenant)`
+- L1701  `async def page(request)`
+- L1724  `async def vers_espace(request)`
+- L1730  `async def api(request)`
+- L1758  `def _empreinte_donnees(cle, d)`
+- L1770  `async def membre(request)`
+- L1790  `async def conversation(request)`
+- L1807  `async def export(request)`
+- L1834  `def _origine_ok(request)`
+- L1848  `async def limite_grave(g, auteur, genre, n, maintenant)`
+- L1872  `def _genre_grave(nom, corps)`
+- L1890  `async def action(request)`
+- L1943  `async def sortir(request)`
+- L1978  `def _fichiers_site()`
+- L2001  `def empreinte_site(maintenant)`
+- L2025  `def version_page()`
+- L2030  `def _lire_page_site(nom)`
+- L2050  `def _chemin_statique(brut)`
+- L2066  `def lecteurs_statique(rel)`
+- L2076  `def _lire_statique(rel)`
+- L2103  `def _meme_etag(request, etag)`
+- L2108  `def _introuvable(cache)`
+- L2113  `async def statique(request)`
+- L2152  `async def service_worker(request)`
+- L2181  `def _normaliser_route(nom, d)`
+- L2212  `def _normaliser_regle(r)`
+- L2235  `def _definitions(nom, d)`
+- L2243  `def monter(*sources)`
+- L2281  `def _routes_de(nom)`
+- L2288  `def _route(nom, methode)`
+- L2292  `async def _lire_corps(request, maximum)`
+- L2324  `def _trop_profond(x, limite)`
+- L2336  `async def _lire_json(request, maximum)`
+- L2349  `def _parametres(request)`
+- L2359  `async def _noter_ecriture(g, auteur, nom, journal)`
+- L2375  `async def _executer(nom, route, g, auteur, requete, corps, maintenant)`
+- L2430  `async def api_site(request)`
+- L2476  `def _resultat_garde(status)`
+- L2482  `async def _op_connue(op_id)`
+- L2495  `async def _garder_op(guild_id, uid, op_id, api, status, corps, t)`
+- L2505  `async def _appliquer_op(g, auteur, uid, op_id, op, maintenant)`
+- L2559  `async def sync(request)`
+- L2597  `def dossier_site(sous)`
+- L2605  `def type_image(data)`
+- L2615  `def reencoder_image(data, cote)`
+- L2654  `def _ecrire_atomique(chemin, data)`
+- L2667  `def _nom_fichier(nom)`
+- L2672  `async def _place_medias(dossier)`
+- L2685  `async def _route_media(g, auteur, requete, corps)`
+- L2747  `async def lire_media(ident)`
+- L2759  `def _chemin_media(ident)`
+- L2783  `async def media(request)`
+- L2820  `def _verrou(nom, fabrique)`
+- L2829  `async def _compter(sql, args)`
+- L2835  `async def _supprimer(sql, args)`
+- L2848  `def _sqlite_date(t)`
+- L2852  `async def jours_regle(guild_id, cle)`
+- L2871  `async def etat_nettoyage(guild_id, maintenant)`
+- L2935  `async def apercu_regle(r, guild_id, jours, t)`
+- L2946  `async def nettoyer(g, auteur, maintenant, seulement)`
+- L2992  `async def nettoyer_si_du(g, maintenant)`
+- L3003  `def _noms_nettoyage(g, etat)`
+- L3013  `async def _route_nettoyage(g, auteur, requete, corps)`
+- L3020  `async def _route_nettoyage_regle(g, auteur, requete, corps)`
+- L3041  `async def _route_nettoyage_lancer(g, auteur, requete, corps)`
+- L3067  `async def _route_nettoyage_apercu(g, auteur, requete, corps)`
+- L3091  `async def _purger_journal_messages(gid, jours, t)`
+- L3096  `async def _compter_journal_messages(gid, jours, t)`
+- L3100  `async def _purger_journal(gid, jours, t)`
+- L3104  `async def _compter_journal(gid, jours, t)`
+- L3109  `async def _compter_archives(gid, jours, t)`
+- L3116  `async def _purger_transcripts(gid, jours, t)`
+- L3120  `async def _compter_transcripts(gid, jours, t)`
+- L3129  `async def _candidatures_refusees(gid, jours, t)`
+- L3136  `async def _purger_candidatures(gid, jours, t)`
+- L3143  `async def _compter_candidatures(gid, jours, t)`
+- L3147  `def _avec_serveur(f)`
+- L3156  `async def _medias_utilises(gid)`
+- L3164  `async def _purger_medias(gid, jours, t)`
+- L3184  `async def _compter_medias(gid, jours, t)`
+- L3188  `async def _purger_ops(gid, jours, t)`
+- L3192  `async def _compter_ops(gid, jours, t)`
+- L3197  `async def _apercu_journal_messages(gid, jours, t)`
+- L3202  `async def _apercu_journal(gid, jours, t)`
+- L3206  `async def _apercu_transcripts(gid, jours, t)`
+- L3222  `async def _apercu_candidatures(gid, jours, t)`
+- L3226  `async def _purger_candidatures_acceptees(gid, jours, t)`
+- L3230  `async def _apercu_candidatures_acceptees(gid, jours, t)`
+- L3234  `async def _apercu_medias(gid, jours, t)`
+- L3243  `async def _apercu_ops(gid, jours, t)`
+- L3247  `async def _apercu_sessions(gid, jours, t)`
+- L3254  `async def _purger_sessions(gid, jours, t)`
+- L3261  `async def _compter_sessions(gid, jours, t)`
+- L3265  `def _regle_interne(**r)`
+- L3271  `def purges_en_regle(purges)`
+- L3286  `def ajouter_regle(**r)`
+- L3351  `def monter_equipage(lectures, medias)`
+- L3373  `async def _media_permis_equipage(g, ident)`
+- L3388  `async def vers_equipage(request)`
+- L3394  `async def page_equipage(request)`
+- L3409  `async def api_equipage(request)`
+- L3441  `async def api_equipage_refus(request)`
+- L3509  `def _fnv(texte)`
+- L3517  `def objet_direct(o)`
+- L3525  `def _titre_direct(t)`
+- L3529  `def _page_direct(p)`
+- L3582  `def _salle_direct(gid)`
+- L3589  `def _texte_direct(m)`
+- L3593  `def _envoyer_a(prise, m)`
+- L3604  `def _diffuser(salle, m, sauf)`
+- L3614  `def _couper(prise, code, raison)`
+- L3623  `def _qui_direct(gid, uid)`
+- L3629  `def _personne_direct(salle, uid)`
+- L3646  `def _verrou_rec(salle, v)`
+- L3651  `def _etat_direct(salle, prise, t)`
+- L3662  `def _place_direct(salle, uid)`
+- L3667  `def _brancher(salle, prise)`
+- L3675  `def _vue_pages(rec)`
+- L3679  `def _delta_page(salle, uid)`
+- L3691  `def _bonjour(salle, prise, page, t, onglet)`
+- L3714  `def _changer_page(salle, prise, page, t)`
+- L3720  `def _liberer(salle, v, t)`
+- L3726  `def _retirer_du_verrou(salle, v, onglets, t)`
+- L3735  `def _bail(prise, t)`
+- L3739  `def _ecrits_n(gid, o)`
+- L3744  `def _ecrit_depuis(gid, o, n, uid)`
+- L3760  `async def _session_direct(prise, t, forcer)`
+- L3787  `def _retirer(salle, prise, t)`
+- L3806  `def _finir(salle, prise, raison, t)`
+- L3812  `def _debrancher(salle, prise, t)`
+- L3822  `async def _ronde(salle)`
+- L3834  `async def _balayer(salle, t)`
+- L3853  `def _cadence_direct(prise, t)`
+- L3861  `async def _prendre(salle, prise, m, t)`
+- L3896  `def _lacher(salle, prise, o, t)`
+- L3903  `def _vivant(salle, prise, cache, t)`
+- L3911  `def _demande(salle, prise, o, t)`
+- L3932  `async def _traiter_direct(salle, prise, m, t)`
+- L3955  `def _origine_direct_ok(request)`
+- L3965  `async def _ecrire_direct(prise)`
+- L3982  `async def direct(request)`
+- L4049  `async def _route_direct_etat(g, auteur, requete, corps)`
+- L4076  `async def _route_direct_envoi(g, auteur, requete, corps)`
+- L4089  `def direct_ecrit(gid, objets, uid)`
+- L4106  `def diffuser_candidat(gid, m)`
+- L4121  `def refus_verrou(gid, objets, uid, maintenant)`
+- L4137  `def _champ_id(c, k)`
+- L4142  `def _objet_si(genre, *valeurs)`
+- L4146  `def _v_affiche(c)`
+- L4153  `async def _v_correction(c)`
+- L4162  `def _v_par_id(genre)`
+- L4197  `async def _objets_ecriture(nom, fn, corps)`
+- L618  `class _Refus(Exception)`
+    - L619  `def __init__(self, status, message, portee)`
+- L808  `class _Personnes(dict)`
+    - L812  `def __init__(self, g)`
+    - L816  `def __call__(self, uid, defaut)`
+- L3084  `class _Serveur`
+    - L3087  `def __init__(self, gid)`
+- L3534  `class _Verrou`
+    - L3538  `def __init__(self, objet, titre, uid, t)`
+- L3543  `class _Prise`
+    - L3549  `def __init__(self, ident, gid, uid, emp, ws, t)`
+    - L3559  `def envoyer(self, texte)`
+- L3568  `class _Salle`
+    - L3573  `def __init__(self, gid)`
 
 ### `tests/banc_ticket_recrutement.py`
 
-- L55  `def _noeud(nom)`
-- L67  `def source(nom)`
-- L277  `def espace_du_bot(*, g, get_db, cfg, db_set, porteur, categorie, journal, logs, erreurs, metiers, autorise, fondateur)`
-- L74  `class _Asyncio`
-    - L77  `def __getattr__(self, nom)`
-    - L81  `async def sleep(_delai, *_a, **_k)` @staticmethod
-- L85  `class MessageFil(Message)`
-    - L88  `async def edit(self, **kw)`
-    - L94  `async def delete(self, **_kw)`
-- L98  `class FilTicket(Fil)`
-    - L101  `def __init__(self, monde, tid, parent, name)`
-    - L106  `async def send(self, content, **kw)`
-    - L116  `def entrer_par_mention(self, am)`
-    - L124  `async def fetch_members(self)`
-    - L127  `async def add_user(self, m)`
-    - L131  `async def delete(self, *, reason)`
-    - L135  `def get_partial_message(self, mid)`
-    - L145  `def visibles(self)`
-    - L148  `def vue(self, m)`
-- L154  `class Role`
-    - L155  `def __init__(self, rid, name, position)`
-    - L159  `def is_default(self)`
-    - L162  `def __ge__(self, autre)`
-    - L165  `def __lt__(self, autre)`
-- L169  `class Membre`
-    - L170  `def __init__(self, uid, nom, *roles)`
-    - L183  `def top_role(self)` @property
-    - L186  `async def add_roles(self, *roles, reason)`
-    - L192  `async def remove_roles(self, *roles, reason)`
-    - L198  `async def send(self, content, **kw)`
-    - L204  `def __str__(self)`
-- L208  `class Serveur(Monde)`
-    - L211  `def __init__(self)`
-    - L216  `def get_role(self, rid)`
-    - L219  `def role(self, nom, position)`
-    - L224  `async def create_role(self, *, name, reason, **_k)`
-    - L228  `def membre(self, uid, nom, *roles)`
-- L236  `class Inter`
-    - L239  `def __init__(self, banc, membre, salon)`
-    - L249  `async def _repondre(self, content, **kw)`
-    - L253  `async def _modal(self, modal)`
-    - L257  `async def _defer(self, **_kw)`
-    - L260  `async def _editer(self, **kw)`
-    - L264  `async def _suivre(self, content, **kw)`
-    - L267  `async def delete_original_response(self)`
-    - L270  `async def edit_original_response(self, **kw)`
-    - L273  `def vues(self)`
-- L353  `class BancTicket`
-    - L357  `def __init__(self, tmp_path, *, metier)`
-    - L388  `async def get_db(self)` @contextlib.asynccontextmanager
-    - L395  `async def preparer(self)`
-    - L411  `async def cfg(self, _gid)`
-    - L414  `async def db_set(self, _gid, cle, valeur)`
-    - L419  `def _espace(self)`
-    - L436  `def monter(self, **extra)`
-    - L459  `async def lien(self, i)`
-    - L464  `async def noter(self, g, type_, texte, membre_id, auteur_id)`
-    - L468  `async def ouvrir_ticket(self, membre, pid, reponses)`
-    - L482  `async def statut(self, tid)`
+- L56  `def _noeud(nom)`
+- L68  `def source(nom)`
+- L278  `def espace_du_bot(*, g, get_db, cfg, db_set, porteur, categorie, journal, logs, erreurs, metiers, autorise, fondateur)`
+- L75  `class _Asyncio`
+    - L78  `def __getattr__(self, nom)`
+    - L82  `async def sleep(_delai, *_a, **_k)` @staticmethod
+- L86  `class MessageFil(Message)`
+    - L89  `async def edit(self, **kw)`
+    - L95  `async def delete(self, **_kw)`
+- L99  `class FilTicket(Fil)`
+    - L102  `def __init__(self, monde, tid, parent, name)`
+    - L107  `async def send(self, content, **kw)`
+    - L117  `def entrer_par_mention(self, am)`
+    - L125  `async def fetch_members(self)`
+    - L128  `async def add_user(self, m)`
+    - L132  `async def delete(self, *, reason)`
+    - L136  `def get_partial_message(self, mid)`
+    - L146  `def visibles(self)`
+    - L149  `def vue(self, m)`
+- L155  `class Role`
+    - L156  `def __init__(self, rid, name, position)`
+    - L160  `def is_default(self)`
+    - L163  `def __ge__(self, autre)`
+    - L166  `def __lt__(self, autre)`
+- L170  `class Membre`
+    - L171  `def __init__(self, uid, nom, *roles)`
+    - L184  `def top_role(self)` @property
+    - L187  `async def add_roles(self, *roles, reason)`
+    - L193  `async def remove_roles(self, *roles, reason)`
+    - L199  `async def send(self, content, **kw)`
+    - L205  `def __str__(self)`
+- L209  `class Serveur(Monde)`
+    - L212  `def __init__(self)`
+    - L217  `def get_role(self, rid)`
+    - L220  `def role(self, nom, position)`
+    - L225  `async def create_role(self, *, name, reason, **_k)`
+    - L229  `def membre(self, uid, nom, *roles)`
+- L237  `class Inter`
+    - L240  `def __init__(self, banc, membre, salon)`
+    - L250  `async def _repondre(self, content, **kw)`
+    - L254  `async def _modal(self, modal)`
+    - L258  `async def _defer(self, **_kw)`
+    - L261  `async def _editer(self, **kw)`
+    - L265  `async def _suivre(self, content, **kw)`
+    - L268  `async def delete_original_response(self)`
+    - L271  `async def edit_original_response(self, **kw)`
+    - L274  `def vues(self)`
+- L355  `class BancTicket`
+    - L359  `def __init__(self, tmp_path, *, metier)`
+    - L390  `async def get_db(self)` @contextlib.asynccontextmanager
+    - L397  `async def preparer(self)`
+    - L413  `async def cfg(self, _gid)`
+    - L416  `async def db_set(self, _gid, cle, valeur)`
+    - L421  `def _espace(self)`
+    - L441  `def monter(self, **extra)`
+    - L464  `async def lien(self, i)`
+    - L469  `async def noter(self, g, type_, texte, membre_id, auteur_id)`
+    - L473  `async def ouvrir_ticket(self, membre, pid, reponses)`
+    - L487  `async def statut(self, tid)`
 
 ### `tests/conftest.py`
 
@@ -12843,36 +13307,36 @@
 
 ### `tests/test_acces_site.py`
 
-- L238  `def _cadences_libres(monkeypatch)` @pytest.fixture
-- L253  `def _session_candidat(local)`
-- L270  `def portees(local)` @pytest.fixture
-- L278  `def _requete(local, methode, chemin, h, data, entetes, json_)`
-- L287  `def _erreur(corps)`
-- L295  `def _routeur()`
-- L302  `def _registre()`
-- L307  `def _charge_par(page)`
-- L324  `def _lecteurs_attendus(rel)`
-- L334  `def _verifier_entetes(chemin, st, entetes, vus)`
-- L353  `def test_A1_toute_adresse_du_serveur_est_declaree(local)`
-- L378  `def _cases(local)`
-- L420  `def _admis(qui, regle)`
-- L435  `def test_A2_chaque_case_de_la_table(local, portees)`
-- L482  `def test_A2b_le_bon_lien_ouvre_SA_page_et_aucune_autre(local)`
-- L499  `def test_A3_chaque_fichier_du_site_a_ses_lecteurs(local, portees)`
-- L532  `def test_A4_la_websocket_du_direct_la_tete_seule(local, portees)`
-- L561  `def test_A5_la_vitrine_get_seulement_sans_cookie_noindex(local, portees)`
-- L578  `def test_A5b_la_vitrine_cadence_par_la_premiere_adresse_ip(local, monkeypatch)`
-- L593  `def _chaines(x)`
-- L605  `def test_A5c_la_vitrine_ne_montre_que_des_champs_publics(local)`
-- L636  `def _empreinte(local)`
-- L659  `def _ecritures()`
-- L665  `def test_A6_une_ecriture_d_ailleurs_est_refusee_et_rien_n_est_ecrit(local)`
-- L699  `def test_A7_corps_trop_gros_et_json_pieges_refuses_proprement(local)`
-- L752  `def test_A8_aucun_pas_hors_du_dossier_ni_detour_vers_le_code(local, portees)`
-- L778  `def test_A9_les_images_au_dela_des_limites_sont_refusees(local)`
-- L818  `def test_A10_les_medias_et_les_entetes_partout(local, portees)`
-- L841  `def test_A11_stats_sans_donnee_personnelle(local)`
-- L861  `def test_A12_un_numero_ecrit_avec_d_autres_chiffres_est_refuse_proprement(local)`
+- L259  `def _cadences_libres(monkeypatch)` @pytest.fixture
+- L274  `def _session_candidat(local)`
+- L291  `def portees(local)` @pytest.fixture
+- L299  `def _requete(local, methode, chemin, h, data, entetes, json_)`
+- L308  `def _erreur(corps)`
+- L316  `def _routeur()`
+- L323  `def _registre()`
+- L328  `def _charge_par(page)`
+- L345  `def _lecteurs_attendus(rel)`
+- L355  `def _verifier_entetes(chemin, st, entetes, vus)`
+- L374  `def test_A1_toute_adresse_du_serveur_est_declaree(local)`
+- L400  `def _cases(local)`
+- L442  `def _admis(qui, regle)`
+- L457  `def test_A2_chaque_case_de_la_table(local, portees)`
+- L504  `def test_A2b_le_bon_lien_ouvre_SA_page_et_aucune_autre(local)`
+- L521  `def test_A3_chaque_fichier_du_site_a_ses_lecteurs(local, portees)`
+- L554  `def test_A4_la_websocket_du_direct_la_tete_seule(local, portees)`
+- L583  `def test_A5_la_vitrine_get_seulement_sans_cookie_noindex(local, portees)`
+- L600  `def test_A5b_la_vitrine_cadence_par_la_premiere_adresse_ip(local, monkeypatch)`
+- L615  `def _chaines(x)`
+- L627  `def test_A5c_la_vitrine_ne_montre_que_des_champs_publics(local)`
+- L658  `def _empreinte(local)`
+- L681  `def _ecritures()`
+- L687  `def test_A6_une_ecriture_d_ailleurs_est_refusee_et_rien_n_est_ecrit(local)`
+- L721  `def test_A7_corps_trop_gros_et_json_pieges_refuses_proprement(local)`
+- L774  `def test_A8_aucun_pas_hors_du_dossier_ni_detour_vers_le_code(local, portees)`
+- L800  `def test_A9_les_images_au_dela_des_limites_sont_refusees(local)`
+- L840  `def test_A10_les_medias_et_les_entetes_partout(local, portees)`
+- L863  `def test_A11_stats_sans_donnee_personnelle(local)`
+- L883  `def test_A12_un_numero_ecrit_avec_d_autres_chiffres_est_refuse_proprement(local)`
 
 ### `tests/test_accueil_court.py`
 
@@ -13029,6 +13493,13 @@
 - L19  `class Obj`
     - L20  `def __init__(self, **kw)`
 
+### `tests/test_alertes_sans_rafale.py`
+
+- L16  `def _fonctions(*noms)`
+- L27  `def test_S1_comptes_doubles_une_ligne_par_compte_principal_et_par_jour()`
+- L37  `def test_S2_les_cartes_de_protection_sans_rafale()`
+- L46  `def test_S3_profil_a_surveiller_au_journal_jamais_en_alerte()`
+
 ### `tests/test_annonces.py`
 
 - L34  `def env(tmp_path, monkeypatch)` @pytest.fixture
@@ -13086,6 +13557,7 @@
 - L463  `def test_S5_la_banniere_par_l_adresse_media(local)`
 - L484  `def test_S6_le_cablage_et_la_page()`
 - L514  `def test_S7_le_controle_des_imports_lit_le_js_comme_le_navigateur()`
+- L538  `def test_S9_retirer_une_ancienne_annonce_depuis_le_site_de_l_equipage(local)`
 
 ### `tests/test_approuver_bot.py`
 
@@ -13205,23 +13677,24 @@
 - L28  `def _source(nom)`
 - L34  `def env(tmp_path, monkeypatch)` @pytest.fixture
 - L55  `def serveur()`
-- L61  `def _msg(g, mid, auteur, texte, bot)`
-- L66  `def _c(**kw)`
-- L72  `def _vue(i)`
-- L82  `def test_K1_la_duree_se_lit_comme_on_la_dit()`
-- L97  `def test_K2_et_ou_le_role_demande_et_la_chance()`
-- L109  `def test_K3_x2_c_est_deux_fois_plus_de_chances()`
-- L119  `def test_K4_les_messages_comptent_sans_le_spam(env, monkeypatch)`
-- L137  `def test_K5_le_vocal_compte_hors_afk_casque_non_coupe(env, monkeypatch)`
-- L165  `def test_K6_un_cadeau_de_bout_en_bout(env, monkeypatch)`
-- L233  `def test_K7_nouveau_tirage_et_annulation(env)`
-- L249  `def test_K8_la_boucle_tire_a_l_heure_meme_apres_un_redemarrage(env)`
-- L263  `def test_K9_la_gestion_reservee_au_fondateur_et_a_la_direction(env)`
-- L273  `def test_K10_branche_dans_le_bot()`
-- L289  `def test_K11_le_panneau_de_creation_de_bout_en_bout(env)`
-- L331  `def test_K12_ceux_qui_peuvent_et_ceux_qui_peuvent_pas(env)`
-- L355  `def test_K13_le_tirage_tombe_a_la_seconde(env)`
-- L379  `def test_K14_la_commande_giveaway(env)`
+- L61  `def _msg(g, mid, auteur, texte, bot, salon)`
+- L67  `def _c(**kw)`
+- L73  `def _vue(i)`
+- L83  `def test_K1_la_duree_se_lit_comme_on_la_dit()`
+- L98  `def test_K2_et_ou_le_role_demande_et_la_chance()`
+- L110  `def test_K3_x2_c_est_deux_fois_plus_de_chances()`
+- L120  `def test_K4_les_messages_comptent_sans_le_spam(env, monkeypatch)`
+- L138  `def test_K5_le_vocal_compte_hors_afk_casque_non_coupe(env, monkeypatch)`
+- L166  `def test_K6_un_cadeau_de_bout_en_bout(env, monkeypatch)`
+- L234  `def test_K7_nouveau_tirage_et_annulation(env)`
+- L250  `def test_K8_la_boucle_tire_a_l_heure_meme_apres_un_redemarrage(env)`
+- L264  `def test_K9_la_gestion_reservee_au_fondateur_et_a_la_direction(env)`
+- L274  `def test_K10_branche_dans_le_bot()`
+- L290  `def test_K11_le_panneau_de_creation_de_bout_en_bout(env)`
+- L332  `def test_K12_ceux_qui_peuvent_et_ceux_qui_peuvent_pas(env)`
+- L356  `def test_K13_le_tirage_tombe_a_la_seconde(env)`
+- L380  `def test_K14_la_commande_giveaway(env)`
+- L395  `def test_K15_une_rafale_de_messages_courts_compte_pour_un(env, monkeypatch)`
 
 ### `tests/test_cadeaux_v3.py`
 
@@ -13665,24 +14138,17 @@
 - L26  `def _source(nom)`
 - L50  `def test_F1_chaque_question_trouve_son_sujet_dans_sa_langue()`
 - L57  `def test_F2_la_carte_mene_au_bon_endroit_dans_la_bonne_langue()`
-- L79  `def faq_env()` @pytest.fixture
-- L109  `def test_F3_une_carte_en_reponse_qui_s_efface_et_ne_se_repete_pas(faq_env)`
-- L123  `def test_F4_le_staff_les_salons_prives_et_les_destinations_manquantes_n_ont_rien(faq_env)`
-- L134  `def test_F5_la_langue_du_membre_quand_la_question_ne_la_dit_pas(faq_env)`
-- L143  `def _ns_tickets(conf, direction)`
-- L166  `def test_T1_la_direction_ferme_un_type_le_panneau_suit(tmp_path)`
-- L190  `def test_T2_branche_dans_le_bot()`
-- L213  `def _repond(texte, salon, d)`
-- L219  `def _liens(r)`
-- L223  `def test_F6_six_langues_le_bon_sujet()`
-- L244  `def test_F7_general_tous_les_jeux_un_jeu_nomme_son_salon()`
-- L258  `def test_F8_les_annonces_d_un_jeu_de_roblox_du_serveur()`
-- L267  `def test_F9_les_liens_les_videos_l_aide()`
-- L281  `def test_F10_les_salons_reconnus_par_leur_nom()`
-- L291  `def test_F11_branche_dans_le_bot()`
-- L69  `class Message`
-    - L70  `def __init__(self, salon, auteur, texte)`
-    - L74  `async def reply(self, **kw)`
+- L74  `def _ns_tickets(conf, direction)`
+- L97  `def test_T1_la_direction_ferme_un_type_le_panneau_suit(tmp_path)`
+- L121  `def test_T2_branche_dans_le_bot()`
+- L144  `def _repond(texte, salon, d)`
+- L150  `def _liens(r)`
+- L154  `def test_F6_six_langues_le_bon_sujet()`
+- L175  `def test_F7_general_tous_les_jeux_un_jeu_nomme_son_salon()`
+- L189  `def test_F8_les_annonces_d_un_jeu_de_roblox_du_serveur()`
+- L198  `def test_F9_les_liens_les_videos_l_aide()`
+- L212  `def test_F10_les_salons_reconnus_par_leur_nom()`
+- L222  `def test_F11_branche_dans_le_bot()`
 
 ### `tests/test_faux_positifs.py`
 
@@ -13711,6 +14177,11 @@
 - L243  `def test_F19_les_lexiques_se_chargent_a_l_import()`
 - L254  `def test_F20_bd_chemin_et_adresses_de_service_ne_sont_pas_des_coordonnees()`
 - L271  `def test_F21_un_message_deja_supprime_n_annule_plus_le_log_ni_la_sanction()`
+
+### `tests/test_flux_echecs.py`
+
+- L9  `def test_F1_trois_echecs_d_affilee_avant_l_alerte(monkeypatch)`
+- L26  `def test_F2_jamais_averti_quand_l_appelant_demande_le_silence(monkeypatch)`
 
 ### `tests/test_fonctions_retirees.py`
 
@@ -13752,6 +14223,22 @@
     - L220  `async def identifiants_connus_actus(self)`
     - L223  `async def relever_mises_a_jour(self, leger)`
 
+### `tests/test_gif_texte.py`
+
+- L46  `def _ns(texte_lu)`
+- L97  `def _message(proxy)`
+- L116  `def test_G1_le_texte_insultant_du_gif_le_retire()`
+- L123  `def test_G2_un_gif_normal_reste()`
+- L130  `def test_G3_jamais_l_hote_du_gif_directement()`
+- L18  `class _Rep`
+    - L21  `def __init__(self)`
+    - L24  `async def read(self, n)`
+    - L27  `async def __aenter__(self)`
+    - L30  `async def __aexit__(self, *a)`
+- L34  `class _Session(_Rep)`
+    - L35  `def __init__(self, *a, **k)`
+    - L38  `def get(self, url)`
+
 ### `tests/test_habillage.py`
 
 - L24  `def _sources()`
@@ -13762,6 +14249,21 @@
 - L82  `def test_H4_une_icone_est_un_objet_partage_qui_devient_maison_sur_place(monkeypatch)`
 - L93  `def test_H5_les_icones_connues_reviennent_au_demarrage(tmp_path, monkeypatch)`
 - L104  `def test_H6_logs_et_alertes_sans_emoji_decoratif()`
+
+### `tests/test_hierarchie.py`
+
+- L37  `def _h(local, h)`
+- L43  `def _attribuer(local, membre, rang, h)`
+- L49  `def _rang(d, ident)`
+- L53  `def _journal(local, motif)`
+- L57  `def _action(local, action, membre)`
+- L62  `def _vitrine(local)`
+- L72  `def test_H1_les_rangs_de_depart_et_les_trois_rangs_verrouilles(local)`
+- L121  `def test_H2_la_tete_seule_attribue_version_journal_et_l_equipage_refuse(local)`
+- L164  `def test_H3_roles_discord_exclusifs_refus_dangereux_et_rang_par_defaut_jamais_touche(local, monkeypatch)`
+- L240  `def test_H4_la_reprise_des_anciens_grades_par_leur_nom(local)`
+- L310  `def test_H5_un_depart_du_clan_le_rang_n_est_plus_montre_rien_n_est_efface(local)`
+- L328  `def test_H6_le_cablage(local)`
 
 ### `tests/test_honeypot.py`
 
@@ -13871,6 +14373,12 @@
 - L143  `def test_J9_installe_seulement_en_production(monkeypatch)`
 - L153  `def _prints_hors_except()`
 - L176  `def test_J10_les_alertes_hors_except_du_depot_portent_leur_marqueur()`
+
+### `tests/test_json_profond.py`
+
+- L13  `def _imbrique(n)`
+- L20  `def test_J1_la_profondeur()`
+- L27  `def test_J2_le_corps_trop_imbrique_est_illisible()`
 
 ### `tests/test_liens_jeux.py`
 
@@ -14015,45 +14523,45 @@
 
 - L170  `def _base(chemin)`
 - L181  `def run(coro)`
-- L317  `def interaction(g, membre, valeurs)`
-- L329  `def avis(i)`
-- L335  `def banc(tmp_path, monkeypatch)` @pytest.fixture
-- L339  `async def _json(r)`
-- L347  `def test_M1_premier_choix_cree_le_role_sous_le_clan_sans_permission_et_le_donne(banc)`
-- L379  `def test_M1b_le_rangement_tient_aussi_quand_discord_ne_decale_pas_les_roles(tmp_path, monkeypatch)`
-- L391  `def test_M1c_noms_et_couleurs_des_metiers()`
-- L412  `def _image(fmt, taille)`
-- L419  `def test_M2_icone_officielle_si_le_serveur_a_les_icones_de_role(tmp_path, monkeypatch)`
-- L461  `def test_M3_changer_de_metier_retire_l_ancien_role_et_jamais_un_autre(banc)`
-- L486  `def test_M3b_choisir_garde_les_autres_attributs_et_suit_les_versions(banc)`
-- L506  `def test_M4_limite_de_metiers_liste_et_site(banc)`
-- L538  `def test_M5_la_liste_est_reservee_au_clan(banc, monkeypatch)`
-- L554  `def test_M5b_deux_choix_d_affilee_et_une_panne_repondent_toujours(banc, monkeypatch)`
-- L574  `def _quitte(banc, membre, *partants, ajoute)`
-- L581  `def test_M6_perdre_le_role_du_clan_retire_tous_les_roles_du_clan(banc)`
-- L605  `def test_M6b_attribution_automatique_non_rien_n_est_rendu_mais_tout_part(banc)`
-- L618  `def test_M6c_discord_refuse_le_retrait_c_est_dit_au_journal(banc)`
-- L630  `def test_M7_sanction_en_cours_rien_n_est_retire_ni_rendu(banc)`
-- L661  `def test_M8_reconciliation_rattrape_ce_qu_un_redemarrage_a_manque(banc)`
-- L696  `def test_M8b_reconciliation_attribution_non_et_sans_role_du_clan(banc)`
-- L711  `def test_M8c_une_panne_persistante_n_ecrit_qu_une_ligne(banc)`
-- L725  `def test_M9_adresses_reglages_installer_reconcilier_et_droits(banc)`
-- L794  `def test_M9b_sans_role_du_clan_ni_module_les_adresses_le_disent(banc)`
-- L811  `def test_M9c_installer_et_creer_un_role_donnent_aussitot_a_ceux_qui_ont_le_metier(banc)`
-- L864  `def test_M10_le_guide_du_clan_porte_le_choix_du_metier(banc, monkeypatch)`
-- L916  `def test_M10b_un_metier_change_sur_le_site_le_guide_suit(banc)`
-- L926  `def test_M10c_le_selecteur_est_capte_au_demarrage_et_le_detecteur_est_vert()`
-- L938  `def _source(nom)`
-- L955  `def _decision(banc, **plus)`
-- L990  `def test_M11_accepte_au_clan_la_carte_du_metier_avant_la_fermeture(banc)`
-- L1007  `def test_M11b_sans_guide_rien_n_est_promis_et_une_panne_ne_bloque_pas(banc, monkeypatch)`
-- L1023  `def _fonction(nom)`
-- L1027  `def test_M12_cablage_etape_ecouteur_boucle_supervisee()`
-- L1074  `def test_M13_membres_sanctionnes_par_la_base_ou_par_le_role(tmp_path)`
-- L1100  `def test_M14_affiche_du_site_et_appliquer_suivent_le_clan(banc)`
-- L1135  `def test_M15_le_role_du_clan_n_est_jamais_le_role_d_un_metier(banc)`
-- L1152  `def test_M15b_le_fondateur_et_la_direction_ne_sont_jamais_depouilles(banc)`
-- L1167  `def test_M10d_installer_la_zone_du_clan_pose_le_guide_avec_le_choix_du_metier(tmp_path)`
+- L319  `def interaction(g, membre, valeurs)`
+- L331  `def avis(i)`
+- L337  `def banc(tmp_path, monkeypatch)` @pytest.fixture
+- L341  `async def _json(r)`
+- L349  `def test_M1_premier_choix_cree_le_role_sous_le_clan_sans_permission_et_le_donne(banc)`
+- L381  `def test_M1b_le_rangement_tient_aussi_quand_discord_ne_decale_pas_les_roles(tmp_path, monkeypatch)`
+- L393  `def test_M1c_noms_et_couleurs_des_metiers()`
+- L414  `def _image(fmt, taille)`
+- L421  `def test_M2_icone_officielle_si_le_serveur_a_les_icones_de_role(tmp_path, monkeypatch)`
+- L463  `def test_M3_changer_de_metier_retire_l_ancien_role_et_jamais_un_autre(banc)`
+- L488  `def test_M3b_choisir_garde_les_autres_attributs_et_suit_les_versions(banc)`
+- L508  `def test_M4_limite_de_metiers_liste_et_site(banc)`
+- L540  `def test_M5_la_liste_est_reservee_au_clan(banc, monkeypatch)`
+- L556  `def test_M5b_deux_choix_d_affilee_et_une_panne_repondent_toujours(banc, monkeypatch)`
+- L576  `def _quitte(banc, membre, *partants, ajoute)`
+- L583  `def test_M6_perdre_le_role_du_clan_retire_tous_les_roles_du_clan(banc)`
+- L607  `def test_M6b_attribution_automatique_non_rien_n_est_rendu_mais_tout_part(banc)`
+- L620  `def test_M6c_discord_refuse_le_retrait_c_est_dit_au_journal(banc)`
+- L632  `def test_M7_sanction_en_cours_rien_n_est_retire_ni_rendu(banc)`
+- L663  `def test_M8_reconciliation_rattrape_ce_qu_un_redemarrage_a_manque(banc)`
+- L698  `def test_M8b_reconciliation_attribution_non_et_sans_role_du_clan(banc)`
+- L713  `def test_M8c_une_panne_persistante_n_ecrit_qu_une_ligne(banc)`
+- L727  `def test_M9_adresses_reglages_installer_reconcilier_et_droits(banc)`
+- L796  `def test_M9b_sans_role_du_clan_ni_module_les_adresses_le_disent(banc)`
+- L813  `def test_M9c_installer_et_creer_un_role_donnent_aussitot_a_ceux_qui_ont_le_metier(banc)`
+- L866  `def test_M10_le_guide_du_clan_porte_le_choix_du_metier(banc, monkeypatch)`
+- L918  `def test_M10b_un_metier_change_sur_le_site_le_guide_suit(banc)`
+- L928  `def test_M10c_le_selecteur_est_capte_au_demarrage_et_le_detecteur_est_vert()`
+- L940  `def _source(nom)`
+- L957  `def _decision(banc, **plus)`
+- L992  `def test_M11_accepte_au_clan_la_carte_du_metier_avant_la_fermeture(banc)`
+- L1009  `def test_M11b_sans_guide_rien_n_est_promis_et_une_panne_ne_bloque_pas(banc, monkeypatch)`
+- L1025  `def _fonction(nom)`
+- L1029  `def test_M12_cablage_etape_ecouteur_boucle_supervisee()`
+- L1076  `def test_M13_membres_sanctionnes_par_la_base_ou_par_le_role(tmp_path)`
+- L1102  `def test_M14_affiche_du_site_et_appliquer_suivent_le_clan(banc)`
+- L1137  `def test_M15_le_role_du_clan_n_est_jamais_le_role_d_un_metier(banc)`
+- L1154  `def test_M15b_le_fondateur_et_la_direction_ne_sont_jamais_depouilles(banc)`
+- L1169  `def test_M10d_installer_la_zone_du_clan_pose_le_guide_avec_le_choix_du_metier(tmp_path)`
 - L72  `class Role`
     - L73  `def __init__(self, g, rid, nom, position, permissions, managed, couleur)`
     - L79  `def is_default(self)`
@@ -14077,21 +14585,35 @@
     - L163  `async def edit_role_positions(self, positions, reason)`
 - L189  `class Banc`
     - L193  `def __init__(self, tmp_path, monkeypatch, features, decaler)`
-    - L274  `def choisir(self, membre, *valeurs)`
-    - L284  `def sql(self, requete, args)`
-    - L291  `def affiche(self, membre)`
-    - L294  `def role_nomme(self, nom)`
-    - L297  `def lien(self, cle)`
-    - L301  `def types_journal(self)`
-    - L304  `def http(self, scenario)`
-    - L312  `def biscuit(self, uid)`
-- L848  `class Fil`
-    - L849  `def __init__(self, fid)`
-    - L852  `def get_partial_message(self, mid)`
-    - L860  `async def edit(self, **kw)`
-- L947  `class Ticket`
-    - L948  `def __init__(self)`
-    - L951  `async def send(self, content, **kw)`
+    - L276  `def choisir(self, membre, *valeurs)`
+    - L286  `def sql(self, requete, args)`
+    - L293  `def affiche(self, membre)`
+    - L296  `def role_nomme(self, nom)`
+    - L299  `def lien(self, cle)`
+    - L303  `def types_journal(self)`
+    - L306  `def http(self, scenario)`
+    - L314  `def biscuit(self, uid)`
+- L850  `class Fil`
+    - L851  `def __init__(self, fid)`
+    - L854  `def get_partial_message(self, mid)`
+    - L862  `async def edit(self, **kw)`
+- L949  `class Ticket`
+    - L950  `def __init__(self)`
+    - L953  `async def send(self, content, **kw)`
+
+### `tests/test_metiers_places.py`
+
+- L18  `def test_P1_les_reglages_par_defaut_et_lus()`
+- L25  `def test_P2_le_metier_retrouve_dans_les_reponses_de_la_fiche()`
+- L33  `def test_P3_les_places_se_valident(monkeypatch)`
+- L43  `def test_P4_la_fiche_accepte_le_champ_metier()`
+- L49  `def test_P5_la_fiche_propose_seulement_les_places_libres(monkeypatch)`
+- L68  `def test_P6_branche_dans_le_bot_et_le_guide()`
+
+### `tests/test_modeles_annonces.py`
+
+- L12  `def test_A1_les_modeles_d_annonce_sont_ecrits_et_dans_les_limites()`
+- L25  `def test_A2_la_barre_de_mise_en_forme_sur_le_site_de_l_equipage()`
 
 ### `tests/test_mots_vocaux_stockage.py`
 
@@ -14425,9 +14947,9 @@
 - L1081  `def test_Q18_les_mots_pour_soi_s_effacent_et_ne_tuent_aucun_bouton(tmp_path, monkeypatch)`
 - L1099  `def _source(nom)`
 - L1104  `def test_Q19_boutons_persistants_enregistres_et_routes_du_site(tmp_path)`
-- L1185  `def test_Q20_l_affiche_d_un_ticket_du_clan_dans_le_bot(tmp_path)`
-- L1221  `def test_Q21_phrases_du_journal_du_site_et_regle_de_nettoyage(tmp_path)`
-- L1267  `def test_Q30_le_site_range_chaque_candidature_a_son_etape(tmp_path)`
+- L1187  `def test_Q20_l_affiche_d_un_ticket_du_clan_dans_le_bot(tmp_path)`
+- L1223  `def test_Q21_phrases_du_journal_du_site_et_regle_de_nettoyage(tmp_path)`
+- L1269  `def test_Q30_le_site_range_chaque_candidature_a_son_etape(tmp_path)`
 - L58  `class Banc`
     - L61  `def __init__(self, tmp_path, fichier, liens)`
     - L75  `async def get_db(self)` @contextlib.asynccontextmanager
@@ -14617,6 +15139,9 @@
 - L1320  `def test_R26_les_decidees_par_morceaux_comme_le_journal(tmp_path)`
 - L1361  `def test_R27_les_donnees_portent_le_resume_la_fiche_porte_tout(local)`
 - L1404  `def test_R28_un_identifiant_non_ascii_est_refuse_en_400_jamais_500(local)`
+- L1440  `def test_R16_questionnaire_abandonne_rappel_puis_fermeture_sans_liste_noire(tmp_path)`
+- L1474  `def test_R16b_il_reprend_le_compte_repart()`
+- L1481  `def test_R17_les_reglages_des_relances_et_la_liste_du_site(tmp_path)`
 
 ### `tests/test_recrutements.py`
 
@@ -14749,6 +15274,22 @@
 - L302  `class _FauxI`
     - L303  `def __init__(self, salon)`
 
+### `tests/test_reponses_auto.py`
+
+- L41  `def env(tmp_path)` @pytest.fixture
+- L94  `def _dire(e, uid, texte, t)`
+- L99  `def test_R1_une_question_frequente_une_carte_qui_s_efface(env)`
+- L109  `def test_R2_une_fois_puis_rien_puis_un_seul_rappel_sans_demande(env)`
+- L118  `def test_R3_sa_demande_d_aide_existe_plus_rien(env)`
+- L125  `def test_R4_le_staff_le_bavardage_et_l_aide_proposee_n_ont_rien(env)`
+- L133  `def test_R5_la_question_n_attend_plus_le_staff(env)`
+- L141  `def test_R6_la_tete_coupe_les_reponses_ici(env)`
+- L149  `def test_R7_branche_dans_le_bot_et_le_site()`
+- L160  `def test_R8_silence_dans_help_et_trade_et_effacement_qui_survit(env)`
+- L25  `class Message`
+    - L28  `def __init__(self, salon, auteur, texte)`
+    - L35  `async def reply(self, **kw)`
+
 ### `tests/test_revue_admin.py`
 
 - L41  `def _noeud(nom, classe)`
@@ -14828,18 +15369,17 @@
 
 ### `tests/test_revue_entraide.py`
 
-- L27  `def _source(nom)`
-- L33  `def _propre()` @pytest.fixture
-- L41  `def _reponse(g, fil, membre_id, a)`
-- L49  `def test_R1_les_reponses_sous_une_carte_gardent_la_demande_vivante(env)`
-- L71  `def test_R2_une_carte_supprimee_par_un_moderateur_part_avec_ses_mots_et_ses_reponses(env)`
-- L91  `def test_R3_une_carte_n_est_relue_sur_discord_qu_une_fois_par_demi_heure(env, monkeypatch)`
-- L112  `def test_R4_certifier_ni_soi_meme_ni_un_echange_dont_on_est_partie(env)`
-- L134  `def test_R5_la_faq_se_tait_dans_help_et_trade_et_un_membre_retenu_ne_bloque_pas_le_salon(faq_env)`
-- L157  `def test_R6_les_motifs_trop_larges()`
-- L170  `def test_R7_un_post_supprime_ne_laisse_plus_de_bouton_qui_ment(tmp_path, monkeypatch)`
-- L189  `def test_R8_le_panneau_aide_ne_depasse_jamais_quarante_composants()`
-- L211  `def test_R9_branche_dans_le_bot()`
+- L26  `def _source(nom)`
+- L32  `def _propre()` @pytest.fixture
+- L39  `def _reponse(g, fil, membre_id, a)`
+- L47  `def test_R1_les_reponses_sous_une_carte_gardent_la_demande_vivante(env)`
+- L69  `def test_R2_une_carte_supprimee_par_un_moderateur_part_avec_ses_mots_et_ses_reponses(env)`
+- L89  `def test_R3_une_carte_n_est_relue_sur_discord_qu_une_fois_par_demi_heure(env, monkeypatch)`
+- L110  `def test_R4_certifier_ni_soi_meme_ni_un_echange_dont_on_est_partie(env)`
+- L135  `def test_R6_les_motifs_trop_larges()`
+- L148  `def test_R7_un_post_supprime_ne_laisse_plus_de_bouton_qui_ment(tmp_path, monkeypatch)`
+- L167  `def test_R8_le_panneau_aide_ne_depasse_jamais_quarante_composants()`
+- L189  `def test_R9_branche_dans_le_bot()`
 
 ### `tests/test_revue_moderation.py`
 
@@ -15523,6 +16063,21 @@
 - L134  `def test_G5_salon_cree_une_fois_sans_messages(tmp_path)`
 - L159  `def test_G6_les_anciennes_cartes_sont_refaites_une_fois(env)`
 
+### `tests/test_sujets_interdits.py`
+
+- L21  `def _cat(texte, gif)`
+- L31  `def test_permis(texte)` @pytest.mark.parametrize
+- L43  `def test_bloque(texte, categorie)` @pytest.mark.parametrize
+- L47  `def test_symetrie_religions()`
+- L53  `def test_gif_titre_designe_l_image()`
+- L59  `def test_reglages_couper_une_categorie()`
+- L63  `def test_jamais_d_exception()`
+- L68  `def test_insulte_selon_la_langue()`
+- L77  `def _extraire(*noms)`
+- L88  `def sujets_interdits_mod()`
+- L92  `def test_branchement_texte_lien_et_titre_de_gif()`
+- L103  `def test_tous_les_chemins_passent_par_le_nouveau_filtre()`
+
 ### `tests/test_tableau.py`
 
 - L32  `def _source(nom)`
@@ -15553,48 +16108,48 @@
 
 ### `tests/test_textes.py`
 
-- L64  `def _base(chemin)`
-- L76  `def registre_textes(tmp_path, monkeypatch)` @pytest.fixture
-- L93  `def ecrire(cle, valeur, version, g, auteur)`
-- L98  `def remettre(cle, version, g)`
-- L103  `def dans_une_boucle(coro_fn)`
-- L113  `def libelles_boutons(vue)`
-- L134  `def test_T1_declarer_refuse_les_fautes_de_cablage(registre_textes)`
-- L156  `def test_T2_seules_les_variables_declarees_sont_remplacees(registre_textes)`
-- L168  `def test_T3_sans_base_le_texte_d_origine(registre_textes)`
-- L181  `def test_T4_ecrire_nettoie_borne_et_garde(registre_textes)`
-- L205  `def test_T5_conflit_par_version_et_retour_a_l_origine(registre_textes)`
-- L225  `def test_T5b_un_module_prevenu_apres_l_ecriture(registre_textes)`
-- L242  `def test_T6_cache_relu_au_demarrage_et_base_en_panne(registre_textes)`
-- L269  `def test_T7_rgpd_l_auteur_est_neutralise_le_texte_reste(registre_textes)`
-- L363  `async def _json(r)`
-- L367  `def test_T8_les_adresses_du_site(tmp_path, monkeypatch, registre_textes)`
-- L430  `def test_T9_le_recrutement_emploie_les_textes_enregistres(tmp_path, monkeypatch, registre_textes)`
-- L492  `def _carte_de(env_, m_id)`
-- L498  `def test_T10_les_evenements_emploient_les_textes_enregistres(env, registre_textes)`
-- L545  `def test_T10b_les_annonces_publiees_sont_rangees_a_part(env, registre_textes)`
-- L566  `def banc_metiers(tmp_path, monkeypatch, registre_textes)` @pytest.fixture
-- L581  `def _ecrire_puis_attendre(g, cle, valeur)`
-- L587  `def test_T11_le_guide_du_clan_et_l_acceptation(banc_metiers)`
-- L623  `def test_T12_renommer_un_role_droits_refus_et_nom_garde(banc_metiers)`
-- L670  `def test_T16_la_carte_de_l_equipe_ses_boutons_et_le_formulaire_du_refus(tmp_path, monkeypatch, registre_textes)`
-- L710  `def test_T17_les_reponses_au_choix_du_metier(banc_metiers)`
-- L725  `def test_T18_le_listing_et_l_annonce_des_metiers(registre_textes)`
-- L755  `def test_T19_le_guide_du_clan_a_la_sauce_de_la_direction(registre_textes, monkeypatch)`
-- L805  `def test_T20_les_sous_onglets_renommes_et_une_famille_nommee(registre_textes)`
-- L821  `def test_T21_un_texte_en_cours_de_modification_ailleurs_est_refuse_423(tmp_path, monkeypatch, registre_textes)`
-- L878  `def test_T13_les_noms_du_site_sont_ceux_de_la_page()`
-- L915  `def _cles_appelees(source, noms)`
-- L929  `def test_T14_chaque_cle_ecrite_dans_le_code_est_declaree()`
-- L942  `def test_T15_cablage_bot_site_local_et_page()`
-- L288  `class Role`
-    - L289  `def __init__(self, rid, nom, position, permissions, managed)`
-    - L295  `def is_default(self)`
-    - L298  `async def edit(self, *, name, reason)`
-- L305  `class Site`
-    - L306  `def __init__(self, tmp_path, monkeypatch)`
-    - L350  `def biscuit(self)`
-    - L354  `def http(self, scenario)`
+- L65  `def _base(chemin)`
+- L77  `def registre_textes(tmp_path, monkeypatch)` @pytest.fixture
+- L94  `def ecrire(cle, valeur, version, g, auteur)`
+- L99  `def remettre(cle, version, g)`
+- L104  `def dans_une_boucle(coro_fn)`
+- L114  `def libelles_boutons(vue)`
+- L135  `def test_T1_declarer_refuse_les_fautes_de_cablage(registre_textes)`
+- L157  `def test_T2_seules_les_variables_declarees_sont_remplacees(registre_textes)`
+- L169  `def test_T3_sans_base_le_texte_d_origine(registre_textes)`
+- L182  `def test_T4_ecrire_nettoie_borne_et_garde(registre_textes)`
+- L206  `def test_T5_conflit_par_version_et_retour_a_l_origine(registre_textes)`
+- L226  `def test_T5b_un_module_prevenu_apres_l_ecriture(registre_textes)`
+- L243  `def test_T6_cache_relu_au_demarrage_et_base_en_panne(registre_textes)`
+- L270  `def test_T7_rgpd_l_auteur_est_neutralise_le_texte_reste(registre_textes)`
+- L364  `async def _json(r)`
+- L368  `def test_T8_les_adresses_du_site(tmp_path, monkeypatch, registre_textes)`
+- L431  `def test_T9_le_recrutement_emploie_les_textes_enregistres(tmp_path, monkeypatch, registre_textes)`
+- L493  `def _carte_de(env_, m_id)`
+- L499  `def test_T10_les_evenements_emploient_les_textes_enregistres(env, registre_textes)`
+- L546  `def test_T10b_les_annonces_publiees_sont_rangees_a_part(env, registre_textes)`
+- L567  `def banc_metiers(tmp_path, monkeypatch, registre_textes)` @pytest.fixture
+- L582  `def _ecrire_puis_attendre(g, cle, valeur)`
+- L588  `def test_T11_le_guide_du_clan_et_l_acceptation(banc_metiers)`
+- L624  `def test_T12_renommer_un_role_droits_refus_et_nom_garde(banc_metiers)`
+- L671  `def test_T16_la_carte_de_l_equipe_ses_boutons_et_le_formulaire_du_refus(tmp_path, monkeypatch, registre_textes)`
+- L711  `def test_T17_les_reponses_au_choix_du_metier(banc_metiers)`
+- L726  `def test_T18_le_listing_et_l_annonce_des_metiers(registre_textes)`
+- L756  `def test_T19_le_guide_du_clan_a_la_sauce_de_la_direction(registre_textes, monkeypatch)`
+- L806  `def test_T20_les_sous_onglets_renommes_et_une_famille_nommee(registre_textes)`
+- L822  `def test_T21_un_texte_en_cours_de_modification_ailleurs_est_refuse_423(tmp_path, monkeypatch, registre_textes)`
+- L879  `def test_T13_les_noms_du_site_sont_ceux_de_la_page()`
+- L916  `def _cles_appelees(source, noms)`
+- L930  `def test_T14_chaque_cle_ecrite_dans_le_code_est_declaree()`
+- L943  `def test_T15_cablage_bot_site_local_et_page()`
+- L289  `class Role`
+    - L290  `def __init__(self, rid, nom, position, permissions, managed)`
+    - L296  `def is_default(self)`
+    - L299  `async def edit(self, *, name, reason)`
+- L306  `class Site`
+    - L307  `def __init__(self, tmp_path, monkeypatch)`
+    - L351  `def biscuit(self)`
+    - L355  `def http(self, scenario)`
 
 ### `tests/test_tickets_dossier.py`
 
@@ -15695,6 +16250,33 @@
 - L28  `class Obj`
     - L29  `def __init__(self, **kw)`
 
+### `tests/test_tickets_interdits.py`
+
+- L42  `def _sans_attente(monkeypatch)` @pytest.fixture
+- L63  `def banc(tmp_path)`
+- L72  `async def preparer(b)`
+- L77  `def listes(b)`
+- L81  `async def ecrire(b, route, auteur, **corps)`
+- L89  `def silence(b)`
+- L97  `def test_I1_deux_familles_celles_du_site_un_nouveau_panneau_se_range_seul()`
+- L110  `def test_I2_serveur_seul_clan_seul_les_deux_puis_la_levee(tmp_path)`
+- L156  `def test_I3_une_version_perimee_est_refusee_et_rien_n_est_ecrit(tmp_path)`
+- L171  `def test_I4_la_tete_seule_ecrit_et_le_fondateur_la_direction_le_bot_jamais_interdits(tmp_path)`
+- L200  `def _commande(b, journal)`
+- L225  `def test_I5_la_commande_ticketblacklist_voit_et_modifie_les_memes_listes(tmp_path)`
+- L263  `def test_I6_la_liste_noire_du_recrutement_et_la_fiche_disent_la_meme_chose(tmp_path)`
+- L284  `def test_I7_au_clic_un_refus_ephemere_et_l_autre_famille_reste_ouverte(tmp_path)`
+- L312  `def test_I8_le_refus_ne_dit_ni_qui_ni_pourquoi_ni_quand_meme_reecrit(tmp_path, monkeypatch)`
+- L341  `def test_I9_les_messages_prives_de_refus_ne_parlent_jamais_de_liste_noire(tmp_path)`
+- L367  `def test_I10_aucun_envoi_a_la_personne_sur_chaque_chemin(tmp_path)`
+- L51  `class InterK(Inter)`
+    - L54  `def __init__(self, *a, **k)`
+    - L58  `async def _repondre(self, content, **kw)`
+- L214  `class Reponse`
+    - L215  `def __init__(self)`
+    - L218  `async def send_message(self, *a, **kw)`
+    - L221  `def is_done(self)`
+
 ### `tests/test_tickets_panneau_unifie.py`
 
 - L42  `def _classe(nom)`
@@ -15747,13 +16329,15 @@
 ### `tests/test_tickets_sous_menus.py`
 
 - L21  `def _classes(conf, affiches)`
-- L39  `def _membre(uid, admin, bot)`
-- L44  `def _textes(vue)`
-- L54  `def test_T1_liste_noire_en_v2_avec_pages_ajout_et_retrait()`
-- L78  `def test_T2_questions_en_v2_cinq_au_plus()`
-- L90  `def test_T3_plus_aucun_sous_menu_des_tickets_en_embed()`
-- L100  `def test_T4_un_clic_sur_ouvrir_un_ticket_ne_repond_qu_une_fois()`
-- L108  `def test_T5_retirer_une_seule_immunite_en_v2()`
+- L43  `async def _noter(g, uid, pids, **k)`
+- L47  `async def _levee(g, auteur, uid, pids, source)`
+- L51  `def _membre(uid, admin, bot)`
+- L56  `def _textes(vue)`
+- L66  `def test_T1_liste_noire_en_v2_avec_pages_ajout_et_retrait()`
+- L94  `def test_T2_questions_en_v2_cinq_au_plus()`
+- L106  `def test_T3_plus_aucun_sous_menu_des_tickets_en_embed()`
+- L116  `def test_T4_un_clic_sur_ouvrir_un_ticket_ne_repond_qu_une_fois()`
+- L124  `def test_T5_retirer_une_seule_immunite_en_v2()`
 
 ### `tests/test_tickets_v2.py`
 
@@ -15889,6 +16473,16 @@
 - L593  `def test_V12_un_depart_masque_l_affiche_un_retour_la_rend_rien_n_est_supprime(local)`
 - L619  `def test_V13_un_membre_parti_du_serveur_puis_revenu(local)`
 - L636  `def test_V14_une_affiche_sans_membre_lie_ne_change_pas(local)`
+
+### `tests/test_vitrine_portraits.py`
+
+- L17  `def test_V1_l_avatar_discord_garde_est_une_image_du_site(tmp_path, monkeypatch)`
+- L37  `def test_V2_un_avatar_illisible_ne_casse_rien(tmp_path, monkeypatch)`
+- L46  `def test_V3_le_portrait_roblox_sans_pseudo_valide_n_appelle_pas_roblox(monkeypatch)`
+- L57  `def test_V4_les_metiers_de_la_vitrine_restent_ouverts()`
+- L29  `class _Asset`
+    - L30  `def replace(self, **_k)`
+    - L33  `async def read(self)`
 
 ### `tests/test_vocal_hop.py`
 
@@ -16056,7 +16650,7 @@
 - L545  `async def _r_defaut(g, auteur, requete, corps)`
 - L549  `async def _r_renommer(g, auteur, requete, corps)`
 - L553  `def _verrou_texte(corps)`
-- L630  `def _declarer_site()`
+- L631  `def _declarer_site()`
 - L65  `class _Invalide(Exception)`
     - L66  `def __init__(self, message, status)`
 
@@ -16099,6 +16693,48 @@
 - L143  `async def salon(guild, chid)`
 - L154  `async def existe(guild, chid)`
 - L162  `async def ajouter(ch, membre)`
+
+### `tickets_interdits.py`
+
+- L89  `def setup(*, get_db, cfg, db_set, tete, exempte, robot, log)`
+- L100  `def pret()`
+- L104  `async def init_db()`
+- L113  `def _signaler(code, message, detail, ex)`
+- L121  `def _verrou()`
+- L129  `def _questionnaire()`
+- L143  `def famille(c, pid)`
+- L148  `def panneaux(c)`
+- L159  `def _liste(pnl)`
+- L165  `def _membre(v)`
+- L177  `def _qui(g, uid)`
+- L184  `async def protection(g, uid, c)`
+- L210  `async def _recrutement(g, uid)`
+- L218  `async def _metas(guild_id, uid)`
+- L227  `async def _oublier(guild_id, uid, pids)`
+- L237  `async def _retenir(guild_id, uid, pids, *, depuis, par, motif, source)`
+- L249  `def _decor(g, meta)`
+- L257  `def _version(lignes, rec)`
+- L263  `async def _lire_etat(g, uid, c)`
+- L285  `def _resume(lignes)`
+- L295  `async def etat(g, uid)`
+- L308  `async def _ecrire_listes(g, uid, voulu)`
+- L330  `async def _appliquer(g, auteur, uid, voulu, *, motif, source)`
+- L371  `def _cibles(c, familles, pids)`
+- L378  `async def _modifier(g, auteur, uid, cibles, *, ajouter, motif, source)`
+- L388  `async def interdire(g, auteur, uid, *, familles, panneaux_, motif, source)`
+- L396  `async def lever(g, auteur, uid, *, familles, panneaux_, source)`
+- L411  `async def noter(g, uid, pids, *, par, motif, source)`
+- L424  `async def apres_levee(g, auteur, uid, pids, source)`
+- L441  `def _net(texte)`
+- L445  `def _corps(corps, *, motif)`
+- L472  `def _quoi(c, familles, pids)`
+- L480  `async def _ecrire(g, auteur, corps, *, interdire_)`
+- L524  `async def _r_etat(g, auteur, requete, corps)`
+- L533  `async def _r_interdire(g, auteur, requete, corps)`
+- L537  `async def _r_lever(g, auteur, requete, corps)`
+- L541  `def _verrou_membre(corps)`
+- L83  `class _Invalide(Exception)`
+    - L84  `def __init__(self, message, status)`
 
 ### `token_grabber.py`
 
