@@ -22,6 +22,8 @@ import unicodedata
 from functools import lru_cache
 from pathlib import Path
 
+import textes
+
 DONNEES = Path(__file__).resolve().parent / "donnees_jeu"
 DOMAINES = {"jeu": "🎮 Jeu", "site": "🌐 Site", "studio": "🏴‍☠️ Studio"}
 STATUTS = {"confirme": ("✅ Confirmé", "✅ Confirmed"), "a_verifier": ("🔎 À vérifier", "🔎 Unverified"),
@@ -68,6 +70,9 @@ def _lire(nom: str) -> dict:
 def fiches() -> dict:
     """terme plié → fiche {cle, nom, nom_en, type, description, resume_en, statut, image, wiki, preuves}."""
     cat, wiki, vid = _lire("rell_catalogue.json"), _lire("rell_wiki.json"), _lire("rell_videos.json")
+    #  29/10/2026 : les textes RELUS du wiki public (français et anglais, sans supposition) passent avant tout le reste
+    relus = _lire("wiki_public.json")
+    textes = relus.get("textes", {})
     types = {t["cle"]: t["nom"] for t in cat.get("types", [])}
     titres = {v["id"]: v["titre"] for v in vid.get("videos", [])}
     preuves = vid.get("termes", {})
@@ -86,13 +91,25 @@ def fiches() -> dict:
         if not e.get("actif", True):
             continue
         p = pages.get(plier(e["nom_en"]))
+        relu = textes.get(f"{e['type']}.{e['cle']}") or {}
         f = {"cle": f"{e['type']}.{e['cle']}", "nom": e["nom"], "nom_en": e["nom_en"], "type": types.get(e["type"], ""),
-             "description": e.get("description", ""), "resume_en": (p or {}).get("resume", ""),
+             "description": relu.get("fr") or e.get("description", ""), "texte_en": relu.get("en", ""),
+             "resume_en": (p or {}).get("resume", ""),
              "statut": e.get("statut", "a_verifier"), "image": (p or {}).get("image", ""),
              "wiki": e["source"] if "fandom.com" in e.get("source", "") else (p or {}).get("adresse", ""),
              "preuves": [(v, t, titres.get(v, "")) for v, t in preuves.get(e["nom_en"], [])[:3]]}
         poser(e["nom_en"], f)
         poser(e["nom"], f)
+    for cle, x in relus.get("hors_catalogue", {}).items():
+        vus = preuves.get(x.get("preuve") or x["nom"], [])
+        if vus:
+            f = {"cle": cle, "nom": x.get("nom_fr") or x["nom"], "nom_en": x["nom"], "type": "", "description": x["fr"],
+                 "texte_en": x["en"], "resume_en": "", "statut": "confirme", "image": "",
+                 "wiki": pages.get(plier(x.get("preuve") or x["nom"]), {}).get("adresse", ""),
+                 "preuves": [(v, t, titres.get(v, "")) for v, t in vus[:3]]}
+            poser(x["nom"], f)
+            if x.get("nom_fr"):
+                poser(x["nom_fr"], f)
     for p in wiki.get("pages", []):
         nom = re.sub(r"(?i)\s*boss fight (?:guide|page)$", "", p["titre"].split("/")[-1]).strip()
         if not (p.get("resume") or p.get("image")) or plier(nom) in out:
@@ -146,8 +163,9 @@ def reponse(cle: str, langue: str = "fr") -> tuple | None:
     nom = f["nom_en"] if en or f["nom"] == f["nom_en"] else f"{f['nom']} ({f['nom_en']})"
     titre = f"🎮 {nom}" + (f" · {f['type']}" if f["type"] else "")
     lignes = []
-    texte = (f["resume_en"] or f["description"]) if en else (f["description"] or f["resume_en"])
+    texte = (f.get("texte_en") or f["resume_en"] or f["description"]) if en else (f["description"] or f["resume_en"])
     if texte:
+        texte = re.sub(r"\s*Dit dans « [^»]+ » \([^)]*\)\.?", "", texte)       # la preuve a sa propre ligne
         lignes.append(texte[:500] + (" *(wiki des fans, en anglais)*" if not en and not f["description"] else ""))
     lignes.append(STATUTS.get(f["statut"], STATUTS["a_verifier"])[1 if en else 0])
     if f["preuves"]:
@@ -179,3 +197,52 @@ def domaine(sujet: str = "", texte: str = "") -> str:
     if STUDIO.search(p):
         return "studio"
     return ""
+
+
+# ════════════════════════════════════════════════════════════════
+#  La famille « Site » : les questions sur nos pages (29/10/2026)
+# ════════════════════════════════════════════════════════════════
+SUJETS_SITE = {
+    #  le wiki : « y a un wiki ? », « le lien du wiki », « où trouver des infos sur RELL Seas ? », « is there a wiki? »
+    "wiki": re.compile(r"\b(?:wiki|grimoire)\b|\b(?:infos?|informations?|tout savoir|guide)\b.{0,30}\brell ?seas\b|"
+                       r"\brell ?seas\b.{0,30}\b(?:infos?|informations?|guide)\b"),
+    #  la vitrine du clan : « le site du clan », « la vitrine », « le lien de l'équipage », « clan website »
+    "vitrine": re.compile(r"\b(?:site|vitrine|page)\b.{0,25}\b(?:clan|gorp|equipage|crew)\b|\bvitrine\b|"
+                          r"\b(?:clan|crew)\b.{0,15}\bwebsite\b"),
+}
+ADRESSES_SITE = {"wiki": "/wiki", "vitrine": "/equipage"}
+TEXTES_SITE = {
+    "wiki": ("📖 Le wiki RELL Seas", "📖 The RELL Seas wiki",
+             "Le grimoire du clan : tout ce que RELL a vraiment montré, vérifié fiche par fiche — le jeu, le monde, le lore, "
+             "les vidéos officielles. En français et en anglais.",
+             "The clan's grimoire: everything RELL has really shown, verified entry by entry — the game, the world, the lore, "
+             "the official videos. In French and English.", "Ouvrir le wiki", "Open the wiki"),
+    "vitrine": ("🏴‍☠️ La vitrine du clan", "🏴‍☠️ The clan's showcase",
+                "La vitrine de l'équipage GoRP : ses membres, ses affiches, ses nouvelles.",
+                "The GoRP crew's showcase: its members, posters and news.", "Voir la vitrine", "See the showcase"),
+}
+
+
+#  Les textes des réponses « Site » : réécrits sur le site (« Textes & noms », famille « Réponses du bot »), comme la FAQ.
+for _c, _t in TEXTES_SITE.items():
+    for _i, _l in ((2, "fr"), (3, "en")):
+        textes.declarer(f"faq.site_{_c}.{_l}", _t[_i], groupe="reponses", partie="Les questions fréquentes",
+                        ordre=300 + _i, titre=f"Réponse « {_t[0]} » ({_l})", max_=500)
+
+
+def sujet_site(texte: str) -> str:
+    """« wiki », « vitrine » ou "" : une question sur nos pages."""
+    p = plier(texte)
+    if not re.search(r"\b(?:ou|lien|adresse|existe|y a|ya|il y a|c est quoi|comment|where|link|is there|any|what)\b|\?", p + (
+            " ?" if "?" in str(texte) else "")):
+        return ""
+    return next((k for k, r in SUJETS_SITE.items() if r.search(p)), "")
+
+
+def reponse_site(cle: str, langue: str, base: str, gid=None) -> tuple | None:
+    if cle not in TEXTES_SITE or not base:
+        return None
+    t = TEXTES_SITE[cle]
+    en = langue == "en"
+    corps = textes.texte_cache(gid, f"faq.site_{cle}.{'en' if en else 'fr'}") if gid else t[3 if en else 2]
+    return t[1 if en else 0], corps, [(t[5 if en else 4], base.rstrip("/") + ADRESSES_SITE[cle])]

@@ -19,7 +19,7 @@ const T = {
     categories: "Les pancartes du port", tout: "Toutes", chercher: "Chercher une fiche (nom français ou anglais)…", sans: "Aucune fiche ne correspond.", choisir: "Choisis une pancarte, ou cherche une fiche.", retour: "← Toutes les pancartes",
     preuve: "Vu dans", m3: "Movie 3", verifie: "Vérifié", fermer: "Fermer", actusTitre: "Les vidéos officielles", m3Titre: "Movie 3, minute par minute",
     m3Note: "Les termes du jeu prononcés dans RELL Seas: The Movie 3 (sous-titres de la vidéo) : un clic, et la vidéo s'ouvre à la bonne minute.", toutes: "Toutes", plus: "Voir toutes les vidéos", liensIntro: "Seulement les comptes tenus par RELL. Méfie-toi de tout autre lien qui promet le jeu.",
-    chiffresNote: (d) => `Chiffres publics relevés le ${d}.`, fondateur: "Fondateur", direction: "Direction",
+    chiffresNote: (d) => `Chiffres publics relevés le ${d}.`, fondateur: "Fondateur", direction: "Direction", vitrine: "La vitrine du clan",
     regle: "Ici, jamais de rumeur ni de « comment l'obtenir » : le jeu n'est pas encore sorti, et personne ne le sait vraiment.",
     droits: (c) => `Wiki non officiel réalisé par le clan ${c} : textes, tri et mise en page © ${c}, reproduction interdite sans accord. RELL Seas, ses noms et ses images (illustrations des vidéos officielles) appartiennent à RELL Games.` },
   en: { onglets: { accueil: "Home", jeu: "The game", monde: "The world", lore: "Lore", fiches: "Entries", actus: "News & videos", liens: "Official links" },
@@ -33,7 +33,7 @@ const T = {
     categories: "The harbour signs", tout: "All", chercher: "Search an entry (French or English name)…", sans: "No entry matches.", choisir: "Pick a sign, or search an entry.", retour: "← All signs",
     preuve: "Shown in", m3: "Movie 3", verifie: "Verified", fermer: "Close", actusTitre: "Official videos", m3Titre: "Movie 3, minute by minute",
     m3Note: "Game terms spoken in RELL Seas: The Movie 3 (video subtitles): one click opens the video at the right minute.", toutes: "All", plus: "See all videos", liensIntro: "Only accounts run by RELL. Beware of any other link promising the game.",
-    chiffresNote: (d) => `Public figures as of ${d}.`, fondateur: "Founder", direction: "Leadership",
+    chiffresNote: (d) => `Public figures as of ${d}.`, fondateur: "Founder", direction: "Leadership", vitrine: "The clan's showcase",
     regle: "Never rumours nor “how to get it” here: the game isn't out yet, and nobody really knows.",
     droits: (c) => `Unofficial wiki made by the ${c} clan: texts, sorting and layout © ${c}, no reproduction without permission. RELL Seas, its names and images (official video artwork) belong to RELL Games.` } };
 
@@ -261,7 +261,8 @@ function pied() {
       el("div", {}, el("div", {}, el("strong", {}, t().fondateur + " : "), c.fondateur || ""),
         (c.direction || []).length ? el("div", {}, el("strong", {}, t().direction + " : "), c.direction.join(", ")) : null,
         el("div", { classe: "w-note" }, t().regle))),
-    c.discord ? el("a", { classe: "w-bouton laiton", href: c.discord, target: "_blank", rel: "noopener noreferrer" }, "⚓ " + t().rejoindre) : null),
+    el("div", { classe: "w-actions" }, el("a", { classe: "w-bouton bois", href: "/equipage" }, "🏴‍☠️ " + t().vitrine),
+      c.discord ? el("a", { classe: "w-bouton laiton", href: c.discord, target: "_blank", rel: "noopener noreferrer" }, "⚓ " + t().rejoindre) : null)),
   el("p", { classe: "w-note" }, t().droits(c.clan || "GoRP SEA"))];
 }
 

@@ -39,3 +39,21 @@ def test_SAVOIR_branche_dans_les_reponses_du_bot():
     assert R.classer("qui peut m'aider à battre Yahu ?")[0] == "aide"          # une demande d'aide reste une demande
     assert R.classer("comment ouvrir un ticket ?")[0] == "faq"
     assert R._libelle("jeu:" + S.trouver("c'est quoi Yahu ?")["cle"], "") == "Jeu · Yahu"
+
+
+def test_SAVOIR_famille_site_le_wiki_et_la_vitrine():
+    assert R.classer("y a un wiki ?")[:2] == ("savoir", "site:wiki")
+    assert R.classer("où trouver des infos sur rell seas ?")[:2] == ("savoir", "site:wiki")
+    assert R.classer("c'est quoi le lien du site du clan ?")[:2] == ("savoir", "site:vitrine")
+    assert R.classer("comment rejoindre le clan ?")[:2] == ("faq", "clan")            # rien ne change pour le reste
+    assert R.classer("le wiki est trop bien")[0] == ""                                 # pas une question
+    titre, corps, boutons = S.reponse_site("wiki", "fr", "https://exemple.fr")
+    assert boutons == [("Ouvrir le wiki", "https://exemple.fr/wiki")] and "vérifié" in corps
+    assert S.reponse_site("wiki", "fr", "") is None                                    # sans adresse : pas de bouton qui ment
+    assert S.domaine("site:wiki") == "site" and R._libelle("site:wiki", "") == "Site · Le wiki"
+
+
+def test_SAVOIR_les_reponses_prennent_les_textes_relus():
+    titre, corps, _b = S.reponse(S.trouver("comment avoir Flash Dash ?")["cle"], "fr")
+    assert corps.startswith("Poster Agile") and "Dit dans" not in corps
+    assert S.reponse(S.trouver("what is the Sloop?")["cle"], "en")[1].startswith("Ship shown in Movie 3")

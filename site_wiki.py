@@ -32,6 +32,7 @@ from pathlib import Path
 import acces_direction
 import site_vitrine
 import tableau
+import textes
 
 ADRESSE = "/wiki"
 DONNEES = Path(__file__).resolve().parent / "donnees_jeu"
@@ -49,6 +50,17 @@ FOND_TYPE = {"metier": "QuClr80Pmc0", "race": "Mm8Ybn-AzcE", "faction": "P2MhP3F
              "monnaie": "ZCzdKbmQerg", "boss": "ji-L9CdSvN8", "lieu": "QuClr80Pmc0", "systeme": "q09y0z5Vyxw"}
 CSP = site_vitrine.CSP.replace("form-action 'none'", "form-action 'none'; media-src 'none'")
 _cache: dict = {}
+#  29/10/2026 : l'annonce de l'ouverture du wiki (postée UNE fois par le bot dans le salon des annonces du serveur).
+ANNONCE = textes.declarer(
+    "site.wiki_annonce",
+    "## 📖 Le wiki RELL Seas du clan est ouvert !\n"
+    "Tout ce que RELL a vraiment montré de RELL Seas — le jeu, le monde, le lore, les fruits, les boss, les 52 vidéos "
+    "officielles — vérifié fiche par fiche, avec la vidéo et la minute comme preuve. Jamais de rumeur.\n"
+    "En français et en anglais, sur ordinateur comme sur téléphone. Partage-le !\n\n"
+    "**EN** — The clan's RELL Seas wiki is open: everything RELL has really shown, verified entry by entry, with "
+    "official video proof. Share it!",
+    groupe="site", titre="Annonce de l'ouverture du wiki", max_=1500,
+    aide="Postée une seule fois par le bot dans le salon des annonces, avec l'image du wiki et le bouton « Ouvrir le wiki ».")
 
 
 def _lire(nom: str) -> dict:
@@ -77,8 +89,10 @@ def contenu() -> dict:
     def fond(vid: str) -> str:
         return f"s/wiki/fonds/{vid}" if (FONDS / f"{vid}_p.webp").exists() else ""
 
-    def preuves(nom_en: str) -> list:
-        if nom_en.lower() in ambigus:
+    def preuves(nom_en: str, relu: bool = False) -> list:
+        """Les preuves vidéo d'un nom. Un mot courant (« poison ») n'en a pas d'office — sauf pour une fiche RELUE à la
+        main (hors catalogue), où le mot désigne bien le système du jeu (« Haki », « Posters »…)."""
+        if nom_en.lower() in ambigus and not relu:
             return []
         return [{"titre": titres.get(v, "RELL"), "minute": _minute(t), "url": f"https://youtu.be/{v}?t={t}", "fond": fond(v)}
                 for v, t in (termes.get(nom_en) or [])[:2]]
@@ -94,10 +108,10 @@ def contenu() -> dict:
                         "en": txt["en"], "image": e.get("icone") or "", "m3": bool(e.get("nouveau_movie3")),
                         "groupe": e.get("categorie") or "", "preuves": preuves(e["nom_en"])})
     for cle, x in pub.get("hors_catalogue", {}).items():
-        p = preuves(x["nom"])
+        p = preuves(x.get("preuve") or x["nom"], relu=True)
         if not p:                       # hors catalogue : une preuve officielle, sinon rien
             continue
-        entrees.append({"cle": cle, "type": x["type"], "nom": x["nom"], "nom_en": x["nom"], "fr": x["fr"], "en": x["en"],
+        entrees.append({"cle": cle, "type": x["type"], "nom": x.get("nom_fr") or x["nom"], "nom_en": x["nom"], "fr": x["fr"], "en": x["en"],
                         "image": "", "m3": False, "groupe": "", "preuves": p})
     off, pages = _lire("rell_officiel.json"), _lire("wiki_pages.json")
     for x in pages.get("lore", []):

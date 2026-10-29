@@ -66,7 +66,12 @@ function monterEntete(d) {
   $("#nom-serveur").textContent = T("titre", "L'Équipage");
   $("#sous-titre").textContent = [d.clan ? "Clan " + d.clan : "", serveur].filter(Boolean).join(" · ");
   remplacer($("#logo-serveur"), (serveur || T("titre", "L'Équipage")).slice(0, 1));
-  remplacer($("#entete-outils"), boutonLienEquipage());
+  remplacer($("#entete-outils"), lienWiki(), boutonLienEquipage());
+}
+
+//  29/10/2026 : le wiki public de RELL Seas, le grimoire du clan (`/wiki`).
+function lienWiki() {
+  return h("a", { classe: "bouton", href: "/wiki", title: "Wiki RELL Seas" }, "📖 Wiki", h("span", { classe: "vt-suite" }, " RELL Seas"));
 }
 
 // ─── La page : les blocs publics, puis le mur ───────────────────────────────
@@ -113,7 +118,7 @@ function rendre() {
 function pied() {
   remplacer($("#pied"), h("div", { classe: "pied-vitrine" },
     h("p", { classe: "pied-vitrine-texte" }, T("vitrine.pied", "La vitrine de l'équipage : ce que la direction choisit de montrer.")),
-    boutonLienEquipage(),
+    h("div", { classe: "pied-vitrine-liens" }, lienWiki(), boutonLienEquipage()),
     h("p", { classe: "aide" }, T("vitrine.membre", "Membre du clan ? Ton accès personnel : le guide du clan sur Discord."))));
 }
 

@@ -15,6 +15,8 @@
 .pied-vitrine { display: grid; justify-items: center; gap: 12px; width: 100%; padding: 8px 28px 24px; text-align: center; }
 .pied-vitrine-texte { margin: 0; font: italic 400 16px/1.45 var(--police-texte); color: var(--encre-2); max-width: 60ch; }
 .pied-vitrine .aide { margin: 0; max-width: 60ch; }
+.pied-vitrine-liens { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }  /* 29/10/2026 : le wiki à côté du lien */
+#entete-outils { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
 .pied-vitrine .lien-equipage { min-height: 46px; padding: 8px 18px; font-size: 16px; }
 
 @media (max-width: 719px) {
@@ -22,3 +24,4 @@
   .vitrine-phrase { font-size: 16px; }
   .pied-vitrine .lien-equipage { width: 100%; max-width: 340px; justify-content: center; }
 }
+@media (max-width: 560px) { .vt-suite { display: none; } }

@@ -478,43 +478,50 @@
    "type": "lieu",
    "nom": "Hades' Asylum",
    "fr": "Lieu montré dans Movie 3 ; « Into The Seas » y fait descendre chercher le butin des monstres marins colossaux.",
-   "en": "Place shown in Movie 3; “Into The Seas” sends you down there for the loot of colossal sea monsters."
+   "en": "Place shown in Movie 3; “Into The Seas” sends you down there for the loot of colossal sea monsters.",
+   "preuve": "Hades asylum"
   },
   "equipement.handcuffs": {
    "type": "equipement",
    "nom": "Handcuffs",
    "fr": "Des menottes, montrées dans Not Movie 3.",
-   "en": "Handcuffs, shown in Not Movie 3."
+   "en": "Handcuffs, shown in Not Movie 3.",
+   "nom_fr": "Menottes"
   },
   "equipement.utility_tool": {
    "type": "equipement",
    "nom": "Utility Tool",
    "fr": "Un objet tout-en-un qui regroupe plusieurs outils.",
-   "en": "An all-in-one item combining several tools."
+   "en": "An all-in-one item combining several tools.",
+   "nom_fr": "Outil polyvalent"
   },
   "systeme.reputation": {
    "type": "systeme",
    "nom": "Reputation",
    "fr": "Le système de réputation, présenté dans Movie 3.",
-   "en": "The reputation system, presented in Movie 3."
+   "en": "The reputation system, presented in Movie 3.",
+   "nom_fr": "Réputation"
   },
   "systeme.talents": {
    "type": "systeme",
    "nom": "Talents",
    "fr": "Monter ses talents (navigation, pêche, cuisine…) est une des façons principales de progresser.",
-   "en": "Levelling your talents (navigation, fishing, cooking…) is one of the main ways to progress."
+   "en": "Levelling your talents (navigation, fishing, cooking…) is one of the main ways to progress.",
+   "nom_fr": "Talents"
   },
   "systeme.dexes": {
    "type": "systeme",
    "nom": "Dexes",
    "fr": "Les journaux du jeu (aventure, artisanat, pêche, recettes).",
-   "en": "The game's logs (adventure, crafting, fishing, recipes)."
+   "en": "The game's logs (adventure, crafting, fishing, recipes).",
+   "nom_fr": "Journaux (Dexes)"
   },
   "systeme.land_events": {
    "type": "systeme",
    "nom": "Land Events",
    "fr": "Rencontres aléatoires sur terre qui donnent expérience, objets et argent.",
-   "en": "Random encounters on land giving experience, items and money."
+   "en": "Random encounters on land giving experience, items and money.",
+   "nom_fr": "Événements sur terre"
   },
   "systeme.haki": {
    "type": "systeme",
@@ -532,13 +539,62 @@
    "type": "systeme",
    "nom": "Sailing",
    "fr": "Naviguer avec son propre navire, invoqué grâce au navire en bouteille.",
-   "en": "Sailing your own ship, summoned with the ship in a bottle."
+   "en": "Sailing your own ship, summoned with the ship in a bottle.",
+   "nom_fr": "Navigation en mer"
   },
   "systeme.wildlife": {
    "type": "systeme",
    "nom": "Wildlife",
    "fr": "La faune du jeu, sur terre et en mer, présentée dans Not Movie 3.",
-   "en": "The game's wildlife, on land and at sea, presented in Not Movie 3."
+   "en": "The game's wildlife, on land and at sea, presented in Not Movie 3.",
+   "nom_fr": "Faune"
+  },
+  "arme.flintlock": {
+   "type": "arme",
+   "nom": "Flintlock",
+   "fr": "Un pistolet à silex, montré dans Teaser 3 : Fruit & Gun Combat.",
+   "en": "A flintlock pistol, shown in Teaser 3: Fruit & Gun Combat."
+  },
+  "systeme.crew_battles": {
+   "type": "systeme",
+   "nom": "Crew Battles",
+   "fr": "Les combats d'équipages, annoncés dans Movie 3.",
+   "en": "Crew battles, announced in Movie 3.",
+   "nom_fr": "Combats d'équipages"
+  },
+  "systeme.battlegrounds": {
+   "type": "systeme",
+   "nom": "Battlegrounds",
+   "fr": "Le mode Battlegrounds, annoncé dans Movie 3.",
+   "en": "The Battlegrounds mode, announced in Movie 3."
+  },
+  "systeme.sea_events": {
+   "type": "systeme",
+   "nom": "Sea Events",
+   "fr": "Des événements en mer, présentés dans The Movie 2.",
+   "en": "Events at sea, presented in The Movie 2.",
+   "nom_fr": "Événements en mer"
+  },
+  "systeme.mounts": {
+   "type": "systeme",
+   "nom": "Mounts",
+   "fr": "Les montures, présentées dans The Movie et Movie 3.",
+   "en": "Mounts, presented in The Movie and Movie 3.",
+   "nom_fr": "Montures"
+  },
+  "systeme.weapons": {
+   "type": "systeme",
+   "nom": "Weapons",
+   "fr": "Les armes, présentées dans Movie 3.",
+   "en": "Weapons, presented in Movie 3.",
+   "nom_fr": "Armes"
+  },
+  "systeme.fighting_styles": {
+   "type": "systeme",
+   "nom": "Fighting Styles",
+   "fr": "Les styles de combat, présentés dans Movie 3.",
+   "en": "Fighting styles, presented in Movie 3.",
+   "nom_fr": "Styles de combat"
   }
  },
  "types": {

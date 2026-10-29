@@ -15841,6 +15841,29 @@ async def _droits_staff(g) -> None:
     print(f"[droits_staff] {b}")
 
 
+async def _annoncer_wiki(g) -> None:
+    """29/10/2026 (« mettre un lien vers le wiki dans le salon Annonces ») : UNE fois par serveur, l'ouverture du wiki
+    public dans le salon des annonces du serveur — son image, son bouton. Rien sans l'adresse publique du site."""
+    c = await cfg(g.id)
+    if c.get('wiki_annonce_v1') or not tableau._base:
+        return
+    publics = [ch for ch in (getattr(g, "text_channels", []) or []) if ch.permissions_for(g.default_role).view_channel]
+    salon = faq.salons_du_serveur(publics, [j.mots for j in zones.JEUX])["annonces"]
+    if salon is None or not salon.permissions_for(g.me).send_messages:
+        return
+    base = str(tableau._base).rstrip("/")
+    texte = await textes.texte(g.id, "site.wiki_annonce")
+    vue = LayoutView(timeout=None)
+    vue.add_item(discord.ui.Container(
+        discord.ui.TextDisplay(texte),
+        discord.ui.MediaGallery(discord.MediaGalleryItem(f"{base}/wiki/banniere.png", description="Wiki RELL Seas")),
+        discord.ui.ActionRow(discord.ui.Button(label="📖 Ouvrir le wiki · Open the wiki", url=f"{base}/wiki")),
+        accent_color=discord.Color(0xA8823F)))
+    msg = await salon.send(view=vue, allowed_mentions=discord.AllowedMentions.none())
+    await db_set(g.id, 'wiki_annonce_v1', msg.id)
+    health_server_module.ETAT_PUBLIC["wiki_annonce"] = True
+
+
 async def _boosts_au_demarrage(g) -> None:
     await boosts.installer(g, _roles_staff_et_plus(g, await cfg(g.id)))
 
@@ -15853,7 +15876,7 @@ _TRAVAUX = (
     "suggestions.installer", "_actus_en_annonces", "_flux_studio_rell", "_rattacher_flux_orphelins",
     "_configurer_salons", "_passer_logs_sur_site", "_recrutement_rellseas", "_salon_tableau",
     "_logs_direction_seule", "_configurer_salons_v2", "_automod_invitations", "_salon_aide",
-    "_boosts_au_demarrage", "_retirer_fonctions_mortes", "_vocaux_par_contexte", "_droits_staff",
+    "_boosts_au_demarrage", "_retirer_fonctions_mortes", "_vocaux_par_contexte", "_droits_staff", "_annoncer_wiki",
 )
 
 

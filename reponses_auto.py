@@ -150,6 +150,12 @@ def classer(texte: str, jeu_connu: bool = False) -> tuple:
         return "", "", langue
     if langue == "autre":
         return ("inconnu" if questions.est_question(t) or aide else ""), "", langue
+    #  29/10/2026 : la famille « Site » (le wiki, la vitrine) d'abord : ses mots ne recoupent aucun autre sujet, et
+    #  « où trouver des infos sur RELL Seas ? » veut le wiki, pas le lien du jeu.
+    if question and not conversation:
+        site = savoir.sujet_site(t)
+        if site:
+            return "savoir", "site:" + site, langue
     if not conversation:
         s = _sujet(bas, PRECIS)
         if s is not None:
@@ -468,6 +474,11 @@ async def sur_message(msg, c=None, maintenant: float | None = None, attente: flo
     vises, carte = [], None
     if genre == "aide":
         vises = _jeux_aide(c, jeux_vises(texte, ch, jeux), regl)
+    elif genre == "savoir" and sujet.startswith("site:"):
+        import tableau
+        carte = savoir.reponse_site(sujet[5:], langue, str(tableau._base or ""), gid=g.id)
+        if carte is None:
+            return ""
     elif genre == "savoir":
         carte = savoir.reponse(sujet[4:], langue)
         if carte is None:
@@ -551,6 +562,8 @@ def _libelle(sujet: str, jeux: str) -> str:
     if sujet == "aide":
         noms = {j.cle: j.nom for j in zones.JEUX}
         return "Aide · " + (" · ".join(noms.get(k, k) for k in jeux.split(",") if k) or "aucun jeu")
+    if sujet.startswith("site:"):
+        return "Site · " + {"wiki": "Le wiki", "vitrine": "La vitrine"}.get(sujet[5:], sujet[5:])
     if sujet.startswith("jeu:"):
         f = savoir.par_cle(sujet[4:])
         return "Jeu · " + (f["nom"] if f else sujet[4:])

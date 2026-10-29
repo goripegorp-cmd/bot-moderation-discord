@@ -93,3 +93,12 @@ def test_WIKI_rubriques_sourcees_et_chiffres_officiels():
     js = (RACINE / "site" / "wiki.js").read_text(encoding="utf-8")
     for onglet in ("accueil", "jeu", "monde", "lore", "fiches", "actus", "liens"):
         assert f'["{onglet}"' in js, onglet
+
+
+def test_WIKI_annonce_unique_et_liens_croises():
+    import textes
+    src = (RACINE / "bot.py").read_text(encoding="utf-8")
+    assert '"_annoncer_wiki",' in src and "c.get('wiki_annonce_v1')" in src and "db_set(g.id, 'wiki_annonce_v1'" in src
+    assert textes.declare("site.wiki_annonce") and "52 vidéos" in textes.defaut("site.wiki_annonce")
+    assert 'href: "/wiki"' in (RACINE / "site" / "vitrine.js").read_text(encoding="utf-8")       # la vitrine mène au wiki
+    assert 'href: "/equipage"' in (RACINE / "site" / "wiki.js").read_text(encoding="utf-8")      # et le wiki à la vitrine
