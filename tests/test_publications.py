@@ -314,3 +314,12 @@ def test_P8_les_adresses_websub_par_http():
             return v.status, texte, n.status
     statut, texte, n = asyncio.run(scenario())
     assert (statut, texte) == (200, "xyz") and n == 204
+
+
+def test_PUB_pas_pret_au_demarrage_rien_ne_casse(monkeypatch):
+    """29/10/2026 — Railway : « social/poll_loop :: cycle de poll en échec | TypeError: 'NoneType' object is not callable »
+    au démarrage : le relevé social passait avant l'étape « publications ». Pas prêt → rien n'est réservé, sans erreur."""
+    import asyncio
+    monkeypatch.setattr(PUB, "_get_db", None)
+    monkeypatch.setattr(PUB, "_pret", False)
+    assert asyncio.run(PUB.reserver(1, "youtube", "yt:video:X")) is False

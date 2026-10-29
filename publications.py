@@ -20,6 +20,7 @@ REPRISE = 600
 JOURS = 365
 PURGES = [("publications des réseaux", "DELETE FROM publications WHERE reserve_le < ?", JOURS, "unix")]
 _get_db = None
+_pret = False   # 29/10/2026 : la table existe (init_db fait) — le relevé social démarre parfois AVANT
 _instance = "?"
 _log = print
 
@@ -36,6 +37,8 @@ async def init_db():
             " post_id TEXT NOT NULL, reserve_le INTEGER NOT NULL, instance TEXT DEFAULT '', chemin TEXT DEFAULT '',"
             " message_id INTEGER DEFAULT 0, salon_id INTEGER DEFAULT 0, PRIMARY KEY (guild_id, plateforme, post_id))")
         await db.commit()
+    global _pret
+    _pret = True
 
 
 def identifiant(plateforme: str, post_id: str) -> str:
@@ -49,7 +52,12 @@ def identifiant(plateforme: str, post_id: str) -> str:
 
 async def reserver(guild_id: int, plateforme: str, post_id: str, chemin: str = "",
                    maintenant: float | None = None) -> bool:
-    """True : à toi d'envoyer. False : déjà publié, ou en cours d'envoi ailleurs."""
+    """True : à toi d'envoyer. False : déjà publié, ou en cours d'envoi ailleurs — ou pas encore prêt.
+    29/10/2026 : au démarrage, le relevé des réseaux sociaux (on_ready) passait avant l'étape « publications » :
+    `_get_db` était None (« 'NoneType' object is not callable », le cycle entier tombait). Pas prêt : rien n'est
+    réservé, le post sera annoncé au passage suivant."""
+    if not _pret or _get_db is None:
+        return False
     t = int(maintenant or time.time())
     cle = (int(guild_id), str(plateforme), identifiant(plateforme, post_id))
     async with _get_db() as db:
