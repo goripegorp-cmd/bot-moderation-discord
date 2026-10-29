@@ -423,3 +423,5 @@ p > .ic, .meta > .ic, .aide > .ic { display: inline-block; vertical-align: -.16e
 }
 
 .verrou { overflow: hidden; }
+/* 29/10/2026 : le bouton du wiki (en-tête de la direction) cède sa place au téléphone ; le menu du capitaine le garde. */
+@media (max-width: 560px) { .entete-wiki { display: none !important; } }

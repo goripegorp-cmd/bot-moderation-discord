@@ -34,13 +34,23 @@ async function copier(texte) {
 }
 
 /** Le lien montré, sélectionné : quand rien ne peut le copier tout seul. */
-function montrer(lien) {
-  const p = pancarte({ titre: libelleLien(), sous: "Le lien officiel de l'équipage", icone: "lien" });
+function montrer(lien, titre = libelleLien(), sous = "Le lien officiel de l'équipage") {
+  const p = pancarte({ titre, sous, icone: "lien" });
   const champ = h("input", { classe: "saisie lien-equipage-champ", type: "text", readonly: "", value: lien, "aria-label": "Le lien de l'équipage" });
   champ.addEventListener("focus", () => champ.select());
   ajouter(p.corps, [h("p", {}, libelle("site.equipage.lien.repli", "Copie ce lien pour le partager :")), champ]);
   ajouter(p.pied, [bouton("Fermer", { classe: "discret", onclick: () => p.fermer() })]);
   setTimeout(() => { champ.focus(); champ.select(); }, 60);
+}
+
+//  29/10/2026 : le wiki public de RELL Seas (`/wiki`), à ouvrir et à partager depuis le site de la direction.
+export const ADRESSE_WIKI = "/wiki";
+
+/** Copier le lien du wiki, et le dire. */
+export async function copierLienWiki() {
+  const lien = location.origin + ADRESSE_WIKI;
+  if (await copier(lien)) toast("Lien du wiki copié", "succes");
+  else montrer(lien, "Copier le lien du wiki", "Le wiki RELL Seas du clan, à partager");
 }
 
 /** Copier le lien de la vitrine, et le dire. */

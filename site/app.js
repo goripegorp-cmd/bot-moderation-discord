@@ -19,7 +19,7 @@ import { basculeMode, modeSimple, changerMode } from "./mode.js";
 import * as textes from "./textes.js";
 import { demarrerDirect } from "./direct.js";
 import * as zoneRecrutement from "./recrutement_zone.js";
-import { boutonLienEquipage, copierLienEquipage } from "./lien_equipage.js";
+import { boutonLienEquipage, copierLienEquipage, copierLienWiki, ADRESSE_WIKI } from "./lien_equipage.js";
 import * as reglages from "./reglages.js";
 
 const RAFRAICHIR = 60000;
@@ -119,6 +119,8 @@ function monterEntete() {
     { l: "Exporter le casier", icone: "exporter", href: BASE + "/export?quoi=sanctions", telecharger: true, desactive: !enLigne() },
     { l: "Le site de l'équipage", sous: "ce que voit le clan · l'accueil à composer", icone: "equipage", onclick: () => { location.href = "/tableau/equipage/"; } },
     { l: libelle("site.equipage.lien", "Copier le lien de l'équipage"), sous: "la vitrine publique, à partager", icone: "lien", onclick: copierLienEquipage },
+    { l: "Le wiki RELL Seas", sous: "le grimoire public du clan, dans un nouvel onglet", icone: "parchemin", onclick: ouvrirWiki },
+    { l: "Copier le lien du wiki", sous: "à partager à n'importe qui", icone: "lien", onclick: copierLienWiki },
     { titre: "Affichage" },
     { l: modeSimple() ? "Tout afficher" : "Mode simple", sous: modeSimple() ? "les chiffres, graphiques, filtres et détails" : "l'essentiel seulement", icone: modeSimple() ? "oeil" : "masquer", onclick: () => changerMode(!modeSimple()) },
     "-",
@@ -127,8 +129,15 @@ function monterEntete() {
   ]);
   plaque.addEventListener("click", ouvrirFile);
   //  27/10/2026 : « Copier le lien de l'équipage » (la vitrine publique), près de « À bord » (posé devant la plaque).
-  remplacer(outils, boutonLienEquipage({ iconeSeule: true }), plaque, rafraichir, menuB);
+  //  29/10/2026 : le wiki public, à portée de main en haut à droite (le menu le copie aussi).
+  const wiki = boutonIcone("parchemin", "Le wiki RELL Seas (nouvel onglet)", ouvrirWiki, "sur-bois");
+  wiki.classList.add("entete-wiki");   // au téléphone, l'en-tête manque de place : le menu le garde
+  remplacer(outils, wiki, boutonLienEquipage({ iconeSeule: true }), plaque, rafraichir, menuB);
   majPlaque();
+}
+
+function ouvrirWiki() {
+  window.open(ADRESSE_WIKI, "_blank", "noopener");
 }
 
 function majMarque() {
