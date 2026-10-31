@@ -15,6 +15,7 @@ import pytest
 import entraide
 import questions
 import reponses_auto as R
+import zones
 from conftest_discord import Obj
 from faux_serveur import Fil, Monde, run, textes
 
@@ -169,3 +170,87 @@ def test_R8_silence_dans_help_et_trade_et_effacement_qui_survit(env):
     assert effaces == [R.EFFACER_S], "l'effacement survit au redémarrage"
     assert _dire(env, 21, "comment on peut faire du trading ?", 10.0 + R.SUJET_SALON_S + 1)[1] == "reponse", \
         "un autre membre, après la cadence du salon : il a sa réponse"
+
+
+#  31/10/2026 — trois comportements sans test dédié : le plafond d'un salon, le silence d'un ticket, le jeu du salon.
+QUATRE = ("comment rejoindre le clan ?", "comment ouvrir un ticket ?", "comment on peut faire du trading ?",
+          "quelqu'un peut m'aider sur rell ?")
+
+
+def _salon(e, sid, nom, parent=None):
+    """Un salon texte public de ce nom ; avec `parent`, un fil ouvert dans ce salon."""
+    if parent is not None:
+        fil = Fil(e.g, sid, parent, nom)
+        fil.is_private, fil.guild, fil.parent_id = (lambda: False), e.g, parent.id
+        return fil
+    return Obj(id=sid, name=nom, monde=e.g, guild=e.g, parent_id=None, is_nsfw=lambda: False,
+               permissions_for=e.chat.parent.permissions_for)
+
+
+async def _raison(m):
+    async with R._get_db() as db:
+        async with db.execute("SELECT raison FROM reponses_bot WHERE message_id=?", (m.id,)) as cur:
+            return (await cur.fetchone())[0]
+
+
+def test_R9_le_plafond_du_salon_trois_reponses_en_dix_minutes(env):
+    """Quatre membres, quatre sujets, un salon : trois cartes, la quatrième retenue (« plafond »), que les trois soient
+    posées ou encore en attente ; un autre salon n'en pâtit pas ; dix minutes après la première, le salon rouvre."""
+    t = 200_000.0
+    dits = [_dire(env, 50 + n, q, t + 60 * n) for n, q in enumerate(QUATRE)]
+    assert [f for _m, f in dits] == ["reponse"] * R.SALON_MAX + ["retenue"]
+    assert not dits[3][0].reponses and run(_raison(dits[3][0])) == "plafond"
+    ailleurs = Message(_salon(env, 960, "💬général"), env.g.membre(60), QUATRE[3])
+    assert run(R.sur_message(ailleurs, maintenant=t + 200, attente=0)) == "reponse", "le plafond est celui d'un salon"
+    assert _dire(env, 53, QUATRE[3], t + R.SALON_FENETRE_S + 1)[1] == "reponse", "la fenêtre glisse"
+    rafale = _salon(env, 961, "💬rafale")
+    ms = [Message(rafale, env.g.membre(70 + n), q) for n, q in enumerate(QUATRE)]
+
+    async def ensemble():   # quatre questions dans la même seconde : les cartes en attente comptent déjà
+        return await asyncio.gather(*(R.sur_message(m, maintenant=t, attente=1.0) for m in ms))
+    R._verrous.pop(env.g.id, None)   # un verrou disputé se lie à sa boucle : chaque essai le sien
+    try:
+        faits = run(ensemble())
+    finally:
+        R._verrous.pop(env.g.id, None)
+    assert sorted(faits) == ["reponse"] * R.SALON_MAX + ["retenue"] and sum(bool(m.reponses) for m in ms) == 3
+
+
+def test_R10_silence_dans_un_ticket(env):
+    """Dans un ticket, le staff répond : le bot ne pose rien et ne note rien ; hors du ticket, la même question a sa
+    carte. Le bot branche sa vraie reconnaissance des tickets."""
+    tickets = {env.chat.id}
+
+    async def est_ticket(ch):
+        return ch.id in tickets
+    R._est_ticket = est_ticket
+    m, fait = _dire(env, 30, "comment on peut faire du trading ?", 1.0)
+    assert fait == "" and not m.reponses and not run(R._deja_note(env.g.id, m.id))
+    tickets.clear()
+    assert _dire(env, 30, "comment on peut faire du trading ?", 2.0)[1] == "reponse"
+    assert "est_ticket=is_ticket_channel" in SRC
+
+
+def test_R11_le_bon_jeu_d_apres_le_nom_du_salon(env):
+    """Une demande d'aide qui ne nomme aucun jeu : le jeu du salon, lui seul (un fil : celui de son salon) ; le jeu
+    nommé passe avant le salon ; dans un salon sans jeu, chaque jeu et le ticket."""
+    R._destinations = lambda _g, _c: {
+        "ticket": "https://discord.com/channels/1/40",
+        "jeux": [{"cle": j.cle, "nom": j.nom, "emoji": j.emoji, "mots": j.mots, "forum": 0,
+                  "help": f"https://discord.com/channels/1/{44 + n}"} for n, j in enumerate(zones.JEUX)]}
+    clover, rell = _salon(env, 950, "🍀clover-rpg"), _salon(env, 951, "🌊・rell-seas")
+
+    def aide(salon, uid, texte="quelqu'un peut m'aider svp ?"):
+        m = Message(salon, env.g.membre(uid), texte)
+        assert run(R.sur_message(m, maintenant=10_000.0 * uid, attente=0)) == "reponse", salon.name
+        return textes(m.reponses[0]["view"])
+    vu = aide(clover, 40)
+    assert "Help · Clover RPG" in vu and "Rell" not in vu and "🎫 Ticket" not in vu, vu
+    vu = aide(rell, 41)
+    assert "Help · Rell Seas" in vu and "Clover" not in vu, vu
+    vu = aide(_salon(env, 952, "besoin d'un coup de main", parent=clover), 42)
+    assert "Help · Clover RPG" in vu and "Rell" not in vu, "un fil du salon d'un jeu : ce jeu"
+    vu = aide(clover, 43, "quelqu'un peut m'aider sur rell ?")
+    assert "Help · Rell Seas" in vu and "Clover" not in vu, "le jeu nommé passe avant le salon"
+    vu = aide(_salon(env, 953, "💬général"), 44)
+    assert "Help · Rell Seas" in vu and "Help · Clover RPG" in vu and "🎫 Ticket" in vu, vu

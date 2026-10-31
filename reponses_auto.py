@@ -178,12 +178,18 @@ def classer(texte: str, jeu_connu: bool = False) -> tuple:
 
 
 def jeux_du_lieu(salon, jeux: list) -> list:
-    """Les jeux du salon où l'on écrit : son forum (un post de 🌊rell-seas, de 🍀clover-rpg), sinon son nom."""
+    """Les jeux du salon où l'on écrit : son forum (un post de 🌊rell-seas, de 🍀clover-rpg), sinon son nom — pour un
+    fil, le sien, sinon celui de son salon (31/10/2026 : un fil du salon d'un jeu recevait tous les jeux)."""
     par_forum = faq.jeux_du_salon(salon, jeux)
     if par_forum:
         return par_forum
-    nom = questions.plat(getattr(salon, "name", "") or "")
-    return [j for j in jeux if any(re.search(r"\b" + re.escape(m), nom) for m in j.get("mots") or ())]
+    parent = getattr(salon, "parent", None) if isinstance(salon, discord.Thread) else None
+    for lieu in (salon, parent):
+        nom = questions.plat(getattr(lieu, "name", "") or "")
+        trouves = [j for j in jeux if any(re.search(r"\b" + re.escape(m), nom) for m in j.get("mots") or ())]
+        if trouves:
+            return trouves
+    return []
 
 
 def jeux_vises(texte: str, salon, jeux: list) -> list:
