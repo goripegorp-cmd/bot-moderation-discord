@@ -26869,15 +26869,17 @@ async def on_message(msg):
                     if _slvl >= 3:
                         _ilvl, _iterm = _slvl, _sterm   # haine/slur DANS un GIF = sérieux → comme du texte
                     elif _slvl == 2:
-                        # Insulte légère (« tg ») SEULEMENT dans un GIF/lien → LÉGER : on retire le
-                        # média + rappel doux, SANS infraction ni mute (≠ insulte dite en face).
+                        # Insulte (« tg », « fdp »…) SEULEMENT dans un GIF/lien. 31/10/2026, le fondateur : « certains
+                        # arrivent encore à envoyer des gifs avec des insultes… sois beaucoup plus attentif » → le média
+                        # part ET l'infraction compte : l'échelle unique (prévenu, puis mute 30 min, puis décision).
                         try:
                             await msg.delete()
                         except Exception:
                             pass
                         await _warn_calm_down(
                             msg.channel,
-                            f"🎞️ {msg.author.mention}, évite les GIFs/liens avec ce genre de texte 🙏")
+                            f"🎞️ {msg.author.mention}, pas de GIF ni de lien insultant ici.")
+                        await sanction(msg.author, 'delete', 0, f"GIF ou lien insultant — « {_sterm} »", msg.guild)
                         return
             # 🤬 INSULTE VULGAIRE CLAIRE (owner 2026-06-29) : « Bot de con », « serveur trou du cul »,
             # « espèce de con », « fils de pute »… visent le bot/serveur (ou personne) → l'ancien

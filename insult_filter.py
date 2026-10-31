@@ -122,6 +122,10 @@ _FERME_LA_MOTS_MAX = 4
 # « ta gueule » dans le chat FR. Matching FRONTIÈRE DE MOT strict → ne touche jamais un mot.
 _TIER2_ABBR = frozenset({"tg"})
 _RE2_ABBR = None
+# 31/10/2026, le fondateur (un GIF « klipy.com/gifs/pd-kumpel-pd-1 » est passé) : « pd » = « pédé », insulte homophobe →
+# HAINE (niveau 3), avec ses déguisements « p.d », « p-d », « p d », « p*d », « pds ». Frontière de mot stricte : « speed »,
+# « updated », « gps » ne sont jamais touchés.
+_RE3_ABBR = re.compile(r"(?<![^\W\d_])p[\s._\-*]{0,2}d(?:s)?(?![^\W\d_])", re.IGNORECASE | re.UNICODE)
 
 # ── VALIDISME / condition utilisée comme insulte (owner 2026-06-27) ──────────────────────
 # « autiste », « mongol », « trisomique »… utilisés pour rabaisser/juger. BLOQUÉ MÊME en
@@ -440,6 +444,9 @@ def scan(raw: str, normalized: str | None = None, lg: str | None = None):
         h = _hit(_RE3, v)
         if h:
             return 3, h                    # haine = max → court-circuit immédiat
+        m3 = _RE3_ABBR.search(v)
+        if m3:
+            return 3, m3.group(0)          # « pd » & déguisements (31/10/2026)
         if best < 2:
             h = _hit(_RE2, v)
             if h:
