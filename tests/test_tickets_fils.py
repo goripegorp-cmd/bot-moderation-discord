@@ -224,7 +224,7 @@ def banc(tmp_path):
     async def preparer():
         async with get_db() as db:
             await db.execute("CREATE TABLE tickets(id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id, "
-                             "channel_id, user_id, panel_id, claimed_by, status, answers)")
+                             "channel_id, user_id, panel_id, claimed_by, status, answers, created_at DATETIME DEFAULT '2020-01-01 00:00:00')")
             await db.commit()
     asyncio.run(preparer())
     return get_db

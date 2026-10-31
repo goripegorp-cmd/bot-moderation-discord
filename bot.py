@@ -1000,10 +1000,21 @@ async def db_init():
                 try:
                     await db.execute(
                         "UPDATE tickets SET created_at = CURRENT_TIMESTAMP "
-                        "WHERE created_at = '2020-01-01 00:00:00' OR created_at IS NULL"
+                        "WHERE (created_at = '2020-01-01 00:00:00' OR created_at IS NULL) AND NOT channel_id > 0"
                     )
                 except Exception:
                     pass
+        # 31/10/2026, le fondateur : « ça nous dit que ça a été créé il y a 7 ans, alors qu'ils ont été créés à l'instant ».
+        # Les tickets nés avec le défaut du 01/01/2020 (ou rattrapés à l'heure d'un démarrage) reprennent leur VRAIE date :
+        # celle de leur salon (ou fil) Discord, lue dans son identifiant. Seulement une date trop tardive ou bouche-trou.
+        try:
+            await db.execute(
+                "UPDATE tickets SET created_at = datetime(((channel_id >> 22) + 1420070400000) / 1000, 'unixepoch') "
+                "WHERE channel_id > 0 AND (created_at IS NULL OR created_at = '2020-01-01 00:00:00' OR "
+                "CAST(strftime('%s', created_at) AS INTEGER) - ((channel_id >> 22) + 1420070400000) / 1000 > 3600)")
+            await db.commit()
+        except Exception as ex:
+            print(f"[migration] dates des tickets : {ex}")
         # Migration infractions
         async with db.execute("PRAGMA table_info(infractions)") as cur:
             cols = [r[1] for r in await cur.fetchall()]
@@ -2762,7 +2773,7 @@ async def _ouvrir_ticket_recours(guild, membre, pourquoi: str,
         async with get_db() as db:
             await db.execute(
                 'INSERT INTO tickets(guild_id, channel_id, user_id, panel_id, '
-                'claimed_by, status, answers) VALUES(?,?,?,?,0,"open",?)',
+                'claimed_by, status, answers, created_at) VALUES(?,?,?,?,0,"open",?,CURRENT_TIMESTAMP)',
                 (guild.id, ch.id, membre.id, RECOURS_PID,
                  json.dumps({"recours": True}, ensure_ascii=False)))
             await db.commit()
@@ -9198,7 +9209,8 @@ async def _create_ticket_corps(i, pid, ans=None):
             ch = await i.guild.create_text_channel(f"ticket-{i.user.name}"[:50], category=cat, overwrites=ow)
         aj = json.dumps(ans or {}, ensure_ascii=False)
         async with get_db() as db:
-            await db.execute('INSERT INTO tickets(guild_id, channel_id, user_id, panel_id, claimed_by, status, answers) VALUES(?,?,?,?,0,"open",?)',
+            #  31/10/2026 : la date écrite ici — sur une base ancienne, la colonne a pour défaut le 01/01/2020 (« créé il y a 7 ans »).
+            await db.execute('INSERT INTO tickets(guild_id, channel_id, user_id, panel_id, claimed_by, status, answers, created_at) VALUES(?,?,?,?,0,"open",?,CURRENT_TIMESTAMP)',
                 (i.guild.id, ch.id, i.user.id, pid, aj))
             await db.commit()
             async with db.execute('SELECT id FROM tickets WHERE channel_id=?', (ch.id,)) as cur:

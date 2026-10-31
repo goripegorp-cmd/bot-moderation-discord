@@ -30,7 +30,7 @@ import re
 import time
 from collections import OrderedDict, defaultdict
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 
 import discord
 from discord.ui import Button
@@ -1293,7 +1293,7 @@ async def reveilles(g, c: dict, uids) -> set:
     try:
         import activite
         from datetime import timedelta
-        lance = datetime.fromtimestamp(int(c["debut"]))
+        lance = datetime.fromtimestamp(int(c["debut"]), timezone.utc)   # 31/10/2026 : en UTC, comme le suivi d'activité
         suivi = await activite.anciennete_du_suivi(g.id)
         if suivi is None or suivi < (_mur() - int(c["debut"])) / 86400 + 30:
             return set()

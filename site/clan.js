@@ -180,7 +180,8 @@ function ligneClan(m, teinte, surSelection, badgeSup) {
 function pastilleRappel(r) {
   if (!r) return null;
   if (r.statut === "echu") return pastille("Délai écoulé", "#8e2a24", "Prévenu le " + date(r.envoye_le));
-  if (r.statut === "en_attente") return pastille("Prévenu · " + date(r.echeance), "#a8641c", r.remis ? "Retrait proposé le " + date(r.echeance) : "Message privé refusé");
+  //  31/10/2026 : « prévenu le 07/11 » affichait l'ÉCHÉANCE — la date d'envoi, puis l'échéance.
+  if (r.statut === "en_attente") return pastille("Prévenu le " + date(r.envoye_le), "#a8641c", (r.remis ? "Retrait proposé le " : "Message privé refusé · retrait proposé le ") + date(r.echeance));
   if (r.statut === "revenu") return pastille("Revenu", "#3f6b3a", "Actif depuis le rappel du " + date(r.envoye_le));
   return null;
 }
@@ -309,7 +310,7 @@ function vueStaff(zone, o) {
 function pastilleRappelStaff(r) {
   if (!r) return null;
   if (r.statut === "echu") return pastille("Délai écoulé", "#8e2a24", "Prévenu le " + date(r.envoye_le));
-  if (r.statut === "en_attente") return pastille("Prévenu · " + date(r.echeance), "#a8641c", r.remis ? "Point proposé le " + date(r.echeance) : "Message privé refusé");
+  if (r.statut === "en_attente") return pastille("Prévenu le " + date(r.envoye_le), "#a8641c", (r.remis ? "Point proposé le " : "Message privé refusé · point proposé le ") + date(r.echeance));
   if (r.statut === "revenu") return pastille("Revenu", "#3f6b3a", "Actif depuis le rappel du " + date(r.envoye_le));
   return null;
 }
