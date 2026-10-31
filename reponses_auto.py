@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import unicodedata
 import time
 
 import discord
@@ -128,6 +129,41 @@ def langue_de(texte: str) -> str:
 
 def _sujet(bas: str, cles) -> faq.Sujet | None:
     return next((s for s in faq.SUJETS if s.cle in cles and any(re.search(m, bas) for m in s.motifs)), None)
+
+
+#  31/10/2026 : « j'ai commencé Ultimatum sur Roblox » — le nom d'un AUTRE jeu que les nôtres. Prudent : un nom suivi de
+#  « sur Roblox », ou un nom propre (majuscule dans le message) après « je joue à », « j'ai commencé »…
+_AUTRE_ROBLOX = re.compile(r"\b(?:(?:commence|joue|jouer|jouais|installe|telecharge|decouvre|decouvert|lance)\s+"
+                           r"(?:a\s+|au\s+|le jeu\s+|un jeu\s+)?)?([a-z0-9][a-z0-9']{1,24}(?:\s[a-z0-9']{2,15})?)"
+                           r"\s+(?:sur|dans|de)\s+roblox\b")
+_AUTRE_PROPRE = re.compile(r"\b(?:je joue|jai commence|j'ai commence|j ai commence|je commence|jouer|joue)\s+"
+                           r"(?:a\s+|au\s+|le jeu\s+)?([a-z0-9][a-z0-9']{2,24})\b")
+_PAS_UN_NOM = {"roblox", "jeu", "jeux", "game", "ce", "ca", "cette", "un", "une", "le", "la", "les", "du", "des", "a", "au",
+               "hier", "aujourd", "depuis", "tout", "rien", "avec", "maintenant", "beaucoup", "aussi", "encore", "bien",
+               "mal", "trop", "seul", "seule", "ici", "la-dessus", "dessus", "quoi", "comment", "pourquoi", "jouer", "joue"}
+
+
+def autre_jeu(texte: str) -> str:
+    """Le nom d'un autre jeu que les nôtres nommé dans le message (avec sa casse d'origine), ou ""."""
+    p = questions.plat(texte)
+    orig = unicodedata.normalize("NFKD", str(texte or "")).encode("ascii", "ignore").decode()
+    nos_mots = [m for j in zones.JEUX for m in j.mots]
+    candidats = [m.group(1) for m in _AUTRE_ROBLOX.finditer(p)]
+    for m in _AUTRE_PROPRE.finditer(p):
+        mot = m.group(1)
+        vu = re.search(r"(?<!\w)" + re.escape(mot) + r"(?!\w)", orig, re.I)
+        if vu and vu.group(0)[:1].isupper():       # un nom propre : écrit avec une majuscule
+            candidats.append(mot)
+    for c in candidats:
+        mots = [x for x in c.split() if x not in ("le", "la", "les", "un", "une", "a", "au", "du")]
+        nom = " ".join(mots).strip(" '")
+        if len(nom) < 3 or nom in _PAS_UN_NOM or mots[0] in _PAS_UN_NOM:
+            continue
+        if any(re.search(r"\b" + re.escape(m), nom) for m in nos_mots):
+            return ""                      # un de nos jeux : la réponse habituelle
+        brut = re.search(re.escape(nom), orig, re.I)
+        return (brut.group(0) if brut else nom.title())[:40]
+    return ""
 
 
 def _nomme_un_jeu(p: str) -> bool:
@@ -238,6 +274,13 @@ TEXTES = (
     ("reponses.bouton", "Demander de l'aide", "Ask for help", "Le bouton qui ouvre la demande d'aide", ()),
     ("reponses.pied", "Réponse automatique · elle s'efface d'elle-même", "Automatic answer · it removes itself",
      "La petite ligne sous chaque réponse", ()),
+    ("reponses.autre_jeu.titre", "🎮 Un autre jeu ?", "🎮 Another game?", "Le titre quand on demande de l'aide sur un autre jeu", ()),
+    ("reponses.autre_jeu.texte",
+     "Ici, on joue surtout à RELL Seas et Clover RPG : on n'a pas de guide pour {nom}. Pose ta question dans "
+     "💬 Discussion, quelqu'un de la communauté y joue peut-être.",
+     "Here we mostly play RELL Seas and Clover RPG: we don't have a guide for {nom}. Ask in 💬 Discussion, someone in "
+     "the community may play it.", "La réponse quand on demande de l'aide sur un autre jeu", (("nom", "le nom du jeu"),)),
+    ("reponses.autre_jeu.bouton", "Aller dans Discussion", "Go to Discussion", "Le bouton vers la discussion", ()),
 )
 for _n, (_cle, _fr, _en, _titre, _vars) in enumerate(TEXTES):
     for _l, _defaut in (("fr", _fr), ("en", _en)):
@@ -460,7 +503,12 @@ async def sur_message(msg, c=None, maintenant: float | None = None, attente: flo
     jeux = list(liens.get("jeux") or [])
     lieu = jeux_du_lieu(ch, jeux)
     genre, sujet, langue = classer(texte, jeu_connu=bool(lieu))
-    if genre not in ("aide", "faq", "savoir") or (langue and langue not in LANGUES):
+    autre = ""
+    if genre == "aide" and not lieu and not faq.jeux_nommes(questions.plat(texte), jeux):
+        autre = autre_jeu(texte)
+        if autre:
+            genre, sujet = "autre", "autre_jeu"
+    if genre not in ("aide", "faq", "savoir", "autre") or (langue and langue not in LANGUES):
         return ""
     if not questions.salon_public(ch) or _adresse_a_quelqu_un(msg, g, c):
         return ""
@@ -480,6 +528,16 @@ async def sur_message(msg, c=None, maintenant: float | None = None, attente: flo
     vises, carte = [], None
     if genre == "aide":
         vises = _jeux_aide(c, jeux_vises(texte, ch, jeux), regl)
+    elif genre == "autre":
+        boutons = []
+        try:
+            discussion = zones.salon_commu(g, await zones.conf(g), "discussion")
+            if discussion is not None and discussion.id != ch.id:
+                boutons = [(_t(g.id, f"reponses.autre_jeu.bouton.{langue}"), zones.lien_salon(g, discussion))]
+        except Exception:
+            boutons = []
+        carte = (_t(g.id, f"reponses.autre_jeu.titre.{langue}"), _t(g.id, f"reponses.autre_jeu.texte.{langue}", nom=autre),
+                 boutons)
     elif genre == "savoir" and sujet.startswith("site:"):
         import tableau
         carte = savoir.reponse_site(sujet[5:], langue, str(tableau._base or ""), gid=g.id)
@@ -568,6 +626,8 @@ def _libelle(sujet: str, jeux: str) -> str:
     if sujet == "aide":
         noms = {j.cle: j.nom for j in zones.JEUX}
         return "Aide · " + (" · ".join(noms.get(k, k) for k in jeux.split(",") if k) or "aucun jeu")
+    if sujet == "autre_jeu":
+        return "Autre jeu · renvoyé vers Discussion"
     if sujet.startswith("site:"):
         return "Site · " + {"wiki": "Le wiki", "vitrine": "La vitrine"}.get(sujet[5:], sujet[5:])
     if sujet.startswith("jeu:"):

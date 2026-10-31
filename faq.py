@@ -297,7 +297,7 @@ def vue_reponse(titre: str, corps: str, boutons: list, pied: str = "Réponse aut
     v = LayoutView(timeout=None)
     v.add_item(discord.ui.Container(
         discord.ui.TextDisplay(f"### {titre}\n{corps}"),
-        discord.ui.ActionRow(*[Button(label=libelle[:80], url=url) for libelle, url in boutons[:5]]),
+        *([discord.ui.ActionRow(*[Button(label=libelle[:80], url=url) for libelle, url in boutons[:5]])] if boutons else []),
         discord.ui.TextDisplay(f"-# {pied}"), accent_color=Palette.INFO))
     return v
 
