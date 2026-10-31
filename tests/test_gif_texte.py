@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import asyncio
 import re
+import time
 from pathlib import Path
 
 import insult_filter
@@ -80,12 +81,13 @@ def _ns(texte_lu):
                 async def run_in_executor(self, _x, f, data):
                     return f(data)
             return L()
-    ns = {"re": re, "discord": Discord, "aiohttp": Aiohttp, "asyncio": Asyncio, "_OCR_SEM": Sem(), "cfg": cfg,
+    ns = {"re": re, "time": time, "discord": Discord, "aiohttp": Aiohttp, "asyncio": Asyncio, "_OCR_SEM": Sem(), "cfg": cfg,
           "send_log": send_log, "insult_filter": insult_filter, "offtopic_filter": offtopic_filter,
           "sujets_interdits": sujets_interdits, "_normalize_for_scan": lambda t: t, "_logerr": lambda *a, **k: None,
           "ocr_scan": type("O", (), {"available": staticmethod(lambda: True), "image_text": staticmethod(lambda d: texte_lu)})}
     noms = {"_texte_image_interdit", "_retirer_si_texte_interdit", "_ocr_gif_lien", "_HOTES_APERCU", "_GIF_LIEN_RE",
-            "_sujet_interdit", "_gif_texte", "_msg_url_slugs", "_URL_INMSG_RE"}
+            "_sujet_interdit", "_gif_texte", "_msg_url_slugs", "_URL_INMSG_RE",
+            "_lire_apercu", "_ATTENTE_APERCU", "_APERCUS_LUS"}
     for n in ARBRE.body:
         nom = n.name if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) else (
             getattr(n.targets[0], "id", None) if isinstance(n, ast.Assign) else None)

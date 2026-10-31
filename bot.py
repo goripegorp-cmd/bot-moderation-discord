@@ -5661,6 +5661,47 @@ def _gif_texte(msg, ct: str = "") -> str:
     return " ".join(m for m in morceaux if m).strip()
 
 
+def _gif_insultant(msg, ct: str = ""):
+    """(niveau, mot) de l'insulte que portent les GIF et les liens du message — les mots de l'adresse et le titre de
+    l'aperçu, jugés dans leur langue (anglais par défaut) ; (0, None) sinon. Le même jugement pour tout auteur : le
+    lien seul suffit (31/10/2026 : klipy.com/gifs/django-unchained-negre)."""
+    texte = _gif_texte(msg, ct) if msg is not None else _msg_url_slugs(ct)
+    if not texte:
+        return 0, None
+    try:
+        return insult_filter.scan(texte, lg=insult_filter.langue(texte, "en"))
+    except Exception as ex:
+        _logerr("insultes.gif", ex, guild_id=getattr(getattr(msg, 'guild', None), 'id', 0))
+        return 0, None
+
+
+async def _retirer_gif_insultant(msg, ct: str, sanctionner: bool) -> bool:
+    """31/10/2026 : un GIF ou un lien insultant (niveau 2 et plus) part QUEL QUE SOIT L'AUTEUR. `sanctionner` faux
+    pour la tête, le staff et les immunisés : jamais de sanction automatique (19/10/2026), le retrait et le journal
+    seuls. Sinon (un membre dans un ticket, ou dont l'aperçu apporte l'insulte après l'envoi), l'échelle unique, comme
+    le GIF insultant partout ailleurs. Le journal dit
+    la source (l'adresse ou le titre de l'aperçu), la catégorie et le mot. True si le message est parti. FAIL-SAFE."""
+    try:
+        niv, mot = _gif_insultant(msg, ct)
+        if niv < 2:
+            return False
+        source = "lien" if _gif_insultant(None, ct)[0] >= 2 else "titre de l'aperçu"
+        try:
+            await msg.delete()
+        except discord.HTTPException:
+            pass
+        await send_log(msg.guild, 'anti_badwords', msg.author, msg,
+                       "GIF ou lien insultant retiré" + ("" if sanctionner else " (auteur protégé : aucune sanction)"),
+                       f"{source} · insulte · ||{str(mot)[:40]}||")
+        if sanctionner:
+            await _warn_calm_down(msg.channel, f"🎞️ {msg.author.mention}, pas de GIF ni de lien insultant ici.")
+            await sanction(msg.author, 'delete', 0, f"GIF ou lien insultant — « {mot} »", msg.guild)
+        return True
+    except Exception as ex:
+        _logerr("insultes.gif_retrait", ex, guild_id=getattr(getattr(msg, 'guild', None), 'id', 0))
+        return False
+
+
 def _sujet_interdit(c, texte: str, msg=None) -> str:
     """« catégorie · terme » d'un sujet interdit (religion, politique, extrémisme) dans le texte, ses liens ou ses
     GIF ; "" sinon. L'ancien lexique des slogans d'abord, puis `sujets_interdits` (texte, puis GIF : le titre
@@ -5900,7 +5941,12 @@ async def _ocr_scam_check(msg, immune: bool = False, lire=None):
                 return
             #  27/10/2026 : le texte écrit DANS l'image ou le GIF — une insulte grave, du validisme ou un sujet interdit
             #  retirent l'image (le journal le dit) ; aucune sanction sur une lecture d'image.
-            if not immune and await _retirer_si_texte_interdit(msg, text, "une image"):
+            #  31/10/2026 : un GIF insultant part quel que soit l'auteur ; pour la tête, le staff et les immunisés, les
+            #  insultes seules, et leurs autres images restent.
+            _gif_joint = (getattr(a, 'content_type', '') or '').lower() == 'image/gif' \
+                or (getattr(a, 'filename', '') or '').lower().endswith('.gif')
+            if (not immune or _gif_joint) and await _retirer_si_texte_interdit(
+                    msg, text, "un GIF" if _gif_joint else "une image", insultes_seules=immune):
                 return
             # Routine (caché sauf DIAG_VERBOSE=1) : prouve que le scan a TOURNÉ et ce qu'il a lu.
             try:
@@ -5928,17 +5974,22 @@ async def _texte_image_interdit(c: dict, text: str) -> str:
     return ""
 
 
-async def _retirer_si_texte_interdit(msg, text: str, ou: str) -> bool:
-    """Retire le message quand le texte de son image (ou de son GIF) est interdit ; le journal le dit. FAIL-SAFE."""
+async def _retirer_si_texte_interdit(msg, text: str, ou: str, insultes_seules: bool = False) -> bool:
+    """Retire le message quand le texte de son image (ou de son GIF) est interdit ; le journal le dit. FAIL-SAFE.
+    `insultes_seules` (la tête, le staff, les immunisés, les tickets) : les sujets interdits ne comptent pas."""
     try:
-        lu = await _texte_image_interdit(await cfg(msg.guild.id), text)
+        c = await cfg(msg.guild.id)
+        if insultes_seules:
+            c = dict(c, anti_offtopic=0)
+        lu = await _texte_image_interdit(c, text)
         if not lu:
             return False
         try:
             await msg.delete()
         except discord.HTTPException:
             pass
-        await send_log(msg.guild, 'anti_badwords', msg.author, msg, f"Texte interdit dans {ou}", f"||{lu[:60]}||")
+        await send_log(msg.guild, 'anti_badwords', msg.author, msg, f"Texte interdit dans {ou}",
+                       f"image · ||{lu[:60]}||")
         return True
     except Exception as ex:
         _logerr("ocr.texte", ex, guild_id=getattr(msg.guild, 'id', 0))
@@ -5949,20 +6000,39 @@ _HOTES_APERCU = ("discordapp.net", "discordapp.com", "discord.com")
 _GIF_LIEN_RE = re.compile(r"https?://(?:[a-z0-9-]+\.)*(?:tenor\.com|giphy\.com|klipy\.com)/", re.I)
 
 
-async def _ocr_gif_lien(msg) -> None:
+_ATTENTE_APERCU = 3          # secondes avant de relire le message envoyé (Discord pose l'aperçu après coup)
+_APERCUS_LUS = {}            # id du message → instant de la lecture de son aperçu (une seule lecture par message)
+
+
+async def _lire_apercu(url: str):
+    """L'image de l'aperçu, par le relais de Discord, 4 Mo au plus ; None sinon."""
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as s:
+        async with s.get(url) as r:
+            if r.status != 200 or int(r.headers.get("Content-Length") or 0) > 4_000_000:
+                return None
+            data = await r.content.read(4_000_001)
+    return data if len(data) <= 4_000_000 else None
+
+
+async def _ocr_gif_lien(msg, insultes_seules: bool = False, attendre: bool = True) -> None:
     """28/10/2026 (exigence 11 : « GIF insultants bloqués : lien, titre, TEXTE DE L'IMAGE ») : le texte écrit dans un GIF
-    Tenor / Giphy posté en lien. Discord pose l'aperçu après coup : on relit le message 3 s plus tard, on prend la
-    première image de l'aperçu PAR LE RELAIS DE DISCORD (jamais l'hôte du GIF), 4 Mo au plus, et l'OCR la lit. En fond,
-    au plus 2 lectures à la fois (le sémaphore de l'OCR). FAIL-SAFE."""
+    Tenor / Giphy / Klipy posté en lien. Discord pose l'aperçu après coup : on relit le message 3 s plus tard (ou on le
+    prend tel que la modification qui apporte l'aperçu le donne, `attendre` faux), on prend la première image de
+    l'aperçu PAR LE RELAIS DE DISCORD (jamais l'hôte du GIF), 4 Mo au plus, et l'OCR la lit — une seule fois par
+    message. En fond, au plus 2 lectures à la fois (le sémaphore de l'OCR). `insultes_seules` : la tête, le staff, les
+    immunisés et les tickets (31/10/2026). FAIL-SAFE."""
     from urllib.parse import urlsplit
     try:
         if not ocr_scan.available() or not _GIF_LIEN_RE.search(msg.content or ""):
             return
-        await asyncio.sleep(3)
-        try:
-            msg = await msg.channel.fetch_message(msg.id)
-        except discord.HTTPException:
-            return   # retiré entre-temps (la modération), ou illisible
+        if attendre:
+            await asyncio.sleep(_ATTENTE_APERCU)
+            try:
+                msg = await msg.channel.fetch_message(msg.id)
+            except discord.HTTPException:
+                return   # retiré entre-temps (la modération), ou illisible
+        if msg.id in _APERCUS_LUS:
+            return
         url = ""
         for e in msg.embeds or []:
             for x in (getattr(e, 'thumbnail', None), getattr(e, 'image', None)):
@@ -5974,19 +6044,42 @@ async def _ocr_gif_lien(msg) -> None:
             if url:
                 break
         if not url:
-            return
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as s:
-            async with s.get(url) as r:
-                if r.status != 200 or int(r.headers.get("Content-Length") or 0) > 4_000_000:
-                    return
-                data = await r.content.read(4_000_001)
-        if len(data) > 4_000_000:
+            return   # pas encore d'aperçu : la modification qui l'apporte relancera la lecture
+        if len(_APERCUS_LUS) > 5000:
+            _APERCUS_LUS.clear()
+        _APERCUS_LUS[msg.id] = time.monotonic()
+        data = await _lire_apercu(url)
+        if not data:
             return
         async with _OCR_SEM:
             text = await asyncio.get_event_loop().run_in_executor(None, ocr_scan.image_text, data)
-        await _retirer_si_texte_interdit(msg, text, "un GIF")
+        await _retirer_si_texte_interdit(msg, text, "un GIF", insultes_seules=insultes_seules)
     except Exception as ex:
         _logerr("ocr.gif", ex, guild_id=getattr(getattr(msg, 'guild', None), 'id', 0))
+
+
+async def _juger_apercu_gif(before, after) -> None:
+    """31/10/2026 : l'aperçu d'un GIF (Klipy, Tenor, Giphy) arrive souvent APRÈS l'envoi, par une modification du
+    message au contenu identique — que on_message_edit écartait sans la juger. Son titre (quand c'est lui qui apporte
+    l'insulte) et son image sont jugés ici, avec les règles de l'envoi : salons immunisés exclus ; la tête, le staff
+    et les immunisés, le retrait sans sanction ; eux et les tickets, les insultes seules dans l'image. FAIL-SAFE."""
+    try:
+        if after.guild is None or after.author is None or getattr(after.author, 'bot', False):
+            return
+        if await is_channel_immune(after.guild.id, after.channel.id):
+            return
+        c = await cfg(after.guild.id)
+        ct = after.content or ""
+        protege = await is_immune(after.author, 'general', after.channel) or await is_fully_immune(after.author)
+        ticket = await is_ticket_channel(after.channel)
+        if c.get('anti_insults', 1):
+            apporte = _gif_insultant(after, ct)[0] >= 2 and _gif_insultant(before, ct)[0] < 2
+            if apporte and await _retirer_gif_insultant(after, ct, sanctionner=not protege):
+                return
+        if c.get('anti_scam_ocr', 1) and _GIF_LIEN_RE.search(ct):
+            _spawn_bg_scan(_ocr_gif_lien(after, insultes_seules=protege or ticket, attendre=False))
+    except Exception as ex:
+        _logerr("insultes.gif_apercu", ex, guild_id=getattr(getattr(after, 'guild', None), 'id', 0))
 
 
 async def _retirer_image_arnaque(msg, titre: str, detail: str, immune: bool) -> None:
@@ -25600,7 +25693,10 @@ async def on_message_edit(before, after):
         if before.author is None or before.author.bot or before.guild is None:
             return
         # Ignore si contenu identique (Discord renvoie on_message_edit pour les previews d'embed)
+        #  31/10/2026 : sauf l'aperçu qui arrive — celui d'un GIF Klipy, Tenor ou Giphy est jugé (titre, image).
         if (before.content or "") == (after.content or ""):
+            if len(after.embeds or []) > len(before.embeds or []):
+                await _juger_apercu_gif(before, after)
             return
         # FIX sécu P0-2 : re-scanner le contenu ÉDITÉ (phishing/token/webhook/scam).
         try:
@@ -26471,8 +26567,9 @@ async def on_message(msg):
         if _ocr:
             _spawn_bg_scan(_ocr_scam_check(msg, immune=user_immune, lire=_lire))
         #  28/10/2026 : le texte écrit dans un GIF Tenor / Giphy posté en lien (l'image de son aperçu).
-        if c.get('anti_scam_ocr', 1) and (not user_immune) and (not is_ticket) and _GIF_LIEN_RE.search(ct or ""):
-            _spawn_bg_scan(_ocr_gif_lien(msg))
+        #  31/10/2026 : quel que soit l'auteur — la tête, le staff, les immunisés et les tickets, les insultes seules.
+        if c.get('anti_scam_ocr', 1) and _GIF_LIEN_RE.search(ct or ""):
+            _spawn_bg_scan(_ocr_gif_lien(msg, insultes_seules=bool(user_immune or is_ticket)))
 
         # DÉTECTION IMAGE NSFW PAR IA (owner 2026-06-27 — protection mineurs) : en arrière-plan,
         # repère une photo sexuellement explicite (que l'OCR ne voit pas). Garde RAM côté module
@@ -26684,6 +26781,15 @@ async def on_message(msg):
                             msg.guild)
                 return
 
+        #  31/10/2026 : le GIF klipy.com/gifs/django-unchained-negre est passé. Tout le filtre des insultes est derrière
+        #  le retour ci-dessous : le GIF de la tête, du staff (un rôle au niveau du rôle staff ou plus haut), d'un
+        #  administrateur ou d'un immunisé, ou posté dans un ticket, n'était jamais lu. Un GIF insultant part quel que soit
+        #  l'auteur ; la tête, le staff et les immunisés ne sont jamais sanctionnés (19/10/2026), un membre dans un
+        #  ticket l'est comme partout (09/07/2026 : les insultes sont modérées aussi dans les tickets).
+        if (user_immune or is_ticket) and c.get('anti_insults', 1):
+            if await _retirer_gif_insultant(msg, ct, sanctionner=not user_immune):
+                return
+
         # Si utilisateur immunisé OU dans un ticket = ignorer les autres protections
         if user_immune or is_ticket:
             #  Le staff n'est jamais sanctionné, mais un exécutable qu'il poste (compte volé ?) reste
@@ -26872,12 +26978,8 @@ async def on_message(msg):
                 _ilvl, _iterm = 0, None
             # Rien dans le texte PARLÉ → regarder le GIF/lien (slug), jaugé différemment.
             if _ilvl == 0:
-                _slug = _gif_texte(msg, ct)
-                if _slug:
-                    try:
-                        _slvl, _sterm = insult_filter.scan(_slug, lg=insult_filter.langue(_slug, "en"))
-                    except Exception:
-                        _slvl, _sterm = 0, None
+                _slvl, _sterm = _gif_insultant(msg, ct)
+                if _slvl:
                     if _slvl >= 3:
                         _ilvl, _iterm = _slvl, _sterm   # haine/slur DANS un GIF = sérieux → comme du texte
                     elif _slvl == 2:
