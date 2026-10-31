@@ -907,7 +907,12 @@ async def log_member_escalation(bot, guild, member, total_warns, palier,
     catégorie Sécurité est désactivée ou si aucun salon de catégorie n'est routé,
     on poste DIRECTEMENT dans le salon de logs de base (get_log_channel).
     100% fail-soft : ne casse jamais la sanction qui l'a déclenchée.
+
+    31/10/2026, le fondateur : « il y en a des milliers comme ça… ça veut rien dire ». Plus rien n'est posté ici : chaque
+    joueur a UN panneau dans 📋logs (vigilance.py, `_carte_vigilance` de bot.py) qui dit ce qu'il a fait et propose la
+    décision. Gardée pour ses appelants, sans effet.
     """
+    return None
     try:
         try:
             mention = getattr(member, "mention", str(member))

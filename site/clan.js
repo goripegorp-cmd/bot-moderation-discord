@@ -25,7 +25,7 @@ const resetPages = (p) => { for (const k of Object.keys(etat.pages)) if (k.start
 // 27/10/2026 : « Équipage » est UNE liste et ses trois vues, un sous-onglet chacune — Présence (#equipage/membres),
 // Fiches techniques (…/fiches : l'ancienne rubrique) et Équipes (…/equipes : l'ancien « Par équipe ») ; on passe de
 // l'une à l'autre sans quitter la page (la recherche, les tuiles et « Ajouter au clan » restent).
-export const VUES_EQUIPAGE = nommerOnglets("site.sous.equipage.membres", [["presence", "Présence", "membres"], ["fiches", "Fiches techniques", "fiches"], ["equipes", "Équipes", "equipage"], ["hierarchie", "Hiérarchie", "grade"]]);
+export const VUES_EQUIPAGE = nommerOnglets("site.sous.equipage.membres", [["presence", "Présence", "membres"], ["fiches", "Fiches techniques", "fiches"], ["equipes", "Équipes", "equipage"], ["hierarchie", "Hiérarchie", "grade"], ["staff", "Staff", "equipage"]]);
 const vueEquipage = (sous) => (VUES_EQUIPAGE.some(([k]) => k === sous) ? sous : "presence");
 export function membres(vue, ctx = {}) {
   const f = filtres("clan", { q: "", rang: "tous", ajout: "" });
@@ -60,6 +60,10 @@ export function membres(vue, ctx = {}) {
       etat.selection.clear();
       remplacer(lot); remplacer(bas); remplacer(resultats);
       fic = vueHierarchie(resultats, { q: () => f.q });
+    } else if (v === "staff") {
+      etat.selection.clear();
+      remplacer(lot); remplacer(bas); remplacer(resultats);
+      fic = vueStaff(resultats, { q: () => f.q, lot });
     } else {
       fic = null;
       outils.append(copierListe);
@@ -67,6 +71,7 @@ export function membres(vue, ctx = {}) {
     }
   };
   const majHaut = () => {
+    if (v === "staff") { remplacer(haut); return; }   // le staff a ses propres tuiles (vueStaff)
     const c = etat.d && etat.d.clan;
     if (!c) { remplacer(haut, indisponible()); return; }
     const nb = [0, 0, 0, 0, 0];
@@ -222,6 +227,104 @@ async function dialoguePrevenir(n) {
   const modeL = liste({ valeur: mode, label: "Comment", plein: true, options: [{ v: "mp", l: "Message privé" }, { v: "salon", l: "Mention dans un salon" }], changer: (v) => { mode = v; majApercu(); } });
   majApercu();
   const r = await confirmer({ titre: "Prévenir " + quantite(n, "membre(s)") + (n > 1 ? " de leur inactivité" : " de son inactivité"), texte: "Sans activité d'ici une semaine, le site te rappelle et propose de les retirer du clan.", contenu: [modeL, salonL, apercu], libelleOk: "Prévenir", icone: "cloche" });
+  if (!r) return null;
+  if (mode === "salon" && !salon) { toast("Aucun salon possible.", "erreur"); return null; }
+  return { mode, salon: mode === "salon" ? salon : "" };
+}
+
+// ─── Le staff (31/10/2026) ──────────────────────────────────────────────────
+// « Le même système d'activité dans une petite branche à part : on voit ceux du clan, on voit ceux du staff, et on peut
+// prévenir en MP ceux du staff qui ne sont pas actifs. » Les mêmes barres sur 7 jours ; pas de retrait : la direction décide.
+function vueStaff(zone, o) {
+  const f = filtres("staff", { rang: "tous" });
+  const majLot = () => {
+    const n = etat.selection.size;
+    if (!n || !peutAgir()) { remplacer(o.lot); return; }
+    remplacer(o.lot, h("div", { classe: "lot", role: "region", "aria-label": "Sélection" },
+      h("span", {}, h("b", { classe: "num" }, String(n)), " " + accord(n, "membre(s) du staff sélectionné(s)")),
+      h("div", { classe: "rangee" },
+        bouton("Tout désélectionner", { classe: "p bois", onclick: () => { etat.selection.clear(); dessiner(); } }),
+        bouton("Prévenir", { classe: "p laiton", icone: "cloche", reseau: true, onclick: async () => {
+          const r = await dialoguePrevenirStaff(n);
+          if (!r) return;
+          const ok = await agir(Object.assign({ action: "staff_prevenir", membres: [...etat.selection] }, r), "", "", { direct: true });
+          if (ok) { etat.selection.clear(); dessiner(); }
+        } }))));
+  };
+  const ligneStaff = (m, teinte) => {
+    const presents = /^\d+\/\d+$/.test(m.jours) ? +m.jours.split("/")[0] : 0;
+    let l = null;
+    const coche = peutAgir() ? caseACocher(null, etat.selection.has(m.id), (val, entree) => {
+      if (val && etat.selection.size >= 25) { entree.checked = false; toast("25 au plus d'un coup.", "erreur"); return; }
+      if (val) etat.selection.add(m.id); else etat.selection.delete(m.id);
+      if (l) l.classList.toggle("choisie", val);
+      majLot();
+    }, { aria: "Sélectionner " + nomDe(m) }) : null;
+    l = ligne({
+      visuel: [coche, avatar(m, "p")], titre: nomDe(m), libelleOuvrir: "Ouvrir la fiche de " + nomDe(m), ouvrir: () => ouvrirFiche(m.id),
+      sous: ["@" + m.pseudo, h("span", { classe: "ident" }, " · " + m.id), " · arrivé le " + m.arrivee],
+      badges: [m.jours !== "—" ? h("span", { classe: "jauge", vars: { "--teinte": teinte }, title: quantite(m.jours, "jour(s) actif(s)") + " sur 7" }, Array.from({ length: 7 }, (_, k) => h("i", { classe: k < presents ? "on" : "" }))) : null,
+        pastilleRappelStaff(m.rappel), badgeRestreint(m.id), pastille(m.statut, teinte)], maxBadges: 5,
+      date: m.derniere, dateTitre: "Dernière activité : " + m.derniere,
+      classe: etat.selection.has(m.id) ? "choisie" : "", donnees: { membre: m.id },
+    });
+    return l;
+  };
+  const dessiner = () => {
+    const s = etat.d && etat.d.staff_activite;
+    if (!s) { remplacer(zone, indisponible()); return; }
+    if (!s.roles.length) { remplacer(zone, vide("Aucun rôle du staff trouvé", "Les rôles du staff : ceux des tickets, et tout rôle dont le nom dit « staff ».")); return; }
+    const nb = [0, 0, 0, 0, 0];
+    s.membres.forEach((m) => { nb[m.rang] = (nb[m.rang] || 0) + 1; });
+    const l = s.membres.filter((m) => (f.rang === "tous" || String(m.rang) === String(f.rang)) && contient(m.nom + " " + m.pseudo + " " + m.id, o.q()));
+    const echus = s.membres.filter((m) => m.rappel && m.rappel.statut === "echu");
+    const blocs = [tuiles(
+      tuile({ cle: "s1", lib: "Staff", val: s.membres.length, icone: "equipage", sous: s.roles.map(sansEmoji).join(", ").slice(0, 60), teinte: "#1f4e5a" }),
+      tuile({ cle: "s2", lib: "Actifs", val: nb[0], icone: "succes", sous: "présents cette semaine", teinte: "#3f6b3a" }),
+      tuile({ cle: "s3", lib: "Peu présents", val: nb[1], icone: "minuteur", sous: "absents plus de 7 jours", teinte: "#a8641c" }),
+      tuile({ cle: "s4", lib: "Inactifs", val: nb[2], icone: "attention", sous: "absents un mois ou plus", teinte: "#8e2a24" })),
+    peutAgir() ? h("p", { classe: "aide avance" }, "Coche des membres du staff pour les prévenir (message privé ou mention dans un salon du staff, 25 au plus). La direction et le fondateur ne sont jamais touchés. L'activité du staff est suivie depuis le 31/10/2026 : la première semaine peut afficher « Jamais vu » pour qui n'a encore rien fait.") : null];
+    if (echus.length) blocs.push(h("div", { classe: "cadre pile serree alerte-cadre" }, h("h3", {}, "À voir · " + echus.length),
+      h("p", { classe: "aide" }, "Prévenus il y a une semaine, toujours peu présents : à la direction de faire le point."),
+      h("ul", { classe: "lignes-c" }, echus.map((m) => ligne({
+        visuel: avatar(m, "p"), titre: nomDe(m), ouvrir: () => ouvrirFiche(m.id), libelleOuvrir: "Ouvrir la fiche de " + nomDe(m),
+        sous: "Prévenu le " + date(m.rappel.envoye_le) + (m.rappel.par ? " par " + sansEmoji(m.rappel.par) : "") + " · dernière activité : " + m.derniere,
+        etat: "alerte", actions: [{ texte: true, icone: "valider", libelle: "Point fait", reseau: true, classe: "discret", onclick: () => agir({ action: "staff_rappel_annuler", membre: m.id }, "", "", { direct: true }) }],
+      })))));
+    blocs.push(puces([["tous", "Tous", s.membres.length], ...RANGS.map(([lib, t], r) => (nb[r] ? [String(r), lib, nb[r], t] : null)).filter(Boolean)], String(f.rang), (val) => { f.rang = val; dessiner(); }, "Présence"));
+    if (!l.length) blocs.push(vide("Personne ici", "Change le filtre ou la recherche."));
+    const groupesZone = h("div", { classe: "groupes-zone" }, groupes([2, 1, 3, 4, 0].map((r) => {
+      const g = l.filter((m) => m.rang === r);
+      if (!g.length) return null;
+      const [lib, teinte] = RANGS[r];
+      return { titre: lib, compte: g.length, chaud: r === 2, cle: "staff-" + r, contenu: () => lignes("staff-" + r, g, (m) => ligneStaff(m, teinte)) };
+    }).filter(Boolean), { ouverts: 2, forcer: !!o.q() || f.rang !== "tous" }));
+    if (l.length) blocs.push(h("div", { classe: "rangee entre" }, h("span", { classe: "meta" }, quantite(l.length, "membre(s) du staff")), outilsGroupes(groupesZone)), groupesZone);
+    remplacer(zone, ...blocs);
+    majLot();
+  };
+  dessiner();
+  return { maj: dessiner, chercher: () => { resetPages("staff"); dessiner(); } };
+}
+function pastilleRappelStaff(r) {
+  if (!r) return null;
+  if (r.statut === "echu") return pastille("Délai écoulé", "#8e2a24", "Prévenu le " + date(r.envoye_le));
+  if (r.statut === "en_attente") return pastille("Prévenu · " + date(r.echeance), "#a8641c", r.remis ? "Point proposé le " + date(r.echeance) : "Message privé refusé");
+  if (r.statut === "revenu") return pastille("Revenu", "#3f6b3a", "Actif depuis le rappel du " + date(r.envoye_le));
+  return null;
+}
+async function dialoguePrevenirStaff(n) {
+  const salons = (etat.d.staff_activite && etat.d.staff_activite.salons) || [];
+  let mode = "mp", salon = salons[0] ? salons[0].id : "";
+  const apercu = h("p", { classe: "aide" });
+  const salonL = liste({ valeur: salon, label: "Salon", plein: true, options: salons.map((s) => ({ v: s.id, l: "#" + sansEmoji(s.nom), sous: sansEmoji(s.cat) })), changer: (val) => { salon = val; } });
+  const majApercu = () => {
+    salonL.hidden = mode !== "salon";
+    apercu.textContent = mode === "mp" ? "« On ne t'a pas beaucoup vu ces derniers temps. Sans activité d'ici une semaine, la direction fera le point avec toi sur ta place dans le staff. »" : salons.length ? "Un seul message qui les mentionne, dans le salon du staff choisi." : "Aucun salon du staff où le bot peut écrire.";
+  };
+  const modeL = liste({ valeur: mode, label: "Comment", plein: true, options: [{ v: "mp", l: "Message privé" }, { v: "salon", l: "Mention dans un salon du staff" }], changer: (val) => { mode = val; majApercu(); } });
+  majApercu();
+  const r = await confirmer({ titre: "Prévenir " + quantite(n, "membre(s) du staff"), texte: "Sans activité d'ici une semaine, le site te le rappelle : à la direction de faire le point.", contenu: [modeL, salonL, apercu], libelleOk: "Prévenir", icone: "cloche" });
   if (!r) return null;
   if (mode === "salon" && !salon) { toast("Aucun salon possible.", "erreur"); return null; }
   return { mode, salon: mode === "salon" ? salon : "" };

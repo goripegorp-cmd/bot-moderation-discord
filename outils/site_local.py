@@ -380,12 +380,18 @@ async def construire(dossier: Path | None = None, port: int = PORT, qui: int = F
     #  Le Port et l'Équipage : les VRAIES actions de bot.py, l'activité du clan, la conversation d'un ticket.
     import site_local_port
     carnet = site_local_port.completer_faux_serveur(g, X)
+    def _membres_staff_local(g_, _c):
+        """31/10/2026 : l'onglet Staff — les porteurs du rôle « Staff » (comme `_membres_du_staff` de bot.py)."""
+        roles = [r for r in g_.roles if r.name == "Staff"]
+        return [m for m in g_.members if not m.bot and any(r in m.roles for r in roles)], roles
+
     tableau.setup(bot=X.Obj(get_guild=lambda gid: g if gid == SERVEUR_ID else None, user=X.Obj(id=999), guilds=[g]),
                   cle="site-local", base_url=f"http://localhost:{port}", cfg=cfg, get_db=get_db,
                   mesurer_groupe=site_local_port.mesurer_groupe(), autorise_membre=a_la_tete, direction=a_la_tete,
                   tete=TETE, alerte_securite=alerte, conversation=site_local_port.conversation(g=g, get_db=get_db),
                   actions=site_local_port.actions_du_bot(g=g, X=X, get_db=get_db, cfg=cfg, tete=TETE,
-                                                         fondateur=FONDATEUR, carnet=carnet), log=print)
+                                                         fondateur=FONDATEUR, carnet=carnet), log=print,
+                  membres_staff=_membres_staff_local)
     for module in (registre, recrutements, questions, vigilance, clan, casier, sondages, suggestions, entraide,
                    annonces, tableau, questionnaire, reponses_auto):
         await module.init_db()

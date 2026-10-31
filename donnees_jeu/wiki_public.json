@@ -447,6 +447,14 @@
   "monnaie.randomize": {
    "fr": "Des tirages (spins).",
    "en": "Spins."
+  },
+  "arme.dagger": {
+   "fr": "Arme de la classe Light, rapide et légère, avec son propre arbre de compétences (Movie 3) et l'attaque Dagger Mirage (Dev Log 1).",
+   "en": "A Light-class weapon, quick and small, with its own skill tree (Movie 3) and the Dagger Mirage move (Dev Log 1)."
+  },
+  "enchantement.poison": {
+   "fr": "Enchantement d'arme, aux côtés du feu, de la glace et de la foudre : les coups de l'arme empoisonnent (The Movie). Une attaque d'arme s'appelle Poison Ignition (Dev Log 2).",
+   "en": "A weapon enchantment, alongside fire, ice and lightning: the weapon's hits poison (The Movie). One weapon move is called Poison Ignition (Dev Log 2)."
   }
  },
  "hors_catalogue": {

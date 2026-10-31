@@ -4008,6 +4008,14 @@ async def _record_infraction(guild_id, user_id, typ, reason, duration=''):
             asyncio.create_task(recidivism_module.on_infraction(guild_id, user_id, str(typ)))
     except Exception:
         pass
+    #  31/10/2026 : « on ne sait pas ce qu'ils ont commis » — le motif exact au journal, gravité 1 : le panneau du joueur
+    #  (vigilance) l'affiche ligne par ligne.
+    try:
+        await registre.noter(int(guild_id), "Modération", "auto.infraction",
+                             (f"Mute automatique ({duration}) : " if str(typ).lower() == 'mute' else "Infraction : ")
+                             + str(reason)[:240], membre_id=int(user_id), gravite=1)
+    except Exception:
+        pass
 
 
 async def _recidivism_log_escalation(guild, member, tier, palier, reason):
@@ -4419,6 +4427,7 @@ async def sanction(m, action, dur, reason, g, actor_id=None):
     # l'escalade ; (2) passée au détecteur de RAFALE → ≥N infractions en quelques s = bot/piraté/
     # raid → BAN direct. Les actions MANUELLES du staff (actor_id renseigné) ne comptent jamais.
     # FAIL-OPEN : tout échec ici n'empêche jamais la sanction normale ci-dessous.
+    _auto_immune = True
     if actor_id is None and getattr(m, 'guild', None) is not None and not getattr(m, 'bot', False):
         # GARDE D'IMMUNITÉ (audit 2026-06-26) : les protections « critiques » (phishing/scam)
         # appellent sanction() pour TOUT LE MONDE au niveau message — mais un immunisé (owner/
@@ -4439,6 +4448,13 @@ async def sanction(m, action, dur, reason, g, actor_id=None):
                     return True   # exclu par la rafale → plus rien à faire
             except Exception:
                 pass
+            #  31/10/2026 : l'échelle unique (prévenu → 30 min → jusqu'à décision) remplace le mute réglé par filtre.
+            if action in ('delete', 'mute'):
+                try:
+                    await _cumulative_offense_sanction(m.guild, m, None, str(reason or 'infraction')[:200])
+                except Exception:
+                    pass
+                return True
     # Phase 263 : ne plus AVALER silencieusement les échecs (perms/hiérarchie) — logguer
     # explicitement + renvoyer True/False. Les call sites qui ignorent le retour restent
     # inchangés ; ceux qui veulent réagir peuvent désormais détecter l'échec.
@@ -4673,7 +4689,12 @@ async def _announce_sanction_public(interaction, embed):
         qui gardent tous le mod_id. ⚠️ Le salon de logs doit rester réservé au staff côté perms
         Discord — c'est une config serveur, pas du code.
     FAIL-SAFE : si l'envoi public échoue, la sanction reste appliquée (on n'annule rien).
+
+    31/10/2026, le fondateur : « l'avertissement est écrit dans le salon qui s'appelle commande… tout le monde voit qui a
+    warn qui… je veux que toutes les sanctions soient mises au propre sur le site ». Plus AUCUNE carte publique : le staff
+    a sa confirmation éphémère, le membre son message privé, le staff les logs et le site (onglet des sanctions).
     """
+    return None
     try:
         ch = getattr(interaction, 'channel', None)
         if ch is None or not hasattr(ch, 'send'):
@@ -6313,16 +6334,18 @@ async def _cumulative_insult_sanction(msg, iterm):
     await _cumulative_offense_sanction(msg.guild, msg.author, msg.channel, 'insulte')
 
 
-async def _cumulative_offense_sanction(guild, member, channel, label='infraction'):
-    """Sanction graduée CUMULATIVE (owner 2026-06-24, généralisée 2026-06-26 à TOUS les types
-    d'infractions : insultes, invitations, liens, scam…) — le warn seul ne suffit pas si le
-    membre s'en fiche : on durcit selon son NB TOTAL d'INFRACTIONS (hors mutes/ban/kick) sur
-    14 jours, jusqu'à une « blacklist » (mute permanent) + alerte owner (kick/ban à trancher), en
-    lui EXPLIQUANT que ça empire s'il continue et que ça se calme s'il arrête. À appeler APRÈS
-    avoir enregistré l'infraction. FAIL-SAFE."""
-    # GARDE D'IMMUNITÉ EN PROFONDEUR (audit 2026-06-26) : owner/super-owner/admin/rôles-users
-    # immunisés ne doivent JAMAIS être auto-mutés, même si un appelant oublie de filtrer en amont
-    # (ex. phishing/scam « critiques » qui sanctionnent tout le monde). Doute → on n'escalade pas.
+#  31/10/2026, le fondateur : une seule échelle pour TOUTE infraction automatique (insultes, spam, mentions, liens,
+#  invitations, majuscules…), comptée sur 24 h : 1re → il est prévenu ; 2e → mute 30 min ; 3e (juste après son mute)
+#  → muet jusqu'à la décision de la direction (28 jours, le plus long que Discord permet) et UN panneau dans 📋logs avec
+#  ce qu'il a fait et les boutons de décision. Plus de « 1 h, 1 jour, 1 semaine, blacklist » automatiques.
+ECHELLE_FENETRE_H = 24
+ECHELLE_MUTE_MIN = 30
+ECHELLE_DECISION_J = 28
+
+
+async def _cumulative_offense_sanction(guild, member, channel, label='infraction', preuve=''):
+    """L'échelle unique des infractions automatiques (voir ECHELLE_*). À appeler APRÈS avoir enregistré l'infraction.
+    FAIL-SAFE : n'interrompt jamais la modération. Jamais un immunisé (fondateur, direction, rôles immunisés)."""
     try:
         if await is_fully_immune(member):
             return
@@ -6332,80 +6355,77 @@ async def _cumulative_offense_sanction(guild, member, channel, label='infraction
     try:
         async with get_db() as db:
             async with db.execute(
-                "SELECT COUNT(*) FROM infractions WHERE guild_id=? AND user_id=? AND "
+                "SELECT COUNT(*) FROM infractions WHERE guild_id=? AND user_id=? AND mod_id=? AND "
                 "type NOT IN ('mute','unmute','ban','kick') AND "
-                "datetime(created_at) >= datetime('now','-14 days')",
-                (guild.id, member.id)) as cur:
+                f"datetime(created_at) >= datetime('now','-{ECHELLE_FENETRE_H} hours')",
+                (guild.id, member.id, getattr(getattr(bot, 'user', None), 'id', 0) or 0)) as cur:
                 n = int((await cur.fetchone())[0] or 1)
     except Exception:
         n = 1
-    async def _notice(text):   # avertissement en salon (no-op si pas de salon, ex. appel depuis sanction())
+    motif = str(label or 'infraction')[:120]
+    extrait = (" — « " + str(preuve)[:120] + " »") if preuve else ""
+
+    async def _notice(text):
         if channel is not None:
             await _warn_calm_down(channel, text)
-    # 1-2 infractions : AVERTISSEMENT clair (pas encore de mute) ; 3+ : exclusion graduée.
+
     if n <= 1:
-        await _notice(
-            f"🚫 {member.mention}, ce comportement (**{label}**) n'est pas autorisé ici. **1er "
-            f"rappel** — si tu continues, ça va commencer à coûter (exclusions de plus en plus "
-            f"longues). 🙏")
+        await _notice(f"🚫 {member.mention}, ce comportement (**{motif}**) n'est pas autorisé ici. Premier avertissement : "
+                      f"à la prochaine, tu seras rendu muet.")
+        try:
+            await _dm_sanction(member, guild, "Avertissement ⚠️", f"{motif}{extrait}. À la prochaine infraction, tu seras "
+                               f"rendu muet {ECHELLE_MUTE_MIN} minutes.")
+        except Exception:
+            pass
         return
     if n == 2:
-        await _notice(
-            f"⚠️ {member.mention}, **2e fois**. À la prochaine, tu seras **exclu temporairement**. "
-            f"Calme-toi maintenant 🙏")
+        try:
+            await member.timeout(timedelta(minutes=ECHELLE_MUTE_MIN), reason=f"2e infraction en 24 h : {motif}"[:500])
+        except Exception:
+            pass
+        try:
+            await _record_infraction(guild.id, member.id, 'mute', f"2e infraction en 24 h : {motif}{extrait}",
+                                     f"{ECHELLE_MUTE_MIN} minutes")
+        except Exception:
+            pass
+        await _notice(f"🔇 {member.mention} est rendu muet **{ECHELLE_MUTE_MIN} minutes** (2e infraction : {motif}).")
+        try:
+            await _dm_sanction(member, guild, f"Mute ({ECHELLE_MUTE_MIN} minutes)",
+                               f"{motif}{extrait}. Si tu recommences après ce mute, tu resteras muet jusqu'à la décision "
+                               f"de la direction.", f"{ECHELLE_MUTE_MIN} minutes")
+        except Exception:
+            pass
         return
-    if n == 3:
-        _dur, _lbl = timedelta(minutes=10), "10 minutes"
-    elif n == 4:
-        _dur, _lbl = timedelta(hours=1), "1 heure"
-    elif n == 5:
-        _dur, _lbl = timedelta(days=1), "1 jour"
-    elif n == 6:
-        _dur, _lbl = timedelta(days=7), "1 semaine"
-    else:
-        _dur, _lbl = None, "blacklist (permanent)"
-    if _dur is not None:
+    #  3e infraction ou plus : muet jusqu'à la décision (une seule fois — ensuite le panneau se met à jour).
+    deja = False
+    try:
+        fin_mute = getattr(member, "timed_out_until", None)
+        deja = bool(fin_mute and fin_mute > now() + timedelta(days=7))
+    except Exception:
+        deja = False
+    if not deja:
         try:
-            await member.timeout(_dur, reason=f"Infractions répétées ({n} en 14 j)")
-        except Exception:
-            pass
-    else:
-        try:
-            _qr = await _ensure_quarantine_role(guild)
-            if _qr is not None and _qr not in member.roles:
-                await member.add_roles(_qr, reason="Blacklist (infractions répétées)")
-                # Retenu : un départ puis un retour ne l'efface pas ; le staff peut le lever (revue 24/10).
-                await _noter_isolement(guild.id, member.id, [], f"Blacklist ({n} infractions en 14 j)", "escalade")
+            await member.timeout(timedelta(days=ECHELLE_DECISION_J), reason=f"Infractions répétées ({n} en 24 h) : "
+                                 f"muet jusqu'à la décision de la direction"[:500])
         except Exception:
             pass
         try:
-            await member.timeout(timedelta(days=28), reason="Blacklist (infractions répétées) — filet")
+            await _record_infraction(guild.id, member.id, 'mute', f"{n}e infraction en 24 h : {motif}{extrait} — muet "
+                                     f"jusqu'à la décision de la direction", "jusqu'à décision")
         except Exception:
             pass
+        await _notice(f"⛔ {member.mention} est rendu muet **jusqu'à la décision de la direction** ({n} infractions en "
+                      f"24 h).")
         try:
-            await ulogger2026.log_event(
-                bot, guild, ulogger2026.EventType.SEC_ESCALATION,
-                description=(f"⛔ {member.mention} (`{member.id}`) **mis en blacklist** "
-                             f"({n} infractions en 14 j, dernière : {label}) → mute permanent. "
-                             f"**À vous de trancher : kick ou ban ?**"),
-                user=member, moderator=bot.user)
+            await _dm_sanction(member, guild, "Mute jusqu'à décision",
+                               f"{n} infractions en 24 h (dernière : {motif}{extrait}). La direction va décider de la suite.",
+                               "jusqu'à décision")
         except Exception:
             pass
     try:
-        await _record_infraction(guild.id, member.id, 'mute', f"Escalade cumulée ({n} infractions/14j)", _lbl)
-    except Exception:
-        pass
-    await _notice(
-        f"⛔ {member.mention} — **{n} infractions** en 14 jours → **exclusion : {_lbl}**.\n"
-        f"Si tu **continues**, ça **empire** (palier suivant plus long, puis blacklist) ; si tu "
-        f"**arrêtes**, ça **se calme** et ça s'efface avec le temps. À toi de voir. 🙏")
-    try:
-        await _dm_sanction(member, guild, f"Exclusion ({_lbl})",
-                           f"Tu as accumulé {n} infractions en 14 jours. Si tu continues, ça empire ; "
-                           f"si tu arrêtes, ça se calme.")
-    except Exception:
-        pass
-
+        await vigilance.examiner(guild.id, member.id, forcer=True)
+    except Exception as ex:
+        _logerr("echelle.panneau", ex, guild_id=guild.id)
 
 def check_channel_cfg(msg, conf):
     if not conf: return False, None
@@ -6927,6 +6947,67 @@ async def _action_clan_prevenir(g, auteur, d):
     return True, texte
 
 
+async def _action_staff_prevenir(g, auteur, d):
+    """31/10/2026 : prévenir le staff peu présent, en message privé ou par une mention dans un salon du staff — comme
+    pour le clan, sans retrait automatique : la direction décide."""
+    c = await cfg(g.id)
+    mode = str(d.get("mode") or "")
+    ids = list(dict.fromkeys(int(x) for x in (d.get("membres") or []) if str(x).isdigit()))[:clan.MAX_LOT]
+    if mode not in ("mp", "salon") or not ids:
+        return False, "Demande invalide."
+    salon = None
+    if mode == "salon":
+        salon = g.get_channel(int(d.get("salon", 0) or 0))
+        if not isinstance(salon, discord.TextChannel) or not salon.permissions_for(g.me).send_messages:
+            return False, "Je ne peux pas écrire dans ce salon."
+    cibles = []
+    for uid in ids:
+        m = g.get_member(uid)
+        if m is not None and _est_du_staff(g, m, c) and m.id != g.owner_id and not _direction_ou_plus(g, m, c):
+            cibles.append(m)
+    if not cibles:
+        return False, "Personne à prévenir : ils ne sont plus dans le staff, ou sont de la direction."
+    echeance = int(time.time()) + clan.DELAI
+    remis = {}
+    if mode == "mp":
+        for m in cibles:
+            v = LayoutView(timeout=None)
+            v.add_item(discord.ui.Container(discord.ui.TextDisplay(clan.texte_mp_staff(g.name, echeance)),
+                                            accent_color=Palette.WARNING))
+            try:
+                await m.send(view=v)
+                remis[m.id] = True
+            except discord.HTTPException:
+                remis[m.id] = False
+            await asyncio.sleep(0.5)
+    else:
+        for k in range(0, len(cibles), 20):
+            lot = cibles[k:k + 20]
+            v = LayoutView(timeout=None)
+            v.add_item(discord.ui.Container(discord.ui.TextDisplay(clan.texte_salon_staff([m.mention for m in lot], echeance)),
+                                            accent_color=Palette.WARNING))
+            await salon.send(view=v, allowed_mentions=discord.AllowedMentions(everyone=False, roles=False, users=lot))
+    await clan.prevenir(g.id, [m.id for m in cibles], auteur.id, mode, salon.id if salon else 0, remis, groupe="staff")
+    comment = "message privé" if mode == "mp" else f"ping dans #{salon.name}"
+    for m in cibles:
+        await _au_journal(g, "Staff", "staff.prevenu", f"Staff prévenu de son inactivité ({comment}) par {auteur.display_name}"
+                          + ("" if remis.get(m.id, True) else " — message privé refusé"), membre_id=m.id, auteur_id=auteur.id)
+    fermes = sum(1 for v in remis.values() if not v)
+    texte = f"{len(cibles)} membre(s) du staff prévenu(s) : point proposé le {_heure_courte(echeance)[:5]} sans activité."
+    if fermes:
+        texte += f" {fermes} message(s) privé(s) refusé(s) : préviens-les par une mention dans un salon."
+    return True, texte
+
+
+async def _action_staff_rappel_annuler(g, auteur, d):
+    uid = int(d.get("membre", 0) or 0)
+    if not await clan.clore(g.id, uid, "annule", auteur.id, groupe="staff"):
+        return False, "Aucun rappel en cours pour ce membre du staff."
+    await _au_journal(g, "Staff", "staff.rappel_annule", f"Rappel d'inactivité du staff clos par {auteur.display_name}",
+                      membre_id=uid, auteur_id=auteur.id)
+    return True, "Rappel clos."
+
+
 async def _action_clan_rappel_annuler(g, auteur, d):
     uid = int(d.get("membre", 0) or 0)
     if not await clan.clore(g.id, uid, "annule", auteur.id):
@@ -7294,6 +7375,7 @@ _ACTIONS_TABLEAU = {"ticket_fermer": _action_ticket_fermer, "candidature": _acti
                     "casier_serveur": _action_casier_serveur, "casier_restaurer": _action_casier_restaurer,
                     "debannir": _action_debannir, "clan_ajouter": _action_clan_ajouter,
                     "clan_prevenir": _action_clan_prevenir, "clan_rappel_annuler": _action_clan_rappel_annuler,
+                    "staff_prevenir": _action_staff_prevenir, "staff_rappel_annuler": _action_staff_rappel_annuler,
                     "suggestion_repondre": _action_suggestion_repondre, "suggestion_retirer": _action_suggestion_retirer}
 
 
@@ -7339,18 +7421,88 @@ def _heure_courte(t) -> str:
 
 
 def _carte_vigilance(g, membre_id, incidents, points, evenements):
+    """Le panneau d'UN joueur dans 📋logs (31/10/2026) : ce qu'il a fait, ligne par ligne, où il en est, et la décision."""
     m = g.get_member(int(membre_id))
     nom = m.display_name if m else f"Membre {membre_id}"
-    lignes = "\n".join(f"- `{_heure_courte(e['quand'])}` · {str(e['texte'])[:150]}" for e in evenements[-8:])
+    lignes = "\n".join(f"- `{_heure_courte(e['quand'])}` · {str(e['texte'])[:180]}" for e in evenements[-10:])
+    fin_mute = getattr(m, "timed_out_until", None) if m else None
+    attente = bool(fin_mute and fin_mute > now() + timedelta(days=7))
+    if attente:
+        etat = "⛔ **Muet jusqu'à votre décision.** Que fait-on de lui ?"
+    elif fin_mute and fin_mute > now():
+        etat = f"🔇 Muet jusqu'à <t:{int(fin_mute.timestamp())}:t>."
+    else:
+        etat = "Pas de sanction en cours."
     v = LayoutView(timeout=None)
     v.add_item(discord.ui.Container(
-        discord.ui.TextDisplay(f"### 🚨 {nom} cumule des évènements graves\n<@{int(membre_id)}> · "
-                               f"{incidents} incident(s) · {points} point(s) en 24 h"),
-        discord.ui.TextDisplay(lignes or "-"),
-        discord.ui.TextDisplay("-# « Géré » retire l'alerte ; le compteur repart alors de zéro."),
+        discord.ui.TextDisplay(f"### 🚨 {nom} — {'décision requise' if attente else 'à surveiller'}\n<@{int(membre_id)}> · "
+                               f"{incidents} infraction(s) en 24 h\n{etat}"),
+        discord.ui.TextDisplay("**Ce qu'il a fait**\n" + (lignes or "-")),
+        discord.ui.ActionRow(BoutonDecision("warn", int(membre_id)), BoutonDecision("mute7", int(membre_id)),
+                             BoutonDecision("kick", int(membre_id)), BoutonDecision("ban", int(membre_id)),
+                             BoutonDecision("unmute", int(membre_id))),
         discord.ui.ActionRow(BoutonFicheSite(int(membre_id)), BoutonGere(int(membre_id))),
+        discord.ui.TextDisplay("-# Une décision ferme le panneau. « Géré » le retire sans rien faire."),
         accent_color=Palette.DANGER))
     return v
+
+
+_DECISIONS = {"warn": ("Avertir", "warn", discord.ButtonStyle.secondary),
+              "mute7": ("Mute 7 jours", "mute", discord.ButtonStyle.primary),
+              "kick": ("Expulser", "kick", discord.ButtonStyle.danger),
+              "ban": ("Bannir", "ban", discord.ButtonStyle.danger),
+              "unmute": ("Lever le mute", "unmute", discord.ButtonStyle.success)}
+
+
+async def _decider(i, cle: str, membre_id: int, motif: str, panneau=None) -> None:
+    """La décision prise depuis le panneau : le même circuit que le site (vérifications, fiche, MP, journal)."""
+    libelle, sanction_, _style = _DECISIONS[cle]
+    ok, message = await _action_moderer(i.guild, i.user, {"sanction": sanction_, "membre": membre_id, "motif": motif,
+                                                         "duree": 10080})
+    if ok:
+        await vigilance.gerer(i.guild.id, membre_id, i.user.id)
+        try:
+            if panneau is not None:
+                await panneau.delete()
+        except discord.HTTPException:
+            pass
+        await _au_journal(i.guild, "Modération", "alerte.decision", f"Décision « {libelle} » prise par {i.user.display_name}",
+                          membre_id=membre_id, auteur_id=i.user.id, detail=motif[:300])
+    await i.followup.send(message, ephemeral=True)
+
+
+class _MotifDecision(discord.ui.Modal):
+    def __init__(self, cle: str, membre_id: int, message):
+        super().__init__(title=_DECISIONS[cle][0][:45])
+        self.cle, self.membre_id, self.message = cle, membre_id, message
+        self.motif = discord.ui.TextInput(label="Motif (envoyé au membre)", max_length=300, min_length=3,
+                                          default="Infractions répétées sur le serveur (décision de la direction)")
+        self.add_item(self.motif)
+
+    async def on_submit(self, i: discord.Interaction):
+        await i.response.defer(ephemeral=True)
+        await _decider(i, self.cle, self.membre_id, str(self.motif.value).strip(), self.message)
+
+
+class BoutonDecision(discord.ui.DynamicItem[Button], template=r"alerte:dec:(?P<a>warn|mute7|kick|ban|unmute):(?P<m>\d+)"):
+    """« Est-ce qu'on le warn ? On le mute encore plus ? On le kick ? On le banne ? » — fondateur et direction."""
+
+    def __init__(self, cle: str = "warn", membre_id: int = 0):
+        self.cle, self.membre_id = cle, int(membre_id)
+        libelle, _s, style = _DECISIONS[cle]
+        super().__init__(Button(label=libelle, style=style, custom_id=f"alerte:dec:{cle}:{self.membre_id}"))
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(match["a"], int(match["m"]))
+
+    async def callback(self, i: discord.Interaction):
+        if not _direction_ou_plus(i.guild, i.user, await cfg(i.guild.id)):
+            return await i.response.send_message("Réservé au fondateur et à la direction.", ephemeral=True)
+        if self.cle == "unmute":
+            await i.response.defer(ephemeral=True)
+            return await _decider(i, "unmute", self.membre_id, "Mute levé par la direction", i.message)
+        await i.response.send_modal(_MotifDecision(self.cle, self.membre_id, i.message))
 
 
 _BOTS_REFUSES: dict = {}  # {bot_id: instant} — expulsés par l'anti-bot-voyou, approuvables depuis l'alerte
@@ -22310,6 +22462,7 @@ async def _activite_boot():
                       mesurer_groupe=_rellseas_mesurer_groupe, autorise_membre=_a_la_tete,
                       radie=_RADIE_ROLE_NAME, direction=_a_la_tete, tete=TETE_IDS,
                       mis_a_part=lambda g, m, c: _a_la_tete(g, m, c) or _direction_ou_plus(g, m, c),
+                      membres_staff=_membres_du_staff,
                       actions=_ACTIONS_TABLEAU, alerte_securite=_alerte_securite_site,
                       conversation=_conversation_ticket, log=print)
         securite_site.setup(envoyer=_alerte_forte_site)   # 26/10/2026 : les seules alertes de sécurité du site (signaux forts)
@@ -22561,7 +22714,7 @@ async def on_ready():
                               suggestions.BoutonPour, suggestions.BoutonContre,
                               suggestions.BoutonGerer, notifs.BoutonNotif, BoutonAnnulerConfig,
                               recrutements.BoutonTableau, recrutements.BoutonDecision,
-                              BoutonAnciensSalons, BoutonGere, BoutonFicheSite, BoutonApprouverBot)
+                              BoutonAnciensSalons, BoutonGere, BoutonDecision, BoutonFicheSite, BoutonApprouverBot)
         #  25/10/2026 : le recrutement en deux étapes — l'étape 1 (équipe), « Répondre » et « Continuer » (candidat).
         bot.add_dynamic_items(questionnaire.BoutonEtape1, questionnaire.BoutonRepondre, questionnaire.BoutonPage,
                               questionnaire.BoutonApercu)
@@ -27249,43 +27402,10 @@ async def on_message(msg):
                     except Exception as _ex:
                         print(f"[anti_spam warn count] {_ex}", file=_sys.stderr, flush=True)
 
-                    if _spam_warns < int(c.get('spam_warns_before_sanction', 2)):
-                        # ── PALIER WARN (4e puis 5e) : fiche + MP ──
-                        _reason = f"Spam toxique répété (malgré {strikes - 1} rappels)"
-                        await _record_infraction(msg.guild.id, msg.author.id, 'warn', _reason, '')
-                        # MP avec le récap COMPLET (owner : « il dira toujours j'ai rien fait »).
-                        await _dm_sanction(
-                            msg.author, msg.guild,
-                            f"⚠️ Avertissement officiel ({_spam_warns + 1}/2)",
-                            _reason)
-                        await _warn_calm_down(
-                            msg.channel,
-                            f"⚠️ {msg.author.mention}, **avertissement officiel** enregistré "
-                            f"(spam malgré les rappels). Regarde tes MP. À la prochaine, "
-                            f"c'est une sanction.",
-                        )
-                        try:
-                            await ulogger2026.log_member_escalation(
-                                bot, msg.guild, msg.author, total_warns=_spam_warns + 1,
-                                palier="spam-warn",
-                                reason=_reason, moderator=bot.user, severity="moyenne",
-                            )
-                        except Exception as _ex:
-                            print(f"[anti_spam escalation] {_ex}")
-                    else:
-                        # ── PALIER SANCTION : les 2 warns n'ont pas suffi ──
-                        dur = c.get('spam_mute_duration', 10)
-                        await sanction(msg.author, c.get('spam_action', 'mute'), dur,
-                                       "Spam toxique répété (2 avertissements ignorés)", msg.guild)
-                        try:
-                            await ulogger2026.log_member_escalation(
-                                bot, msg.guild, msg.author, total_warns=strikes,
-                                palier="spam-mentions",
-                                reason="Spam toxique répété malgré rappels et avertissements",
-                                moderator=bot.user, severity="haute",
-                            )
-                        except Exception as _ex:
-                            print(f"[anti_spam escalation] {_ex}")
+                    #  31/10/2026 : l'échelle unique décide (prévenu → mute 30 min → jusqu'à décision), avec ce qu'il a écrit.
+                    _extrait = " ".join(str(msg.content or "").split())[:100].replace("`", "'")
+                    await sanction(msg.author, 'mute', 0,
+                                   f"Spam toxique répété (malgré {strikes - 1} rappels) — « {_extrait} »", msg.guild)
                 return
 
         # Anti-MONOLOGUE (owner 2026-06-21) : ≥ 10 messages D'AFFILÉE d'un même membre sans que
@@ -27427,17 +27547,9 @@ async def on_message(msg):
                 # 3e écart+ dans la fenêtre : sanction configurée + escalade staff.
                 if strikes >= _PROTECTION_STRIKE_ESCALATE:
                     dur = c.get('mention_mute_duration', 10)
+                    #  31/10/2026 : l'échelle unique ; le panneau du joueur dans 📋logs remplace l'alerte « Escalade ».
                     await sanction(msg.author, c.get('mention_action', 'mute'), dur,
-                                   "Spam de mentions répété", msg.guild)
-                    try:
-                        await ulogger2026.log_member_escalation(
-                            bot, msg.guild, msg.author, total_warns=strikes,
-                            palier="spam-mentions",
-                            reason="Spam de mentions/@everyone répété",
-                            moderator=bot.user, severity="haute",
-                        )
-                    except Exception as _ex:
-                        print(f"[anti_mass_mention escalation] {_ex}")
+                                   f"Spam de mentions répété ({mention_count} mentions dans un message)", msg.guild)
                 return
 
         # Anti-QRCode (détection de scams par QR code) - Actif pour tous
@@ -31827,10 +31939,34 @@ async def on_voice_state_update(member, before, after):
 async def _activite_suivi(guild_id, user_id) -> bool:
     """19/10/2026 : « un système d'inactivité en fonction d'un rôle que j'aurai moi-même
     prédéfini » — le « Rôle attribué » du menu Rell Seas. Sans rôle choisi : personne."""
-    rid = int((await cfg(guild_id)).get('rellseas_role', 0) or 0)
-    g = bot.get_guild(int(guild_id)) if rid else None
+    c = await cfg(guild_id)
+    rid = int(c.get('rellseas_role', 0) or 0)
+    g = bot.get_guild(int(guild_id))
     m = g.get_member(int(user_id)) if g else None
-    return m is not None and any(r.id == rid for r in m.roles)
+    if m is None:
+        return False
+    if rid and any(r.id == rid for r in m.roles):
+        return True
+    #  31/10/2026 : « le même système d'activité » pour le staff (onglet Staff de L'Équipage).
+    return _est_du_staff(g, m, c)
+
+
+def _roles_staff_suivis(g, c) -> list:
+    """Les rôles du staff suivis (sans la Direction ni les fondateurs, qui sont mis à part)."""
+    return list(_equipes_droits(g, c)[0])
+
+
+def _est_du_staff(g, m, c) -> bool:
+    ids = {r.id for r in _roles_staff_suivis(g, c)}
+    return bool(ids) and any(r.id in ids for r in getattr(m, "roles", []) or [])
+
+
+def _membres_du_staff(g, c) -> tuple:
+    """(membres du staff suivis, leurs rôles) — pour le site ; jamais un bot."""
+    roles = _roles_staff_suivis(g, c)
+    ids = {r.id for r in roles}
+    membres = [m for m in getattr(g, "members", []) or [] if not m.bot and any(r.id in ids for r in m.roles)]
+    return membres, roles
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

@@ -99,21 +99,21 @@ async def _examiner_plus_tard(cle) -> None:
     await examiner(*cle)
 
 
-async def examiner(guild_id: int, membre_id: int, g=None, maintenant: float | None = None):
+async def examiner(guild_id: int, membre_id: int, g=None, maintenant: float | None = None, forcer: bool = False):
     """Compte, puis poste ou met à jour la carte d'alerte. Rend le message, ou None."""
     if len(_verrous) > 500:  # 20/10/2026 : un verrou par membre un jour alerté, à vie
         for k in [k for k, v in _verrous.items() if not v.locked()]:
             _verrous.pop(k, None)
     async with _verrous.setdefault((guild_id, membre_id), asyncio.Lock()):
         try:
-            return await _examiner(guild_id, membre_id, g, maintenant)
+            return await _examiner(guild_id, membre_id, g, maintenant, forcer)
         except discord.HTTPException as ex:
             _log("[VIGILANCE][E1] alerte impossible")
             _log(f"[VIGILANCE][E1:DETAIL] {guild_id} {membre_id} {type(ex).__name__} {ex}")
             return None
 
 
-async def _examiner(guild_id, membre_id, g, maintenant):
+async def _examiner(guild_id, membre_id, g, maintenant, forcer=False):
     t = int(maintenant or time.time())
     guild = g if g is not None else _guild(guild_id)
     if guild is None or (_epargne is not None and await _epargne(guild, membre_id)):
@@ -121,7 +121,7 @@ async def _examiner(guild_id, membre_id, g, maintenant):
     etat = await _etat(guild_id, membre_id)
     message_id, salon_id, ouverte_le, base_le = etat or (0, 0, 0, 0)
     evts = await registre.graves(guild_id, membre_id, max(t - FENETRE, int(base_le or 0)))
-    if not alerte_due(evts):
+    if not alerte_due(evts) and not forcer:      # 31/10/2026 : l'échelle force le panneau à la 3e infraction
         return None
     n, points = mesure(evts)
     vue = _carte(guild, membre_id, n, points, evts)

@@ -262,6 +262,31 @@ function parJour(items, rendreUn) {
   return h("div", { classe: "pile serree" }, items.length > 20 ? h("div", { classe: "rangee droite" }, outilsGroupes(zone)) : null, zone);
 }
 const heureL = (t) => h("span", { classe: "lc-heure" }, heure(t));
+/** 31/10/2026, le fondateur : « avertissement, avertissement, avertissement… il remplit 20 pages… que ça regroupe les
+ *  infractions commises et qu'on sache de quel type, et surtout quoi ». Une ligne par sorte d'infraction (type + motif,
+ *  sans l'extrait du message ni les nombres), son compte et sa dernière date ; le dernier extrait en dessous. */
+const motifSeul = (r) => String(r || "sans motif").replace(/\s*[—-]\s*«[^»]*»?/g, "").replace(/\(.*?\)/g, "").replace(/\d+/g, "#").replace(/\s+/g, " ").trim();
+const extraitDe = (r) => { const m = /«\s*([^»]+?)\s*»/.exec(String(r || "")); return m ? m[1] : ""; };
+function resumeSanctions(liste) {
+  if (liste.length < 2) return null;
+  const sortes = new Map();
+  for (const s of liste) {
+    const cle = s.libelle + "|" + motifSeul(s.raison);
+    const x = sortes.get(cle) || { libelle: s.libelle, motif: motifSeul(s.raison).replace(/#/g, "…"), type: s.type, n: 0, derniere: 0, extrait: "", auto: 0 };
+    x.n++;
+    if ((s.date || 0) >= x.derniere) { x.derniere = s.date || 0; x.extrait = extraitDe(s.raison) || x.extrait; }
+    if (s.auto) x.auto++;
+    sortes.set(cle, x);
+  }
+  const l = [...sortes.values()].sort((a, b) => b.n - a.n || b.derniere - a.derniere);
+  return h("div", { classe: "cadre pile serree" }, h("h3", {}, "Ce qu'il a commis · " + quantite(liste.length, "entrée(s)")),
+    h("ul", { classe: "lignes-c" }, l.map((x) => ligne({
+      titre: x.libelle + " — " + x.motif, teinte: teinteType(x.type),
+      sous: [(x.auto === x.n ? "automatique" : x.auto ? x.auto + " automatique(s), " + (x.n - x.auto) + " par le staff" : "par le staff") + " · dernière " + depuis(x.derniere),
+        x.extrait ? h("span", { classe: "ident" }, " · « " + x.extrait.slice(0, 90) + " »") : null],
+      badges: [pastille("× " + x.n, teinteType(x.type))], etat: ["kick", "ban"].includes(x.type) ? "alerte" : null,
+    }))));
+}
 function entreeChrono(x) {
   return ligne({
     visuel: heureL(x.t), titre: x.texte, sous: [h("span", { classe: "lc-cat", vars: { "--teinte": x.teinte } }, x.cat), x.meta ? " · " + x.meta : ""],
@@ -273,12 +298,12 @@ function entreeChrono(x) {
 function contenuOnglet(f, m, p) {
   const o = etatFiche.onglet;
   if (o === "chrono") return parJour(chronologie(f), entreeChrono);
-  if (o === "sanctions") return parJour(f.sanctions.map((s) => Object.assign({ t: s.date }, s)), (s) => ligne({
+  if (o === "sanctions") return h("div", { classe: "pile" }, resumeSanctions(f.sanctions), parJour(f.sanctions.map((s) => Object.assign({ t: s.date }, s)), (s) => ligne({
     visuel: heureL(s.date), titre: s.libelle + (s.duree ? " · " + s.duree : "") + (s.raison ? " — " + s.raison : ""), sous: s.auto ? "Automatique" : "Par " + propre(s.par),
     teinte: teinteType(s.type), etat: ["kick", "ban"].includes(s.type) ? "alerte" : null, deplier: s.raison ? () => h("p", { classe: "texte" }, s.raison) : undefined,
     actions: [peutAgir() ? { icone: "supprimer", libelle: "Retirer du casier", danger: true, reseau: true,
       onclick: () => agir({ action: "sanction_retirer", sanction: s.sanction }, "Retirer cette sanction du casier ?", s.libelle + " — " + (s.raison || "sans motif") + ". Elle sort du casier.", {}, "Retirer", "danger") } : null],
-  }));
+  })));
   if (o === "tickets") return parJour(f.tickets.map((x) => Object.assign({ t: x.ferme || x.ouvert }, x)), (x) => {
     const conv = () => ouvrirConversation(x.ticket, "Ticket #" + x.ticket + " · " + nomDe(p));
     return ligne({

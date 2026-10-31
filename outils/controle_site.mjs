@@ -333,6 +333,8 @@ const SCENES = [
   //  27/10/2026 : la HIÉRARCHIE, côté direction — l'organigramme et ses boutons, l'éditeur d'un rang (son rôle Discord),
   //  « Nommer », la ligne « Rang » de la fiche d'Ishmael (Charpentier de la démonstration).
   { nom: "equipage-hierarchie", ancre: "#equipage/membres/hierarchie", interdits: ["undefined"] },
+  //  31/10/2026 : le staff, comme le clan — présence sur 7 jours, « Prévenir » ; jamais « Retirer du clan ».
+  { nom: "equipage-staff", ancre: "#equipage/membres/staff", interdits: ["undefined", "NaN", "Retirer du clan"] },
   { nom: "fenetre-editeur-rang", ancre: "#equipage/membres/hierarchie",
     geste: "(async () => { await new Promise(r => setTimeout(r, 800)); const p = [...document.querySelectorAll('.org-palier')].find((x) => x.textContent.includes('Vigie')); [...p.querySelectorAll('button')].find(b => b.textContent.includes('Modifier')).click(); return 1; })()" },
   { nom: "fenetre-nommer-rang", ancre: "#equipage/membres/hierarchie",

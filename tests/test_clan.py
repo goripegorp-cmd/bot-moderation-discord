@@ -196,3 +196,32 @@ def test_K6_pas_de_badge_d_activite_hors_du_clan():
     corps = _a.unparse(next(n for n in arbre.body if getattr(n, "name", "") == "recherche"))
     assert "_mesurer_groupe(g.id, du_clan)" in corps and "lignes_clan(du_clan, mesures)" in corps
     assert "lignes.get(m.id, {}).get('statut')" in corps
+
+
+def test_K_STAFF_le_meme_suivi_pour_le_staff_a_part_du_clan(tmp_path):
+    """31/10/2026 : « le même système d'activité dans une petite branche à part… prévenir en MP ceux du staff qui ne sont
+    pas actifs ». Les rappels du staff ne se mêlent jamais à ceux du clan ; pas de retrait automatique."""
+    get_db = _base(tmp_path)
+    t0 = time.time() - 8 * JOUR
+    asyncio.run(clan.prevenir(1, [10], 3, "mp", maintenant=t0))
+    asyncio.run(clan.prevenir(1, [10, 20], 3, "mp", maintenant=t0, groupe="staff"))
+    du_clan = asyncio.run(clan.rappels(1, {}, {10}))
+    du_staff = asyncio.run(clan.rappels(1, {}, {10, 20}, groupe="staff"))
+    assert set(du_clan) == {10} and set(du_staff) == {10, 20}
+    assert asyncio.run(clan.clore(1, 20, "annule", 3, groupe="staff"))
+    assert not asyncio.run(clan.clore(1, 20, "annule", 3)), "le groupe du clan n'a pas de rappel pour lui"
+    assert 20 not in asyncio.run(clan.rappels(1, {}, {10, 20}, groupe="staff"))
+    asyncio.run(clan.init_db())                                       # relancer : la colonne existe déjà, rien ne casse
+    mp = clan.texte_mp_staff("GoRP", 1_800_000_000)
+    assert "staff de GoRP" in mp and "direction fera le point" in mp and "expulsé" not in mp
+    assert clan.texte_salon_staff(["<@1>"], 1_800_000_000).startswith("<@1>\n")
+    src = (RACINE / "bot.py").read_text(encoding="utf-8")
+    assert '"staff_prevenir": _action_staff_prevenir' in src and "membres_staff=_membres_du_staff" in src
+    assert "return _est_du_staff(g, m, c)" in _source("_activite_suivi"), "l'activité du staff est mesurée"
+    corps = _source("_action_staff_prevenir")
+    assert "_direction_ou_plus(g, m, c)" in corps and "groupe='staff'" in corps and "_retirer_du_clan" not in corps
+    tab = (RACINE / "tableau.py").read_text(encoding="utf-8")
+    assert '"staff_activite": await _staff_activite(g, c, apart)' in tab
+    js = (RACINE / "site" / "clan.js").read_text(encoding="utf-8")
+    assert '["staff", "Staff", "equipage"]' in js and 'action: "staff_prevenir"' in js and "function vueStaff" in js
+

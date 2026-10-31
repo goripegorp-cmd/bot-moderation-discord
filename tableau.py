@@ -283,6 +283,7 @@ _base = ""
 _bot = None
 _radie = "🚫 Radié"
 _cfg = _get_db = _mesurer_groupe = _autorise_membre = _direction = _alerte_securite = _mis_a_part = None
+_membres_staff = None   # (g, c) → (membres du staff suivis, noms des rôles) — 31/10/2026
 _tete: frozenset = frozenset()
 _alertes_tete: dict = {}
 _actions: dict = {}
@@ -337,7 +338,7 @@ _log = print
 
 def setup(*, bot, cle: str, base_url, cfg, get_db, mesurer_groupe, autorise_membre, radie=None,
           direction=None, mis_a_part=None, tete=(), actions=None, alerte_securite=None, conversation=None,
-          log=None):
+          log=None, membres_staff=None):
     """`autorise_membre(g, membre, c)` → qui entre sur le site ; `direction(g, membre, c)` → qui agit ;
     `mis_a_part(g, membre, c)` → hors statistiques et intouchable (par défaut : `direction`) ; `tete` :
     les identifiants « à la tête » (« c'est ceux-là et uniquement eux »), jamais suspendus ;
@@ -345,8 +346,8 @@ def setup(*, bot, cle: str, base_url, cfg, get_db, mesurer_groupe, autorise_memb
     texte, suspendu=True)` : prévient dans « 📋logs » ; `conversation(g, ticket)` → toute la conversation
     d'un ticket (ouvert : en direct ; fermé : le transcript enregistré)."""
     global _bot, _cle, _base, _cfg, _get_db, _mesurer_groupe, _autorise_membre, _log, _radie
-    global _direction, _actions, _alerte_securite, _mis_a_part, _tete, _conversation
-    _conversation = conversation
+    global _direction, _actions, _alerte_securite, _mis_a_part, _tete, _conversation, _membres_staff
+    _conversation, _membres_staff = conversation, membres_staff
     _direction, _actions = direction, dict(actions or {})
     _mis_a_part, _tete = mis_a_part or direction, frozenset(int(x) for x in tete)
     _bot, _cle, _base = bot, cle.encode(), (base_url or "").rstrip("/")
@@ -874,6 +875,37 @@ async def _clan(g, c, apart: set) -> dict:
                          "arrivee": x["arrivee"], "rappel": rappels.get(x["id"])}
                         for x in rellseas_panneau.lignes_clan(membres, mesures)],
             "direction": [_ident(g, m.id) for m in tous if m.id in apart], "salons": _salons_du_clan(g, role)}
+
+
+async def _staff_activite(g, c, apart: set) -> dict:
+    """31/10/2026 : « on voit ceux du clan, on voit ceux du staff » — la présence du staff sur 7 jours, ses rappels
+    (groupe « staff ») ; la direction et le fondateur restent à part."""
+    if _membres_staff is None:
+        return {"roles": [], "membres": [], "salons": []}
+    tous, roles = _membres_staff(g, c)
+    membres = [m for m in tous if m.id not in apart]
+    mesures = await _mesurer_groupe(g.id, membres) if _mesurer_groupe and membres else {}
+    avatars = {m.id: str(m.display_avatar.with_size(64).url) for m in membres}
+    try:
+        rappels = await clan.rappels(g.id, {uid: (mes or {}).get("dernier") for uid, mes in mesures.items()},
+                                     {m.id for m in tous}, groupe="staff")
+    except Exception as ex:
+        _log("[TABLEAU][E8b] rappels du staff illisibles")
+        _log(f"[TABLEAU][E8b:DETAIL] {type(ex).__name__} {ex}")
+        rappels = {}
+    for r in rappels.values():
+        r["par"] = _nom(g, r["par"])
+        r["salon"] = getattr(g.get_channel(int(r["salon"] or 0)), "name", "") if r["salon"] else ""
+    salons, me = [], getattr(g, "me", None)
+    for s in getattr(g, "text_channels", None) or []:
+        #  Où mentionner le staff : un salon qu'un rôle du staff voit, fermé au public, où le bot écrit.
+        if (me is not None and s.permissions_for(me).send_messages and not s.permissions_for(g.default_role).view_channel
+                and any(s.permissions_for(r).view_channel for r in roles)):
+            salons.append({"id": str(s.id), "nom": s.name, "cat": s.category.name if s.category else ""})
+    return {"roles": [r.name for r in roles], "membres": [
+        {"id": str(x["id"]), "nom": x["nom"], "pseudo": x["pseudo"], "avatar": avatars.get(x["id"], ""), "statut": x["statut"],
+         "rang": x["rang"], "jours": x["jours"], "derniere": x["derniere"], "arrivee": x["arrivee"], "rappel": rappels.get(x["id"])}
+        for x in rellseas_panneau.lignes_clan(membres, mesures)], "salons": salons[:60]}
 
 
 def _salons_du_clan(g, role) -> list:
@@ -1427,6 +1459,7 @@ async def donnees(g, portee: str = "tout") -> dict:
         "ecartes": cand["vides"] + cand["doublons"],
         "tickets": tickets,
         "clan": await _clan(g, c, apart),
+        "staff_activite": await _staff_activite(g, c, apart),
         "sanctions": sanctions,
         "equipe": sorted(({"id": qui(uid), **v} for uid, v in equipe.items() if uid not in apart),
                          key=lambda x: -(x["tickets"] + x["sanctions"] + x["questions"]))[:12],
@@ -1876,7 +1909,7 @@ def _genre_grave(nom: str, corps: dict) -> tuple[str, int] | None:
         return "exclusion", 1
     if nom in ("clan_retirer", "clan_ajouter"):
         return "roles", 1
-    if nom == "clan_prevenir":
+    if nom in ("clan_prevenir", "staff_prevenir"):
         return "rappels", len(corps.get("membres") or [])
     if nom == "clan_retirer_lot":
         return "roles", len(corps.get("membres") or [])

@@ -65,11 +65,14 @@ def test_R2_le_role_vient_du_menu_rell_seas():
     async def cfg(_g):
         return conf
 
-    ns = {"cfg": cfg, "bot": Obj(get_guild=lambda _g: g)}
+    staff = set()
+    ns = {"cfg": cfg, "bot": Obj(get_guild=lambda _g: g), "_est_du_staff": lambda _g, m, _c: id(m) in staff}
     exec(corps, ns)  # noqa: S102 — code du dépôt
     assert asyncio.run(ns["_activite_suivi"](1, 7)) is True
     assert asyncio.run(ns["_activite_suivi"](1, 8)) is False
     conf["rellseas_role"] = 0
     assert asyncio.run(ns["_activite_suivi"](1, 7)) is False, "sans rôle choisi : personne"
+    staff.add(id(membre))
+    assert asyncio.run(ns["_activite_suivi"](1, 7)) is True, "31/10/2026 : le staff aussi est suivi"
     assert "suivi=_activite_suivi" in SRC
     assert "afk_role_config" not in SRC

@@ -37,6 +37,11 @@ async def init_db():
                          " DEFAULT 0, remis INTEGER DEFAULT 1, statut TEXT DEFAULT 'en_attente', resolu_le INTEGER DEFAULT 0,"
                          " resolu_par INTEGER DEFAULT 0)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_clan_rappels ON clan_rappels(guild_id, membre_id, statut)")
+        #  31/10/2026 : le même suivi pour le staff — chaque rappel dit à quel groupe il appartient.
+        async with db.execute("PRAGMA table_info(clan_rappels)") as cur:
+            colonnes = {r[1] for r in await cur.fetchall()}
+        if "groupe" not in colonnes:
+            await db.execute("ALTER TABLE clan_rappels ADD COLUMN groupe TEXT DEFAULT 'clan'")
         await db.commit()
 
 
@@ -47,6 +52,21 @@ def texte_mp(serveur: str, role: str, echeance: int) -> str:
             f"-# Un message, un vocal ou une réaction sur {serveur} avant cette date suffit pour rester.")
 
 
+def texte_mp_staff(serveur: str, echeance: int) -> str:
+    """31/10/2026 : le message privé au staff peu présent — la direction fait le point, rien d'automatique."""
+    return (f"### ⚠️ Activité dans le staff de {serveur}\n"
+            f"On ne t'a pas beaucoup vu ces derniers temps. Sans activité d'ici une semaine, le <t:{echeance}:D>, "
+            f"la direction fera le point avec toi sur ta place dans le staff.\n"
+            f"-# Un message, un vocal ou une réaction sur {serveur} avant cette date suffit.")
+
+
+def texte_salon_staff(mentions: list[str], echeance: int) -> str:
+    seul = len(mentions) == 1
+    return (" ".join(mentions) + f"\n⚠️ {'Tu es peu présent' if seul else 'Vous êtes peu présents'} dans le staff : "
+            f"sans activité d'ici une semaine, le <t:{echeance}:D>, la direction fera le point avec "
+            f"{'toi' if seul else 'vous'}.")
+
+
 def texte_salon(mentions: list[str], role: str, echeance: int) -> str:
     seul = len(mentions) == 1
     return (" ".join(mentions) + f"\n⚠️ Attention, {'tu es inactif' if seul else 'vous êtes inactifs'} dans le clan "
@@ -55,34 +75,37 @@ def texte_salon(mentions: list[str], role: str, echeance: int) -> str:
 
 
 async def prevenir(guild_id: int, membres: list[int], par: int, mode: str, salon_id: int = 0,
-                   remis: dict | None = None, maintenant: float | None = None) -> int:
+                   remis: dict | None = None, maintenant: float | None = None, groupe: str = "clan") -> int:
     """Un rappel par membre ; un nouveau rappel remplace celui en attente (nouvelle échéance)."""
     t = int(maintenant or time.time())
     remis = remis or {}
     async with _get_db() as db:
         for uid in membres:
             await db.execute("UPDATE clan_rappels SET statut='annule', resolu_le=?, resolu_par=? WHERE guild_id=?"
-                             " AND membre_id=? AND statut='en_attente'", (t, int(par), guild_id, int(uid)))
-            await db.execute("INSERT INTO clan_rappels (guild_id, membre_id, envoye_le, echeance, par, mode, salon_id, remis)"
-                             " VALUES (?,?,?,?,?,?,?,?)", (guild_id, int(uid), t, t + DELAI, int(par), mode,
-                                                           int(salon_id or 0), int(bool(remis.get(uid, True)))))
+                             " AND membre_id=? AND statut='en_attente' AND COALESCE(groupe, 'clan')=?",
+                             (t, int(par), guild_id, int(uid), groupe))
+            await db.execute("INSERT INTO clan_rappels (guild_id, membre_id, envoye_le, echeance, par, mode, salon_id, remis,"
+                             " groupe) VALUES (?,?,?,?,?,?,?,?,?)",
+                             (guild_id, int(uid), t, t + DELAI, int(par), mode, int(salon_id or 0),
+                              int(bool(remis.get(uid, True))), groupe))
         await db.commit()
     return t + DELAI
 
 
-async def clore(guild_id: int, membre_id: int, statut: str, par: int = 0, maintenant: float | None = None) -> bool:
+async def clore(guild_id: int, membre_id: int, statut: str, par: int = 0, maintenant: float | None = None,
+                groupe: str = "clan") -> bool:
     if statut not in STATUTS[1:]:
         raise ValueError(statut)
     async with _get_db() as db:
         cur = await db.execute("UPDATE clan_rappels SET statut=?, resolu_le=?, resolu_par=? WHERE guild_id=? AND"
-                               " membre_id=? AND statut='en_attente'",
-                               (statut, int(maintenant or time.time()), int(par), guild_id, int(membre_id)))
+                               " membre_id=? AND statut='en_attente' AND COALESCE(groupe, 'clan')=?",
+                               (statut, int(maintenant or time.time()), int(par), guild_id, int(membre_id), groupe))
         await db.commit()
         return bool(cur.rowcount)
 
 
 async def rappels(guild_id: int, derniers: dict | None = None, dans_le_clan: set | None = None,
-                  maintenant: float | None = None) -> dict:
+                  maintenant: float | None = None, groupe: str = "clan") -> dict:
     """Le dernier rappel de chaque membre (30 jours). Avant de répondre, le rappel d'un membre
     revenu (actif le jour du rappel ou après) se ferme seul, celui d'un membre sorti du clan aussi.
     `derniers` : {membre: dernier jour actif 'AAAA-MM-JJ'}."""
@@ -90,8 +113,9 @@ async def rappels(guild_id: int, derniers: dict | None = None, dans_le_clan: set
     derniers = derniers or {}
     async with _get_db() as db:
         async with db.execute("SELECT id, membre_id, envoye_le, echeance, par, mode, salon_id, remis, statut, resolu_le,"
-                              " resolu_par FROM clan_rappels WHERE guild_id=? AND envoye_le>=? ORDER BY id",
-                              (guild_id, int(t) - 30 * 86400)) as cur:
+                              " resolu_par FROM clan_rappels WHERE guild_id=? AND envoye_le>=?"
+                              " AND COALESCE(groupe, 'clan')=? ORDER BY id",
+                              (guild_id, int(t) - 30 * 86400, groupe)) as cur:
             lignes = await cur.fetchall()
         out = {}
         for rid, uid, envoye, echeance, par, mode, salon, remis, statut, resolu_le, resolu_par in lignes:

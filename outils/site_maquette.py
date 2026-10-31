@@ -351,6 +351,11 @@ class Monde:
             self.clan[uid] = {"rang": rang, "jours": f"{presents}/7" if rang in (0, 1, 2) else "—",
                               "derniere": derniere, "rappel": rappel}
 
+    def staff_donnees(self) -> dict:
+        """31/10/2026 : l'onglet Staff de L'Équipage — trois membres du clan font office de staff dans la maquette."""
+        c = self.clan_donnees()
+        return {"roles": ["Staff GoRP"], "membres": [dict(x, rappel=None) for x in c["membres"][:3]], "salons": c["salons"][:2]}
+
     def clan_donnees(self) -> dict:
         statuts = ["Actif", "Peu présent", "Inactif", "Jamais vu", "Trop récent"]
         membres = []
@@ -1208,7 +1213,7 @@ class Monde:
             "candidats": [{k: v for k, v in c.items() if k not in ("reponses", "transcript", "candidatures", "pris_par")}
                           for c in sorted(self.candidats, key=lambda c: -c["ferme"])[:30]],
             "en_cours": self.en_cours, "ecartes": 7,
-            "tickets": tickets, "clan": self.clan_donnees(), "sanctions": sanctions, "equipe": eq,
+            "tickets": tickets, "clan": self.clan_donnees(), "staff_activite": self.staff_donnees(), "sanctions": sanctions, "equipe": eq,
             "journal": {"evenements": self.journal[:400], "par_jour": self.par_jour()},
             "questions": self.questions_donnees(), "alertes": self.alertes(),
             "sondages": {"liste": self.sondages, "stats": {"en_cours": sum(s["statut"] == "en_cours" for s in self.sondages), "mois": 9, "votes_mois": 312}},
@@ -1606,6 +1611,18 @@ def a_clan_rappel_annuler(m, d):
     return True, "Rappel annulé."
 
 
+def a_staff_prevenir(m, d):
+    mode = str(d.get("mode") or "")
+    ids = [str(x) for x in (d.get("membres") or []) if str(x).isdigit()][:25]
+    if mode not in ("mp", "salon") or not ids:
+        return False, "Demande invalide."
+    return True, f"{len(ids)} membre(s) du staff prévenu(s) (maquette : rien n'est envoyé)."
+
+
+def a_staff_rappel_annuler(m, d):
+    return False, "Aucun rappel en cours pour ce membre du staff."
+
+
 def a_moderer(m, d):
     sanction = str(d.get("sanction") or "")
     if sanction not in ("warn", "mute", "unmute", "kick", "ban"):
@@ -1783,6 +1800,7 @@ ACTIONS = {"ticket_fermer": a_ticket_fermer, "candidature": a_candidature, "clan
            "sondage_retirer": a_sondage_retirer, "casier_effacer": a_casier_effacer, "casier_serveur": a_casier_serveur,
            "casier_restaurer": a_casier_restaurer, "debannir": a_debannir, "clan_ajouter": a_clan_ajouter,
            "clan_prevenir": a_clan_prevenir, "clan_rappel_annuler": a_clan_rappel_annuler,
+           "staff_prevenir": a_staff_prevenir, "staff_rappel_annuler": a_staff_rappel_annuler,
            "suggestion_repondre": a_suggestion_repondre, "suggestion_retirer": a_suggestion_retirer}
 
 

@@ -606,7 +606,7 @@ SITE_SOUS = (
     ("port", "salons", (("questions", "Réponses du bot"), ("avis", "Idées & sondages"), ("idees", "Idées"), ("sondages", "Sondages"),
                         ("entraide", "Entraide & trade"), ("annonces", "Annonces"), ("droits", "Droits des salons"))),
     ("equipage", "membres", (("presence", "Présence"), ("fiches", "Fiches techniques"), ("equipes", "Équipes"),
-                             ("hierarchie", "Hiérarchie"))),
+                             ("hierarchie", "Hiérarchie"), ("staff", "Staff"))),
     ("capitainerie", "recrutement", (("candidatures", "Candidatures"), ("chefs", "Chefs d'équipe"), ("questions", "Questions"),
                                      ("reglages", "Réglages"))),
     ("equipage", "annonces", (("composer", "Composer"), ("brouillons", "Brouillons"), ("a_venir", "À venir"),
